@@ -1,0 +1,58 @@
+name: Build HexManiacAdvance
+
+# Builds the x64 release zip (the same way release.sh does) and publishes it on the Releases page.
+on:
+  push:
+    branches: [perf-stability-0.6.1]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Build (Release, x64)
+        run: dotnet build -c Release -p:PlatformTarget=x64
+
+      - name: Run unit tests
+        continue-on-error: true
+        run: dotnet test src/HexManiac.Tests --no-build -c Release -p:PlatformTarget=x64 --logger "trx;LogFileName=results.trx"
+
+      - name: Zip the build output
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path src/SharedAssemblyInfo.cs -Pattern 'AssemblyVersion\("([^"]+)"\)').Matches[0].Groups[1].Value
+          Compress-Archive -Path artifacts/HexManiac.WPF/bin/Release/net6.0-windows/* -DestinationPath "HexManiacAdvance_x64.$version-perf.zip"
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HexManiacAdvance_x64
+          path: HexManiacAdvance_x64.*.zip
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/results.trx'
+          if-no-files-found: ignore
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}-perf-${{ github.run_number }}
+          name: HexManiacAdvance ${{ env.VERSION }} (performance build ${{ github.run_number }})
+          body: |
+            Automated build of the `perf-stability-0.6.1` branch (0.6.1 plus performance and stability fixes).
+            Download the zip below, extract it anywhere, and run `HexManiacAdvance.exe`.
+          files: HexManiacAdvance_x64.*.zip
