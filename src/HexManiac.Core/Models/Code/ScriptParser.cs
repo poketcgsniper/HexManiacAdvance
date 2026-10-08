@@ -990,8 +990,10 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
       private readonly IScriptLine[][] macros = new IScriptLine[256][], lines = new IScriptLine[256][], all = new IScriptLine[256][];
 
       public static ScriptLineIndex For(IReadOnlyList<IScriptLine> engine) {
+         // ConditionalWeakTable reads are thread-safe, so the common case needs no lock
+         if (indexes.TryGetValue(engine, out var index) && index.lineCount == engine.Count) return index;
          lock (indexes) {
-            if (indexes.TryGetValue(engine, out var index) && index.lineCount == engine.Count) return index;
+            if (indexes.TryGetValue(engine, out index) && index.lineCount == engine.Count) return index;
             index = new ScriptLineIndex(engine);
             indexes.AddOrUpdate(engine, index);
             return index;

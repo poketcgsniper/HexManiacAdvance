@@ -1505,7 +1505,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       const int SizeX = 7, SizeY = 7;
       public IPixelViewModel AutoCrop(int warpID) {
-         if (allOverworldSprites == null) allOverworldSprites = RenderOWs(model);
+         if (allOverworldSprites == null) allOverworldSprites = GetOverworldSpriteRenders(model);
          if (defaultOverworldSprite == null) defaultOverworldSprite = GetDefaultOW(model);
          var map = GetMapModel();
          if (map == null) return null;
@@ -2008,7 +2008,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var targetID = 1;
          var takenIDs = events.TryGetSubTable("objects", out var eventTable) ? eventTable.Select(ev => ev.TryGetValue("id", out int id) ? id : 0).ToHashSet() : new HashSet<int>();
          while (targetID < element.Table.ElementCount && takenIDs.Contains(targetID)) targetID++;
-         if (allOverworldSprites == null) allOverworldSprites = RenderOWs(model);
+         if (allOverworldSprites == null) allOverworldSprites = GetOverworldSpriteRenders(model);
          if (defaultOverworldSprite == null) defaultOverworldSprite = GetDefaultOW(model);
          var newEvent = new ObjectEventViewModel(this, GotoAddress, element, eventTemplate, allOverworldSprites, defaultOverworldSprite, BerryInfo) {
             X = 0, Y = 0,
@@ -2493,7 +2493,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private IReadOnlyList<IPixelViewModel> allOverworldSprites;
       public IReadOnlyList<IPixelViewModel> AllOverworldSprites {
          get {
-            if (allOverworldSprites == null) allOverworldSprites = RenderOWs(model);
+            if (allOverworldSprites == null) allOverworldSprites = GetOverworldSpriteRenders(model);
             return allOverworldSprites;
          }
          init => allOverworldSprites = value;
@@ -2509,6 +2509,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
          return defaultImage;
       }
+      /// <summary>
+      /// Rendering every overworld sprite takes a noticeable amount of time, and a new map view model is created
+      /// for every navigation (warps, back/forward, goto), so share the renders until the data changes.
+      /// </summary>
+      public static IReadOnlyList<IPixelViewModel> GetOverworldSpriteRenders(IDataModel model) {
+         return model.CurrentCacheScope.GetOrAdd("overworld-sprite-renders", () => RenderOWs(model));
+      }
+
       public static List<IPixelViewModel> RenderOWs(IDataModel model) {
          var list = new List<IPixelViewModel>();
          var run = model.GetTable(HardcodeTablesModel.OverworldSprites);
@@ -2543,7 +2551,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       private EventGroupModel BuildEventGroup() {
-         if (allOverworldSprites == null) allOverworldSprites = RenderOWs(model);
+         if (allOverworldSprites == null) allOverworldSprites = GetOverworldSpriteRenders(model);
          if (defaultOverworldSprite == null) defaultOverworldSprite = GetDefaultOW(model);
          var map = GetMapModel();
          if (map == null) return null;

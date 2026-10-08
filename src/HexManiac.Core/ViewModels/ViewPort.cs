@@ -1124,7 +1124,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          InitializationWorkload = model.InitializationWorkload.ContinueWith(task => {
             var firstViewPort = changeHistory == null;
             if (firstViewPort) {
-               if (eventTemplate == null) eventTemplate = new EventTemplate(singletons?.WorkDispatcher ?? InstantDispatch.Instance, Model, Tools.CodeTool.ScriptParser, BlockMapViewModel.RenderOWs(Model));
+               if (eventTemplate == null) eventTemplate = new EventTemplate(singletons?.WorkDispatcher ?? InstantDispatch.Instance, Model, Tools.CodeTool.ScriptParser, BlockMapViewModel.GetOverworldSpriteRenders(Model));
                CascadeScripts();
                ValidateMatchedWords();
             }
