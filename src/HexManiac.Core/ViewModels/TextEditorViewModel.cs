@@ -143,6 +143,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var check = basic.GetPossibleKeywordStartPoints().ToList();
          var (keywords, constantNames) = (KeywordSet, ConstantSet);
          for (int i = 0; i < check.Count; i++) {
+            if (check[i].start + check[i].length > basic.Length) continue; // the scan can report a token just past the end of the text (right after a closing quote)
             var token = basic.Substring(check[i].start, check[i].length);
 
             // keywords
