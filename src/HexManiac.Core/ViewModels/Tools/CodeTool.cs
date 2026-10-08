@@ -266,14 +266,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             if (Contents.Count > i) {
                body.ContentChanged -= ScriptChanged;
                body.HelpSourceChanged -= UpdateScriptHelpFromLine;
-               body.Content = string.Empty;
+               // Only the text that actually changed gets pushed to the editor. Blanking the editor and refilling it
+               // (and replacing the body in the collection) made the UI rebuild every script editor after every compile,
+               // which is what made editing long scripts stutter.
                body.Content = info.Content;
                body.Address = scriptStart;
                body.CompiledLength = info.Length;
                body.Label = label;
                body.HelpSourceChanged += UpdateScriptHelpFromLine;
                body.ContentChanged += ScriptChanged;
-               Contents[i] = body;
+               if (!ReferenceEquals(Contents[i], body)) Contents[i] = body;
             } else {
                body.CompiledLength = info.Length;
                body.Content = info.Content;

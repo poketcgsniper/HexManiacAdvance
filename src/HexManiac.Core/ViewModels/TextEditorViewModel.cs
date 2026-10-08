@@ -28,17 +28,19 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public event EventHandler RequestCaretMove;
       public event EventHandler RequestKeyboardFocus;
 
-      public TextEditorViewModel() {
-         Keywords.CollectionChanged += (sender, e) => UpdateLayers();
-         Constants.CollectionChanged += (sender, e) => UpdateLayers();
-         SyntaxHighlighting = true;
-      }
+      public TextEditorViewModel() : this(true) { }
 
       public TextEditorViewModel(bool syntaxHighlighting) {
-         Keywords.CollectionChanged += (sender, e) => UpdateLayers();
-         Constants.CollectionChanged += (sender, e) => UpdateLayers();
+         Keywords.CollectionChanged += (sender, e) => { keywordSet = null; UpdateLayers(); };
+         Constants.CollectionChanged += (sender, e) => { constantSet = null; UpdateLayers(); };
          SyntaxHighlighting = syntaxHighlighting;
       }
+
+      // Matching every token of the text against every keyword and constant (thousands of enum names) is far too slow
+      // for long scripts, so the collections are mirrored into sets that are rebuilt only when the collections change.
+      private HashSet<string> keywordSet, constantSet;
+      private HashSet<string> KeywordSet => keywordSet ??= new HashSet<string>(Keywords.Where(keyword => !string.IsNullOrEmpty(keyword)));
+      private HashSet<string> ConstantSet => constantSet ??= new HashSet<string>(Constants.Where(constant => !string.IsNullOrEmpty(constant)));
 
       private bool contentChanging;
       private string content = string.Empty;
@@ -139,29 +141,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
 
          var check = basic.GetPossibleKeywordStartPoints().ToList();
+         var (keywords, constantNames) = (KeywordSet, ConstantSet);
          for (int i = 0; i < check.Count; i++) {
-            bool match = false;
+            var token = basic.Substring(check[i].start, check[i].length);
 
             // keywords
-            for (int j = 0; j < Keywords.Count; j++) {
-               if (check[i].length != Keywords[j].Length) continue;
-               if (basic.Match(Keywords[j], check[i].start)) {
-                  accent.Replace(check[i].start, Keywords[j]);
-                  basic.Clear(check[i].start, Keywords[j].Length);
-                  match = true;
-                  break;
-               }
+            if (keywords.Contains(token)) {
+               accent.Replace(check[i].start, token);
+               basic.Clear(check[i].start, token.Length);
+               continue;
             }
-            if (match) continue;
 
             // constants
-            for (int j = 0; j < Constants.Count; j++) {
-               if (check[i].length != Constants[j].Length) continue;
-               if (basic.Match(Constants[j], check[i].start)) {
-                  constants.Replace(check[i].start, Constants[j]);
-                  basic.Clear(check[i].start, Constants[j].Length);
-                  break;
-               }
+            if (constantNames.Contains(token)) {
+               constants.Replace(check[i].start, token);
+               basic.Clear(check[i].start, token.Length);
             }
          }
 
@@ -209,6 +203,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       public override string ToString() => new(content);
 
+      public string Substring(int start, int length) => new(content, start, length);
+
       public int IndexOfKeyword(string keyword, int start) {
          if (keyword.Length == 0) return -1;
          for (int i = start; i < content.Length - keyword.Length + 1; i++) {
@@ -221,6 +217,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          return -1;
       }
 
+      private static readonly char[] keywordBodyCharacters = ".'-~_\\".ToCharArray();
       public IEnumerable<(int start, int length)> GetPossibleKeywordStartPoints() {
          for (int i = 0; i < content.Length - 1; i++) {
             if (i > 0 && char.IsLetterOrDigit(content[i - 1])) continue; // not valid keyword start
@@ -238,7 +235,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             }
             if (i < content.Length && !char.IsLetterOrDigit(content[i])) continue; // some constants _do_ start with numbers, like 2to5Hits
             int length = 1;
-            while (i + length < content.Length && (char.IsLetterOrDigit(content[i + length]) || content[i + length].IsAny(".'-~_\\".ToCharArray()))) length++;
+            while (i + length < content.Length && (char.IsLetterOrDigit(content[i + length]) || content[i + length].IsAny(keywordBodyCharacters))) length++;
             yield return (i, length);
             i += length;
          }

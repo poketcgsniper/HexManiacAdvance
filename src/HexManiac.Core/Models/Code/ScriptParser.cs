@@ -684,7 +684,9 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
       }
 
       public IScriptLine FirstMatch(string line) {
-         foreach (var command in engine) {
+         // This is called for every line of a script whenever the script text changes,
+         // so only consider the commands whose name matches the line instead of testing every command in the reference.
+         foreach (var command in ScriptLineIndex.For(engine).CandidatesForCompile(line)) {
             if (!command.MatchesGame(gameHash)) continue;
             if (command.CanCompile(line)) return command;
          }
@@ -700,12 +702,8 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                labels[line.Substring(0, line.Length - 1)] = start + length;
                continue;
             }
-            foreach (var command in engine) {
-               if (!command.MatchesGame(gameHash)) continue;
-               if (!command.CanCompile(line)) continue;
-               length += command.CompiledByteLength(model, line);
-               break;
-            }
+            var command = FirstMatch(line);
+            if (command != null) length += command.CompiledByteLength(model, line);
          }
          return new LabelLibrary(model, labels) { RequireCompleteAddresses = RequireCompleteAddresses };
       }
@@ -989,6 +987,10 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
       private readonly int lineCount;
       private readonly IScriptLine[][] macros = new IScriptLine[256][], lines = new IScriptLine[256][], all = new IScriptLine[256][];
 
+      // for compiling: the commands grouped by name, each remembered with its position in the script reference
+      private readonly Dictionary<string, List<(int index, IScriptLine line)>> byCommand = new(StringComparer.CurrentCultureIgnoreCase);
+      private readonly List<(int index, IScriptLine line)> unnamedCommands = new(); // commands whose name can't be used as a lookup key: always candidates
+
       public static ScriptLineIndex For(IReadOnlyList<IScriptLine> engine) {
          // ConditionalWeakTable reads are thread-safe, so the common case needs no lock
          if (indexes.TryGetValue(engine, out var index) && index.lineCount == engine.Count) return index;
@@ -1007,7 +1009,8 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
          var allBuckets = new List<IScriptLine>[256];
          for (int i = 0; i < 256; i++) (macroBuckets[i], lineBuckets[i], allBuckets[i]) = (new(), new(), new());
 
-         foreach (var line in engine) {
+         for (int i = 0; i < engine.Count; i++) {
+            var line = engine[i];
             if (line == null) continue;
             int firstByte = -1; // -1 means 'could match any first byte'
             if (line is MacroScriptLine macro) {
@@ -1018,6 +1021,14 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                Add(lineBuckets, firstByte, line);
             }
             Add(allBuckets, firstByte, line);
+
+            var name = line.LineCommand;
+            if (string.IsNullOrEmpty(name) || name.Any(char.IsWhiteSpace)) {
+               unnamedCommands.Add((i, line));
+            } else {
+               if (!byCommand.TryGetValue(name, out var list)) byCommand[name] = list = new();
+               list.Add((i, line));
+            }
          }
 
          for (int i = 0; i < 256; i++) {
@@ -1038,6 +1049,36 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
       public IScriptLine[] Macros(byte firstByte) => macros[firstByte];
       public IScriptLine[] Lines(byte firstByte) => lines[firstByte];
       public IScriptLine[] All(byte firstByte) => all[firstByte];
+
+      /// <summary>
+      /// The commands that could possibly compile the given line of script text, in script-reference order.
+      /// A ScriptLine can only compile text whose first space-delimited word is its name (ignoring case),
+      /// and a MacroScriptLine can only compile text whose first token is its name,
+      /// so only the commands with those names need to be checked (callers still verify with CanCompile).
+      /// </summary>
+      public IEnumerable<IScriptLine> CandidatesForCompile(string line) {
+         if (line == null) return NoLines;
+         var spaceIndex = line.IndexOf(' ');
+         var prefix = spaceIndex < 0 ? line : line.Substring(0, spaceIndex);
+         var tokens = ScriptLine.Tokenize(line);
+         var firstToken = tokens.Length > 0 ? tokens[0] : null;
+
+         byCommand.TryGetValue(prefix, out var byPrefix);
+         List<(int index, IScriptLine line)> byToken = null;
+         if (firstToken != null && !string.Equals(firstToken, prefix, StringComparison.CurrentCultureIgnoreCase)) byCommand.TryGetValue(firstToken, out byToken);
+
+         // common case: a single candidate list and nothing unnamed, so no merging is needed
+         if (unnamedCommands.Count == 0) {
+            if (byToken == null) return byPrefix == null ? NoLines : byPrefix.Select(pair => pair.line);
+            if (byPrefix == null) return byToken.Select(pair => pair.line);
+         }
+
+         var candidates = new List<(int index, IScriptLine line)>(unnamedCommands);
+         if (byPrefix != null) candidates.AddRange(byPrefix);
+         if (byToken != null) candidates.AddRange(byToken);
+         candidates.Sort((a, b) => a.index.CompareTo(b.index));
+         return candidates.Select(pair => pair.line);
+      }
    }
 
    public static class ScriptExtensions {

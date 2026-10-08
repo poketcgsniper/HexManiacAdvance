@@ -227,7 +227,6 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          }
       }
 
-      // TODO do some sort of caching: rendering these images every time probably sucks for performance.
       public IEnumerable<ComboOption> GetComboOptions(IDataModel model) {
          var defaultOptions = GetOptions(model)
             .Select((option, i) => new ComboOption(option, i))
@@ -237,6 +236,13 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          if (!(tableRun.ElementContent[0] is ArrayRunPointerSegment pointerSegment)) return defaultOptions;
          if (!LzSpriteRun.TryParseSpriteFormat(pointerSegment.InnerFormat, out var _) && !SpriteRun.TryParseSpriteFormat(pointerSegment.InnerFormat, out var _)) return defaultOptions;
 
+         // Rendering an image for every option (every trainer sprite, every overworld sprite, ...) is expensive,
+         // and a new combo box is built every time the table tool shows a different element.
+         // The images only depend on the data, so keep them until the data changes.
+         return model.CurrentCacheScope.GetOrAdd("combo-options:" + EnumName, () => RenderComboOptions(model, tableRun, defaultOptions));
+      }
+
+      private static IReadOnlyList<ComboOption> RenderComboOptions(IDataModel model, ITableRun tableRun, List<ComboOption> defaultOptions) {
          var imageOptions = new List<ComboOption>();
          for (int i = 0; i < tableRun.ElementCount; i++) {
             var destination = model.ReadPointer(tableRun.Start + tableRun.ElementLength * i);
