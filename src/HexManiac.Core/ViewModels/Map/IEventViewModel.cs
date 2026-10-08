@@ -999,8 +999,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             if (trainerSprite != null) return trainerSprite;
             var trainerContent = EventTemplate.GetTrainerContent(element.Model, this);
             if (trainerContent == null) return null;
+            if (!(trainerContent.TrainerClassAddress + 2).InRange(0, element.Model.Count)) return null;
             var spriteIndex = element.Model[trainerContent.TrainerClassAddress + 2];
-            var spriteAddress = element.Model.GetTableModel(HardcodeTablesModel.TrainerSpritesName)[spriteIndex].GetAddress("sprite");
+            // hacks can point at a sprite that doesn't exist in the table: show no sprite rather than failing to show the event
+            var spriteTable = element.Model.GetTableModel(HardcodeTablesModel.TrainerSpritesName);
+            if (spriteTable == null || spriteIndex >= spriteTable.Count) return null;
+            var spriteAddress = spriteTable[spriteIndex].GetAddress("sprite");
+            if (!spriteAddress.InRange(0, element.Model.Count)) return null;
             var spriteRun = element.Model.GetNextRun(spriteAddress) as ISpriteRun;
             return trainerSprite = ReadonlyPixelViewModel.Create(element.Model, spriteRun, true, .5);
          }

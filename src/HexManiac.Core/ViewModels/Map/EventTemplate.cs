@@ -90,11 +90,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          });
 
          initializationWorkload = dispatcher.RunBackgroundWork(() => {
-            // one pass over every script finds all three kinds of usage
-            var usage = Flags.GetScriptUsage(model, parser);
-            usedFlags = usage.ItemFlags;
-            usedTrainerFlags = usage.TrainerFlags;
-            usedVariables = usage.Variables;
+            try {
+               // one pass over every script finds all three kinds of usage
+               var usage = Flags.GetScriptUsage(model, parser);
+               usedFlags = usage.ItemFlags;
+               usedTrainerFlags = usage.TrainerFlags;
+               usedVariables = usage.Variables;
+            } catch (Exception ex) {
+               // Malformed map/script data in a hack shouldn't make every event creation crash.
+               // Without the scan, new flags/variables may collide with existing ones, but the editor keeps working.
+               System.Diagnostics.Debug.WriteLine($"Could not scan scripts for used flags: {ex}");
+               usedFlags ??= new HashSet<int>();
+               usedTrainerFlags ??= new HashSet<int>();
+               usedVariables ??= new HashSet<int>();
+            }
          });
       }
 

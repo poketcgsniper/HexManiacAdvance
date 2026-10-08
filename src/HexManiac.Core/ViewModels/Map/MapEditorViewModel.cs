@@ -648,7 +648,18 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public double HighlightCursorHeight { get => highlightCursorHeight; set => Set(ref highlightCursorHeight, value); }
 
       private bool showBeneath;
-      public bool ShowBeneath { get => showBeneath; set => Set(ref showBeneath, value, old => PrimaryMap.ShowBeneath = ShowBeneath); }
+      public bool ShowBeneath {
+         get => showBeneath;
+         set => Set(ref showBeneath, value, old => {
+            PrimaryMap.ShowBeneath = ShowBeneath;
+            // the hover point is only tracked while 'show beneath' is active (see Hover), so catch it up to the current cursor
+            if (showBeneath && hoverMap == PrimaryMap) PrimaryMap.HoverPoint = ToPixelPosition(PrimaryMap, hoverX, hoverY);
+         });
+      }
+
+      // the most recent hover position, so the 'show beneath' effect can start from the cursor
+      private BlockMapViewModel hoverMap;
+      private double hoverX, hoverY;
 
       private bool hideEvents;
       public bool HideEvents {
@@ -664,6 +675,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private static readonly object[] EmptyTooltip = new object[0];
       public object Hover(double x, double y) {
          var map = MapUnderCursor(x, y);
+         (hoverMap, hoverX, hoverY) = (map, x, y);
          if (map == null) return EmptyTooltip;
          if (use9Grid && IsValid9GridSelection) {
             var p = ToBoundedMapTilePosition(map, x, y, 2, 2);
@@ -677,7 +689,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             UpdateHover(map, p.X, p.Y, tilesToDraw.GetLength(0), tilesToDraw.GetLength(1));
          } else {
             var p = ToBoundedMapTilePosition(map, x, y, 1, 1);
-            map.HoverPoint = ToPixelPosition(map, x, y);
+            // The hover point positions the 'show beneath' reveal effect, which is drawn as an opacity mask over the whole map image.
+            // Updating it on every mouse move makes the UI re-render the full map image every time the mouse moves,
+            // so only track it while the effect is actually visible.
+            if (map.ShowBeneath) map.HoverPoint = ToPixelPosition(map, x, y);
             if (UpdateHover(map, p.X, p.Y, 1, 1)) {
                if (!SpartanMode && interactionType == PrimaryInteractionType.None) {
                   var matches = map.EventsUnderCursor(x, y, false).OfType<BaseEventViewModel>().ToList();

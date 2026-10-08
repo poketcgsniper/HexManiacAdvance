@@ -159,26 +159,32 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
 
       public bool Matches(int gameCodeHash, IReadOnlyList<byte> data, int index) {
          if (Args.Count == 0) return false;
+         if (index < 0 || index >= data.Count) return false;
+         // This gets called for every macro at every byte of every script, so the cheap checks come first:
+         // most macros are rejected by their first byte, before any allocation or game check.
+         if (Args[0] is SilentMatchArg firstSilent && data[index] != firstSilent.ExpectedValue) return false;
          if (!MatchesGame(gameCodeHash)) return false;
-         var expectedVariableValues = new Dictionary<string, int>();
+         Dictionary<string, int> expectedVariableValues = null;
          for (int i = 0; i < Args.Count; i++) {
             var arg = Args[i];
+            var argLength = arg.Length(default, -1);
+            if (index + argLength > data.Count) return false;
             if (arg is SilentMatchArg smarg) {
                if (data[index] != smarg.ExpectedValue) return false;
             } else if (arg is ScriptArg sarg) {
                // if the argument is duplicated through multiple spots,
                // make sure all the spots match the same value.
                var matchingShortArg = ShortFormArgs.FirstOrDefault(shortArg => shortArg.Name == arg.Name);
-               var argLength = arg.Length(default, -1);
                if ((matchingShortArg?.Length(default, -1) ?? 0) == argLength) {
                   var value = data.ReadMultiByteValue(index, argLength);
+                  expectedVariableValues ??= new Dictionary<string, int>();
                   if (!expectedVariableValues.TryGetValue(sarg.Name, out var expectedValue)) expectedVariableValues[sarg.Name] = value;
                   else if (expectedValue != value) return false; // only match the macro if all the variables match
                }
             } else {
                throw new NotImplementedException();
             }
-            index += arg.Length(default, -1);
+            index += argLength;
          }
          return true;
       }

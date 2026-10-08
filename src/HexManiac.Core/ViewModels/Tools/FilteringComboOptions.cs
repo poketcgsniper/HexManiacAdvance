@@ -77,6 +77,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          if (interactionType != InteractionType.None) return;
          interactionType = InteractionType.Update;
          bool notifyOptions = false, notifyDropOpen = false;
+         if (options is not IReadOnlyCollection<ComboOption>) options = options.ToList(); // the options are enumerated up to three times below: don't recompute a lazy sequence each time
 
          // warning: this might be a performance sink. It might be faster to replace elements, rather than replacing the full collection.
          if (AllOptions == null || !AllOptions.Select(option => option.Text).SequenceEqual(options.Select(option => option.Text))) {

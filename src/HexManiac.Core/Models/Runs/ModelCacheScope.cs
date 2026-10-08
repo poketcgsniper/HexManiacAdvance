@@ -81,7 +81,9 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
 
       private readonly Dictionary<string, IReadOnlyList<ArrayRun>> cachedDependentArrays = new();
       public IEnumerable<ArrayRun> GetDependantArrays(string anchor) {
-         if (cachedDependentArrays.TryGetValue(anchor, out var cache)) return cache;
+         lock (cachedDependentArrays) {
+            if (cachedDependentArrays.TryGetValue(anchor, out var cache)) return cache;
+         }
 
          var results = new List<ArrayRun>();
          foreach (var array in model.Arrays) {
@@ -92,7 +94,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
                }
             }
          }
-         cachedDependentArrays[anchor] = results;
+         lock (cachedDependentArrays) cachedDependentArrays[anchor] = results;
          return results;
       }
 
@@ -104,7 +106,9 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
       }
 
       public IReadOnlyList<string> GetBitOptions(string enumName) {
-         if (cachedBitOptions.ContainsKey(enumName)) return cachedBitOptions[enumName];
+         lock (cachedBitOptions) {
+            if (cachedBitOptions.TryGetValue(enumName, out var cached)) return cached;
+         }
 
          // if it's from a list, then it's not from an enum, but instead from just a string list
          if (model.TryGetList(enumName, out var nameArray)) return nameArray.Select(QuoteIfNeeded).ToList();
@@ -130,7 +134,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
             }
          }
 
-         cachedBitOptions[enumName] = results;
+         lock (cachedBitOptions) cachedBitOptions[enumName] = results;
          return results;
       }
 
@@ -185,11 +189,13 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
       // stores only the start and length
       private Dictionary<int, Dictionary<int, int>> scriptDestinations = new();
       public Dictionary<int, int> ScriptDestinations(int start) {
-         if (!scriptDestinations.TryGetValue(start, out var destinations)) {
-            destinations = new();
-            scriptDestinations[start] = destinations;
+         lock (scriptDestinations) {
+            if (!scriptDestinations.TryGetValue(start, out var destinations)) {
+               destinations = new();
+               scriptDestinations[start] = destinations;
+            }
+            return destinations;
          }
-         return destinations;
       }
 
       // stores start, length, and contents

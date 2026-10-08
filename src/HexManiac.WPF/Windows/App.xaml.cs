@@ -50,6 +50,15 @@ namespace HavenSoft.HexManiac.WPF.Windows {
       protected override void OnStartup(StartupEventArgs e) {
          base.OnStartup(e);
 
+         // Exceptions on the UI thread are reported by MainWindow.HandleException.
+         // Exceptions from background work would otherwise either kill the process with no record of why (background threads)
+         // or surface much later when the finalizer observes a faulted task. Record them so they show up in crash.log.
+         AppDomain.CurrentDomain.UnhandledException += (sender, args) => LogBackgroundException("Unhandled exception on a background thread", args.ExceptionObject as Exception);
+         TaskScheduler.UnobservedTaskException += (sender, args) => {
+            LogBackgroundException("Unobserved exception in a background task", args.Exception);
+            args.SetObserved();
+         };
+
          var (path, address, options) = ParseArgs(e.Args);
 
          singleInstanceApplicationMutex = new Mutex(true, appInstanceIdentifier, out var mutexIsNew);
@@ -69,6 +78,15 @@ namespace HavenSoft.HexManiac.WPF.Windows {
          MainWindow.Resources.Add("IsPaletteMixerExpanded", new EditableValue<bool>());
          MainWindow.Show();
          DebugLog(viewModel, "All Started!");
+      }
+
+      private static void LogBackgroundException(string context, Exception exception) {
+         try {
+            var text = $"{DateTime.Now}: {context}{Environment.NewLine}{exception}{Environment.NewLine}-------------------------------------------{Environment.NewLine}";
+            File.AppendAllText("crash.log", text);
+         } catch {
+            // logging is best-effort: never let the logger itself cause a second failure
+         }
       }
 
       private void SetupServer(EditorViewModel viewModel) {

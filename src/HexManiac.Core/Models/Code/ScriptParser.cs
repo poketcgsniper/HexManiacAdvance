@@ -914,7 +914,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                continue;
             }
 
-            var line = engine.FirstOrDefault(option => option.Matches(gameHash, data, index));
+            var line = engine.GetMatchingLineOrMacro(gameHash, data, index);
             if (line == null) {
                results.Add($".raw {data[index]:X2}");
                index += 1;
@@ -976,16 +976,97 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
       SpriteTemplate,
    }
 
+   /// <summary>
+   /// Every script command (and macro) can only match data that starts with a specific byte.
+   /// Scanning the whole command list for every byte of every script is the single most expensive part of walking scripts,
+   /// so this groups the commands by that first byte. Within a group, the original order is preserved,
+   /// so the first match is the same one that a scan of the whole list would find.
+   /// </summary>
+   internal sealed class ScriptLineIndex {
+      private static readonly IScriptLine[] NoLines = new IScriptLine[0];
+      private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IReadOnlyList<IScriptLine>, ScriptLineIndex> indexes = new();
+
+      private readonly int lineCount;
+      private readonly IScriptLine[][] macros = new IScriptLine[256][], lines = new IScriptLine[256][], all = new IScriptLine[256][];
+
+      public static ScriptLineIndex For(IReadOnlyList<IScriptLine> engine) {
+         lock (indexes) {
+            if (indexes.TryGetValue(engine, out var index) && index.lineCount == engine.Count) return index;
+            index = new ScriptLineIndex(engine);
+            indexes.AddOrUpdate(engine, index);
+            return index;
+         }
+      }
+
+      private ScriptLineIndex(IReadOnlyList<IScriptLine> engine) {
+         lineCount = engine.Count;
+         var macroBuckets = new List<IScriptLine>[256];
+         var lineBuckets = new List<IScriptLine>[256];
+         var allBuckets = new List<IScriptLine>[256];
+         for (int i = 0; i < 256; i++) (macroBuckets[i], lineBuckets[i], allBuckets[i]) = (new(), new(), new());
+
+         foreach (var line in engine) {
+            if (line == null) continue;
+            int firstByte = -1; // -1 means 'could match any first byte'
+            if (line is MacroScriptLine macro) {
+               if (macro.Args.Count > 0 && macro.Args[0] is SilentMatchArg silent) firstByte = silent.ExpectedValue;
+               Add(macroBuckets, firstByte, line);
+            } else {
+               if (line.LineCode.Count > 0) firstByte = line.LineCode[0];
+               Add(lineBuckets, firstByte, line);
+            }
+            Add(allBuckets, firstByte, line);
+         }
+
+         for (int i = 0; i < 256; i++) {
+            macros[i] = macroBuckets[i].Count == 0 ? NoLines : macroBuckets[i].ToArray();
+            lines[i] = lineBuckets[i].Count == 0 ? NoLines : lineBuckets[i].ToArray();
+            all[i] = allBuckets[i].Count == 0 ? NoLines : allBuckets[i].ToArray();
+         }
+      }
+
+      private static void Add(List<IScriptLine>[] buckets, int firstByte, IScriptLine line) {
+         if (firstByte >= 0) {
+            buckets[firstByte].Add(line);
+         } else {
+            foreach (var bucket in buckets) bucket.Add(line);
+         }
+      }
+
+      public IScriptLine[] Macros(byte firstByte) => macros[firstByte];
+      public IScriptLine[] Lines(byte firstByte) => lines[firstByte];
+      public IScriptLine[] All(byte firstByte) => all[firstByte];
+   }
+
    public static class ScriptExtensions {
       public static MacroScriptLine GetMatchingMacro(this IReadOnlyList<IScriptLine> self, int gameHash, IReadOnlyList<byte> data, int start) {
-         return (MacroScriptLine)self.FirstOrDefault(option => option is MacroScriptLine && option.Matches(gameHash, data, start));
+         if (start < 0 || start >= data.Count) return null;
+         foreach (var option in ScriptLineIndex.For(self).Macros(data[start])) {
+            if (option.Matches(gameHash, data, start)) return (MacroScriptLine)option;
+         }
+         return null;
       }
 
       /// <summary>
       /// Does not consider macros. Only returns individual lines.
       /// </summary>
       public static ScriptLine GetMatchingLine(this IReadOnlyList<IScriptLine> self, int gameHash, IReadOnlyList<byte> data, int start) {
-         return (ScriptLine)self.FirstOrDefault(option => option is ScriptLine && option.Matches(gameHash, data, start));
+         if (start < 0 || start >= data.Count) return null;
+         foreach (var option in ScriptLineIndex.For(self).Lines(data[start])) {
+            if (option.Matches(gameHash, data, start)) return (ScriptLine)option;
+         }
+         return null;
+      }
+
+      /// <summary>
+      /// Considers both macros and individual lines, in the order they appear in the script reference.
+      /// </summary>
+      public static IScriptLine GetMatchingLineOrMacro(this IReadOnlyList<IScriptLine> self, int gameHash, IReadOnlyList<byte> data, int start) {
+         if (start < 0 || start >= data.Count) return null;
+         foreach (var option in ScriptLineIndex.For(self).All(data[start])) {
+            if (option.Matches(gameHash, data, start)) return option;
+         }
+         return null;
       }
 
       public static int GetScriptSegmentLength(this IReadOnlyList<IScriptLine> self, int gameHash, IDataModel model, int address, IDictionary<int, int> destinationLengths) {

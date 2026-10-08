@@ -97,15 +97,24 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       }
 
       private void Load() {
-         void Add(GotoMapButton button) {
-            Visible = true;
-            dispatcher.BlockOnUIWork(() => MapPreviews.Add(button));
-         }
-         if (tableName == HardcodeTablesModel.OverworldSprites) {
-            foreach (var button in FindOverworldUses()) Add(button);
-         } else {
-            foreach (var button in FindObjectUses()) Add(button);
-         }
+         // The delayed call lands on the UI thread. Searching every map for uses of this element is slow,
+         // so do the search on a background thread and only touch the UI to add the results.
+         dispatcher.RunBackgroundWork(() => {
+            try {
+               var buttons = tableName == HardcodeTablesModel.OverworldSprites ? FindOverworldUses() : FindObjectUses();
+               foreach (var button in buttons) {
+                  if (cancel) return;
+                  dispatcher.BlockOnUIWork(() => {
+                     if (cancel) return;
+                     Visible = true;
+                     MapPreviews.Add(button);
+                  });
+               }
+            } catch (Exception ex) {
+               // an unexpected problem with one map's data shouldn't crash the editor: it just means the 'maps' button won't show
+               System.Diagnostics.Debug.WriteLine($"Could not find map uses for {tableName}/{index}: {ex}");
+            }
+         });
       }
 
       private IEnumerable<GotoMapButton> FindOverworldUses() {

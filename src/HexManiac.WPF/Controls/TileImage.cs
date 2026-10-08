@@ -6,6 +6,7 @@ using HavenSoft.HexManiac.Core.ViewModels.Tools;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
@@ -261,14 +262,41 @@ namespace HavenSoft.HexManiac.WPF.Controls {
          return source;
       }
 
+      // Map images are rendered on a background thread. While painting on a map, the view model can ask for a
+      // redraw many times per second; rendering each request (and writing a full-size bitmap for each one on the UI thread)
+      // is what makes the map editor feel sluggish. Instead, only one render is in flight at a time,
+      // and any requests that arrive while it runs are folded into a single follow-up render.
+      private bool updateInProgress, updateRequested;
+
       public async void UpdateSource() {
+         if (!Dispatcher.CheckAccess()) {
+            // property changes can come from background work: the image itself can only be touched on the UI thread
+            Dispatcher.BeginInvoke(new Action(UpdateSource));
+            return;
+         }
          var vm = ViewModel;
          if (vm == null || vm.PixelWidth < 0 || vm.PixelHeight < 0) return;
          short[] pixels;
          if (vm is not BlockMapViewModel) {
             pixels = vm.PixelData;
          } else {
-            pixels = await Task.Run(() => vm.PixelData);
+            if (updateInProgress) { updateRequested = true; return; }
+            updateInProgress = true;
+            try {
+               pixels = await Task.Run(() => vm.PixelData);
+            } catch (Exception ex) {
+               // a failed render shouldn't take down the application: just leave the previous image in place
+               updateInProgress = false;
+               Debug.WriteLine($"Map render failed: {ex}");
+               return;
+            }
+            updateInProgress = false;
+            if (updateRequested || vm != ViewModel) {
+               // something changed while rendering: render again with the latest state
+               updateRequested = false;
+               UpdateSource();
+               return;
+            }
          }
          if (pixels == null || ViewModel == null) return;
          if (!UseTrueTransparency) {

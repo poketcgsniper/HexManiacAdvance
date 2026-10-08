@@ -490,6 +490,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          foreach (var scriptStart in initialAddresses) {
             if (scriptStart < 0 || scriptStart >= model.Count) continue;
             var scriptsToCheck = new List<int> { scriptStart };
+            var scriptsSeen = new HashSet<int> { scriptStart }; // same content as scriptsToCheck, but with a fast Contains
             for (int i = 0; i < scriptsToCheck.Count; i++) {
                var address = scriptsToCheck[i];
                int currentScriptLength = 0;
@@ -504,7 +505,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                   foreach (var arg in line.Args) {
                      if (arg.PointerType == ExpectedPointerType.Script) {
                         var destination = model.ReadPointer(address + commandOffset);
-                        if (destination >= 0 && destination < model.Count && !scriptsToCheck.Contains(destination) && scriptsToCheck.Count < ScriptCountLimit) scriptsToCheck.Add(destination);
+                        if (destination >= 0 && destination < model.Count && scriptsToCheck.Count < ScriptCountLimit && scriptsSeen.Add(destination)) scriptsToCheck.Add(destination);
                      }
                      commandOffset += arg.Length(model, -1);
                   }
