@@ -2501,6 +2501,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public static IPixelViewModel GetDefaultOW(IDataModel model) {
          var defaultSpriteAddress = model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, HardcodeTablesModel.PokeIconsTable + "/0/icon/");
          var defaultSpriteRun = model.GetNextRun(defaultSpriteAddress) as ISpriteRun;
+         if (defaultSpriteRun == null) {
+            // decomp-based ROMs keep the icon inside the species table
+            defaultSpriteAddress = model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, HardcodeTablesModel.PokemonStatsTable + "/0/icon/");
+            defaultSpriteRun = model.GetNextRun(defaultSpriteAddress) as ISpriteRun;
+         }
          var defaultImage = defaultSpriteRun == null ? new ReadonlyPixelViewModel(16, 16) : model.CurrentCacheScope.GetImage(defaultSpriteRun);
          if (defaultImage.PixelHeight > 24) {
             var canvas = new CanvasPixelViewModel(defaultImage.PixelWidth, 24) { Transparent = defaultImage.PixelData[0] };

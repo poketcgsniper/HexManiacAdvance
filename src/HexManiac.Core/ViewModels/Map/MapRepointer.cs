@@ -872,6 +872,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             model.WriteValue(token, layoutStart + 24, myLayout.GetValue(Format.BorderWidth));
             model.WriteValue(token, layoutStart + 25, myLayout.GetValue(Format.BorderHeight));
             model.WriteMultiByteValue(layoutStart + 26, 2, token, 0);
+         } else if (myLayout.Table.ElementLength > 24) {
+            // expansion-style layout: copy the extra bytes (isFrlg, border size) from the current layout rather than leaving free-space 0xFF there
+            for (int i = 24; i < myLayout.Table.ElementLength && i < 28; i++) token.ChangeData(model, layoutStart + i, model[myLayout.Start + i]);
          }
          if (ArrayRun.TryParse(model, format.LayoutFormat, layoutStart, SortedSpan<int>.None, out var table) != ErrorInfo.NoError) throw new NotImplementedException();
          model.ObserveRunWritten(token, table);

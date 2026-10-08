@@ -264,16 +264,16 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
 
       public BlocksetCache BlocksetCache => cache;
 
-      public string BlockDataFormat { get; }
-      public string LayoutFormat { get; }
-      public string ObjectsFormat { get; }
-      public string WarpsFormat { get; }
-      public string ScriptsFormat { get; }
-      public string SignpostsFormat { get; }
-      public string EventsFormat { get; }
-      public string ConnectionsFormat { get; }
+      public string BlockDataFormat { get; private set; }
+      public string LayoutFormat { get; private set; }
+      public string ObjectsFormat { get; private set; }
+      public string WarpsFormat { get; private set; }
+      public string ScriptsFormat { get; private set; }
+      public string SignpostsFormat { get; private set; }
+      public string EventsFormat { get; private set; }
+      public string ConnectionsFormat { get; private set; }
       public string HeaderFormat { get; }
-      public string MapFormat { get; }
+      public string MapFormat { get; private set; }
 
       public Format(IDataModel model) {
          this.model = model;
@@ -295,6 +295,58 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          ConnectionsFormat = "[count:: connections<[direction:: offset:: mapGroup. mapNum. unused:]/count>]1";
          HeaderFormat = $"music:songnames layoutID:data.maps.layouts+1 regionSectionID.{regionSectionIDFormat} cave. weather. mapType. allowBiking. flags.|t|allowEscaping.|allowRunning.|showMapName::: floorNum. battleType.";
          MapFormat = $"[{Layout}<{LayoutFormat}> events<{EventsFormat}> mapscripts<[type. pointer<>]!00> {Connections}<{ConnectionsFormat}> {HeaderFormat}]";
+
+         // If the ROM's map bank table already describes maps with a different layout (for example a pokeemerald-expansion build,
+         // where the map header and map layout structs are not the vanilla ones), create new maps/layouts with that format
+         // instead of the vanilla one, so that what the map editor writes matches what the game reads.
+         var banks = model.GetTable(HardcodeTablesModel.MapBankTable);
+         var mapFormat = ExtractPointerContent(banks?.FormatString, "map<");
+         if (mapFormat != null && mapFormat.EndsWith("]1") && !IsVanillaMapFormat(mapFormat)) {
+            MapFormat = mapFormat.Substring(0, mapFormat.Length - 1);
+            var layoutFormat = ExtractPointerContent(mapFormat, Layout + "<");
+            if (layoutFormat != null) LayoutFormat = layoutFormat;
+            var eventsFormat = ExtractPointerContent(mapFormat, Events + "<");
+            if (eventsFormat != null) {
+               EventsFormat = eventsFormat;
+               ObjectsFormat = ExtractPointerContent(eventsFormat, Objects + "<") ?? ObjectsFormat;
+               WarpsFormat = ExtractPointerContent(eventsFormat, Warps + "<") ?? WarpsFormat;
+               ScriptsFormat = ExtractPointerContent(eventsFormat, Scripts + "<") ?? ScriptsFormat;
+               SignpostsFormat = ExtractPointerContent(eventsFormat, Signposts + "<") ?? SignpostsFormat;
+            }
+            var connectionsFormat = ExtractPointerContent(mapFormat, Connections + "<");
+            if (connectionsFormat != null) ConnectionsFormat = connectionsFormat;
+            var blockData = ExtractPointerContent(LayoutFormat, PrimaryBlockset + "<");
+            if (blockData != null) BlockDataFormat = blockData;
+         }
+      }
+
+      /// <summary>
+      /// True if the map format uses the vanilla header fields (cave/allowBiking/floorNum), in which case the built-in formats are kept.
+      /// </summary>
+      private static bool IsVanillaMapFormat(string mapFormat) => mapFormat.Contains(" cave. ");
+
+      /// <summary>
+      /// Given a format like "[a<[x. y.]1> b<[z.]1>]4" and a field prefix like "a<", returns the bracketed content "[x. y.]1".
+      /// Returns null if the field isn't found.
+      /// </summary>
+      public static string ExtractPointerContent(string format, string fieldPrefix) {
+         if (format == null) return null;
+         var index = format.IndexOf(fieldPrefix);
+         while (index > 0 && !" [<".Contains(format[index - 1])) index = format.IndexOf(fieldPrefix, index + 1);
+         if (index < 0 || index + fieldPrefix.Length >= format.Length) return null;
+         var start = index + fieldPrefix.Length;
+         if (format[start] != '[') return null;
+         int depth = 0;
+         for (int i = start; i < format.Length; i++) {
+            if (format[i] == '[') depth++;
+            if (format[i] == ']') depth--;
+            if (depth == 0) {
+               var end = i + 1;
+               while (end < format.Length && format[end] != '>') end++;
+               return format.Substring(start, end - start);
+            }
+         }
+         return null;
       }
 
       public void Refresh() {
