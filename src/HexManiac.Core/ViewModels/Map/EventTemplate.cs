@@ -90,9 +90,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          });
 
          initializationWorkload = dispatcher.RunBackgroundWork(() => {
-            usedFlags = Flags.GetUsedItemFlags(model, parser);
-            usedTrainerFlags = Flags.GetUsedTrainerFlags(model, parser);
-            usedVariables = Flags.GetUsedVariables(model, parser);
+            // one pass over every script finds all three kinds of usage
+            var usage = Flags.GetScriptUsage(model, parser);
+            usedFlags = usage.ItemFlags;
+            usedTrainerFlags = usage.TrainerFlags;
+            usedVariables = usage.Variables;
          });
       }
 
@@ -230,7 +232,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             var pokestats = model.GetTableModel(HardcodeTablesModel.PokemonStatsTable, () => token);
             for (int i = 1; i < pokedex.Count; i++) {
                if (pokedex[i - 1].GetValue(0) > maxPokedex) continue;
-               if (MinLevel.TryGetValue(i, out var level) && level > maxLevel) continue;
+               if (MinLevel is { } minLevels && minLevels.TryGetValue(i, out var level) && level > maxLevel) continue;
                availablePokemon.Add(i);
                if (pokestats != null) {
                   if (pokestats[i].GetValue("type1") == preferredType || pokestats[i].GetValue("type2") == preferredType) {

@@ -616,6 +616,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
          blockPixels = null;
          eventRenders = null;
+         ClearEventGroupCache();
          borderBlock = null;
          berryInfo = null;
          WildPokemon.ClearCache();
@@ -2519,20 +2520,40 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          return list;
       }
 
+      /// <summary>
+      /// Building the event view models is expensive (each object event inspects its script, trainer data, etc).
+      /// The event list is requested constantly (every time the mouse moves to a new tile, every click, every redraw),
+      /// so reuse the same event view models until the model data actually changes.
+      /// The model's cache scope is replaced whenever any data in the model is written, so it works as a version stamp.
+      /// </summary>
+      private sealed record EventGroupCache(ModelCacheScope Version, EventGroupModel Events);
+      private EventGroupCache eventGroupCache;
+
+      private void ClearEventGroupCache() => eventGroupCache = null;
+
       public EventGroupModel EventGroup {
          get {
-            if (allOverworldSprites == null) allOverworldSprites = RenderOWs(model);
-            if (defaultOverworldSprite == null) defaultOverworldSprite = GetDefaultOW(model);
-            var map = GetMapModel();
-            if (map == null) return null;
-            var eventsTable = map.GetSubTable("events");
-            if (eventsTable == null) return null;
-            var eventElements = eventsTable[0];
-            if (eventElements == null) return null;
-            var events = new EventGroupModel(this, GotoAddress, GotoBankMap, eventElements, eventTemplate, allOverworldSprites, defaultOverworldSprite, BerryInfo, group, this.map);
-            events.DataMoved += HandleEventDataMoved;
+            var version = model.CurrentCacheScope;
+            var cache = eventGroupCache;
+            if (version != null && cache != null && cache.Version == version) return cache.Events;
+            var events = BuildEventGroup();
+            eventGroupCache = events == null || version == null ? null : new(version, events);
             return events;
          }
+      }
+
+      private EventGroupModel BuildEventGroup() {
+         if (allOverworldSprites == null) allOverworldSprites = RenderOWs(model);
+         if (defaultOverworldSprite == null) defaultOverworldSprite = GetDefaultOW(model);
+         var map = GetMapModel();
+         if (map == null) return null;
+         var eventsTable = map.GetSubTable("events");
+         if (eventsTable == null) return null;
+         var eventElements = eventsTable[0];
+         if (eventElements == null) return null;
+         var events = new EventGroupModel(this, GotoAddress, GotoBankMap, eventElements, eventTemplate, allOverworldSprites, defaultOverworldSprite, BerryInfo, group, this.map);
+         events.DataMoved += HandleEventDataMoved;
+         return events;
       }
 
       private IReadOnlyList<IEventViewModel> GetEvents() {

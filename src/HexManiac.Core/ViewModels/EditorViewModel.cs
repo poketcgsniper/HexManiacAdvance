@@ -790,7 +790,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                   if (!Singletons.GameReferenceTables.TryGetValue(model.GetGameCode(), out var refTable)) refTable = null;
                   fileSystem.SaveMetadata(file.Name, viewPort.Model.ExportMetadata(refTable, Singletons.MetadataInfo).Serialize());
                   Debug.Assert(viewPort.ChangeHistory.IsSaved, "Put a breakpoint in ChangeHistory.CurrentChange, because a changable token is being created too soon!");
-                  if (model is HardcodeTablesModel hardcode) viewPort.Tools.LogTool.LogMessages.AddRange(hardcode.LoadingMessages);
+                  if (model is HardcodeTablesModel hardcode) viewPort.Tools?.LogTool?.LogMessages.AddRange(hardcode.LoadingMessages);
                }, TaskContinuationOptions.ExecuteSynchronously);
             }
             Add(viewPort);
@@ -1411,12 +1411,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       private void AcceptError(object sender, string message) {
-         if (sender is MapEditorViewModel map) map.ViewPort.Tools.LogTool.LogMessages.Add("Error: " + message);
+         if (sender is MapEditorViewModel map) map.ViewPort.Tools?.LogTool?.LogMessages.Add("Error: " + message);
          ErrorMessage = message;
       }
 
       private void AcceptMessage(object sender, string message) {
-         if (sender is MapEditorViewModel map) map.ViewPort.Tools.LogTool.LogMessages.Add("Message: " + message);
+         if (sender is MapEditorViewModel map) map.ViewPort.Tools?.LogTool?.LogMessages.Add("Message: " + message);
          InformationMessage = message;
       }
 

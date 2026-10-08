@@ -23,6 +23,39 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          return model.CurrentCacheScope;
       }
 
+      private readonly Dictionary<string, object> cachedLookups = new();
+
+      /// <summary>
+      /// Cache an arbitrary computed lookup for as long as the model's data doesn't change.
+      /// (The cache scope is discarded whenever the model data is written.)
+      /// </summary>
+      public T GetOrAdd<T>(string key, Func<T> factory) where T : class {
+         lock (cachedLookups) {
+            if (cachedLookups.TryGetValue(key, out var existing) && existing is T typed) return typed;
+         }
+         var result = factory();
+         lock (cachedLookups) cachedLookups[key] = result;
+         return result;
+      }
+
+      private readonly Dictionary<(int destination, int source, string fieldName, string format), ITableRun> cachedSubTables = new();
+
+      /// <summary>
+      /// ModelArrayElement.GetSubTable has to parse the child table's format every time it's called,
+      /// and it gets called thousands of times when walking the maps (every map lookup goes bank -> maps -> map -> events -> ...).
+      /// Since the parse only depends on the data (and the format), remember the result until the data changes.
+      /// A null result is remembered too, so repeated failures are also cheap.
+      /// </summary>
+      public ITableRun GetOrAddSubTable(int destination, int source, string fieldName, string format, Func<ITableRun> factory) {
+         var key = (destination, source, fieldName, format);
+         lock (cachedSubTables) {
+            if (cachedSubTables.TryGetValue(key, out var existing)) return existing;
+         }
+         var result = factory();
+         lock (cachedSubTables) cachedSubTables[key] = result;
+         return result;
+      }
+
       private readonly Dictionary<string, IReadOnlyList<string>> cachedOptions = new Dictionary<string, IReadOnlyList<string>>();
       private readonly Dictionary<string, IReadOnlyList<string>> cachedBitOptions = new Dictionary<string, IReadOnlyList<string>>();
       private IReadOnlyList<MapInfo> cachedMapInfo;

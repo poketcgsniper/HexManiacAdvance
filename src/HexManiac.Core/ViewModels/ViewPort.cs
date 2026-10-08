@@ -221,7 +221,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             dispatcher.BlockOnUIWork(() => {
                TabChangeRequestedEventArgs args;
                if (arg is string str) {
-                  tools?.LogTool.LogMessages.Add("Attempting to Goto Token: " + str);
+                  Log("Attempting to Goto Token: " + str);
                   var possibleMatches = Model.GetExtendedAutocompleteOptions(str);
                   if (possibleMatches.Count == 1) str = possibleMatches[0];
                   else if (possibleMatches.Count > 1 && possibleMatches.All(match => Model.GetMatchedWords(match).Any())) str = possibleMatches[0];
@@ -310,7 +310,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                }
 
                if (arg is int address) {
-                  tools?.LogTool.LogMessages.Add("Attempting to Goto Address: " + address.ToString());
+                  Log("Attempting to Goto Address: " + address.ToString());
                }
 
                if (arg is string stringArg) selection.Goto.Execute(new SelectionGotoArgs(stringArg, this));
@@ -950,7 +950,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                   index = Model.ReadPointer(run.Start);
                   run = Model.GetNextRun(index);
                }
-               tools.LogTool.LogMessages.Add($"Attempting to Update Anchor at address {run.Start.ToAddress()}: {anchorText}");
+               Log($"Attempting to Update Anchor at address {run.Start.ToAddress()}: {anchorText}");
                if (run.Start <= index) {
                   var token = new NoDataChangeDeltaModel();
 
@@ -1103,7 +1103,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
          if (this is not ChildViewPort) { // child viewports don't need tools
             tools = new ToolTray(Singletons, Model, selection, history, this);
-            tools.LogTool.LogMessages.Add($"Start of session {Name} - {DateTime.Now}");
+            Log($"Start of session {Name} - {DateTime.Now}");
             Tools.OnError += (sender, e) => RaiseError(e);
             Tools.OnMessage += (sender, e) => RaiseMessage(e);
             tools.RequestMenuClose += (sender, e) => RequestMenuClose?.Invoke(this, e);
@@ -1113,7 +1113,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             Tools.TableTool.ModelDataMoved += ModelDataMovedByTool;
             Tools.CodeTool.ModelDataChanged += ModelChangedByCodeTool;
             Tools.CodeTool.ModelDataMoved += ModelDataMovedByTool;
-            model.LogMessage += (sender, e) => tools.LogTool.LogMessages.Add(e);
+            model.LogMessage += (sender, e) => Log(e);
             scroll.Scheduler = tools;
          }
 
@@ -1515,15 +1515,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       public void RaiseError(string text) {
-         tools.LogTool.LogMessages.Add("Error: " + text);
+         Log("Error: " + text);
          OnError?.Invoke(this, text);
       }
+
+      /// <summary>
+      /// Child viewports (such as search results) have no tools, so there may be no log to write to.
+      /// </summary>
+      private void Log(string message) => tools?.LogTool?.LogMessages.Add(message);
 
       private string deferredMessage;
       public void RaiseMessage(string text) {
          deferredMessage = text;
-         tools.LogTool.LogMessages.Add("Message: " + deferredMessage);
-         tools.Schedule(RaiseMessage);
+         Log("Message: " + deferredMessage);
+         if (tools != null) tools.Schedule(RaiseMessage);
+         else RaiseMessage();
       }
       private void RaiseMessage() => OnMessage?.Invoke(this, deferredMessage);
 
@@ -2297,7 +2303,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private bool TryParsePointerSearchSegment(List<ISearchByte> searchBytes, string cleanedSearchString, ref int i) {
          var pointerEnd = cleanedSearchString.IndexOf(PointerEnd, i);
-         if (pointerEnd == -1) { OnError(this, "Search mismatch: no closing >"); return false; }
+         if (pointerEnd == -1) { RaiseError("Search mismatch: no closing >"); return false; }
          var pointerContents = cleanedSearchString.Substring(i + 1, pointerEnd - i - 1);
          var address = Model.GetAddressFromAnchor(history.CurrentChange, -1, pointerContents);
          if (address != Pointer.NULL) {
@@ -2308,7 +2314,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          } else if (pointerContents.All(AllHexCharacters.Contains) && pointerContents.Length <= 6) {
             searchBytes.AddRange(Parse(pointerContents).Reverse().Append((byte)0x08).Select(b => (SearchByte)b));
          } else {
-            OnError(this, $"Could not parse pointer <{pointerContents}>");
+            RaiseError($"Could not parse pointer <{pointerContents}>");
             return false;
          }
          i = pointerEnd + 1;
@@ -2368,12 +2374,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             // follow pointer
             if (format is Pointer pointer) {
                if (pointer.Destination != Pointer.NULL) {
-                  tools.LogTool.LogMessages.Add($"Follow Link {pointer.DestinationAsText}");
+                  Log($"Follow Link {pointer.DestinationAsText}");
                   selection.GotoAddress(pointer.Destination);
                } else if (string.IsNullOrEmpty(pointer.DestinationName)) {
-                  OnError(this, $"null pointers point to nothing, so going to their source isn't possible.");
+                  RaiseError($"null pointers point to nothing, so going to their source isn't possible.");
                } else {
-                  OnError(this, $"Pointer destination {pointer.DestinationName} not found.");
+                  RaiseError($"Pointer destination {pointer.DestinationName} not found.");
                }
                return;
             }
@@ -2382,7 +2388,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             if (format is MatchedWord word) {
                var address = Model.GetAddressFromAnchor(history.CurrentChange, -1, word.Name.Substring(2));
                if (address == Pointer.NULL) {
-                  OnError(this, $"No table with name '{word.Name.Substring(2)}' was found.");
+                  RaiseError($"No table with name '{word.Name.Substring(2)}' was found.");
                } else {
                   selection.GotoAddress(address);
                }
@@ -2570,7 +2576,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private List<ViewPort> RecentDuplicates = new();
       public void GotoScript(int address) {
-         tools.LogTool.LogMessages.Add("Goto Script: " + address.ToAddress());
+         Log("Goto Script: " + address.ToAddress());
          if (RecentDuplicates.Count == 0) RecentDuplicates.Add(this);
 
          int start;

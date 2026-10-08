@@ -279,6 +279,7 @@ namespace HavenSoft.HexManiac.Core.Models {
       public virtual void Load(byte[] newData, StoredMetadata metadata) {
          InitializationWorkload.Wait();
          RawData = newData;
+         ClearCacheScope(); // all of the data is new, so nothing cached from the old data is valid
       }
 
       public abstract void ObserveAnchorWritten(ModelDelta changeToken, string anchorName, IFormattedRun run);

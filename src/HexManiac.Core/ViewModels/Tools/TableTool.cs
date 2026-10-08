@@ -635,7 +635,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          }
 
          // maps
-         if (viewPort.MapEditor != null && viewPort.MapEditor.IsValidState && !viewPort.SpartanMode) {
+         // Only tables that can be referenced from map events can have map uses.
+         // Skip the (expensive, delayed) map search entirely for every other table.
+         var canHaveMapUses =
+            basename == HardcodeTablesModel.OverworldSprites ||
+            basename == HardcodeTablesModel.ItemsTableName ||
+            basename == HardcodeTablesModel.MapNameTable ||
+            viewPort.Tools.CodeTool.ScriptParser.DependsOn(basename).Any();
+         if (canHaveMapUses && viewPort.MapEditor != null && viewPort.MapEditor.IsValidState && !viewPort.SpartanMode) {
             var mapOptions = new MapOptionsArrayElementViewModel(dispatcher, loadMapUsageTimer, viewPort.MapEditor, basename, index);
             mapOptions.MapPreviews.CollectionChanged += (sender, e) => NotifyPropertyChanged(nameof(HasUsageOptions));
             AddUsageChild(mapOptions); // always add, but invisible when empty

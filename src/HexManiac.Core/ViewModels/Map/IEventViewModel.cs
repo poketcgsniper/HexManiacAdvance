@@ -449,7 +449,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             element.SetValue("graphics", value);
             RaiseEventVisualUpdated();
             NotifyPropertyChanged();
-            NotifyPropertyChanged(nameof(HasGraphicsInTransitionScript), nameof(CanAddDynamicGraphicsToTransitionScript));
+            NotifyPropertiesChanged(nameof(HasGraphicsInTransitionScript), nameof(CanAddDynamicGraphicsToTransitionScript));
          }
       }
 
@@ -464,7 +464,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             graphicsText = value;
             if (!graphicsText.TryParseInt(out var result)) return;
             Graphics = result;
-            NotifyPropertyChanged(nameof(CanAddDynamicGraphicsToTransitionScript), nameof(HasGraphicsInTransitionScript));
+            NotifyPropertiesChanged(nameof(CanAddDynamicGraphicsToTransitionScript), nameof(HasGraphicsInTransitionScript));
             if (HasGraphicsInTransitionScript) LoadDynamicOverworldGraphicsCategories();
          }
       }
@@ -849,10 +849,40 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       public IPixelViewModel DefaultOW { get; }
-      public ObservableCollection<VisualComboOption> Options { get; } = new();
+
+      // The option lists below are large (every overworld sprite, every item, every trainer)
+      // and are only needed when this event is shown in the event panel.
+      // Object events get created for every event on the map, so build these lists on first use instead of in the constructor.
+      private readonly IReadOnlyList<IPixelViewModel> overworldSprites;
+      private ObservableCollection<VisualComboOption> options;
+      public ObservableCollection<VisualComboOption> Options {
+         get {
+            if (options == null) {
+               var list = new ObservableCollection<VisualComboOption>();
+               for (int i = 0; i < overworldSprites.Count; i++) list.Add(VisualComboOption.CreateFromSprite(i.ToString(), overworldSprites[i].PixelData, overworldSprites[i].PixelWidth, i, 2, true));
+               options = list;
+            }
+            return options;
+         }
+      }
+
       public FilteringComboOptions FacingOptions { get; } = new();
-      public ObservableCollection<string> ClassOptions { get; } = new();
-      public FilteringComboOptions ItemOptions { get; } = new();
+
+      private ObservableCollection<string> classOptions;
+      public ObservableCollection<string> ClassOptions => classOptions ??= new(element.Model.GetOptions(HardcodeTablesModel.TrainerClassNamesTable));
+
+      private readonly FilteringComboOptions itemOptions = new();
+      private bool itemOptionsLoaded;
+      public FilteringComboOptions ItemOptions {
+         get {
+            if (!itemOptionsLoaded) {
+               itemOptionsLoaded = true;
+               itemOptions.Update(ComboOption.Convert(element.Model.GetOptions(HardcodeTablesModel.ItemsTableName)), ItemContents);
+               itemOptions.Bind(nameof(itemOptions.SelectedIndex), (sender, e) => ItemContents = itemOptions.ModelValue);
+            }
+            return itemOptions;
+         }
+      }
 
       #region Extended Properties
 
@@ -888,11 +918,63 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       #region Trainer Content
 
-      public FilteringComboOptions TrainerOptions { get; } = new();
+      private readonly FilteringComboOptions trainerOptions = new();
+      private bool trainerOptionsLoaded;
+      public FilteringComboOptions TrainerOptions {
+         get {
+            if (!trainerOptionsLoaded) {
+               trainerOptionsLoaded = true;
+               RefreshTrainerOptions();
+               trainerOptions.Bind(nameof(trainerOptions.SelectedIndex), (options, args) => {
+                  this.eventTemplate.UseTrainerFlag(trainerOptions.SelectedIndex);
+                  var trainerContent = EventTemplate.GetTrainerContent(element.Model, this);
+                  element.Model.WriteMultiByteValue(trainerContent.TrainerIndexAddress, 2, () => element.Token, trainerOptions.SelectedIndex);
+                  TeamVisualizations.Clear();
+                  trainerSprite = null;
+                  trainerName = teamText = null;
+                  trainerBeforeText = trainerWinText = trainerAfterText = null;
+                  NotifyPropertiesChanged(nameof(TrainerSprite), nameof(TrainerName), nameof(TrainerBeforeTextEditor), nameof(TrainerWinTextEditor), nameof(TrainerAfterTextEditor), nameof(TrainerTeam), nameof(TrainerClass));
+               });
+            }
+            return trainerOptions;
+         }
+      }
 
       public bool ShowTrainerContent => EventTemplate.GetTrainerContent(element.Model, this) != null && TrainerType != 0;
 
-      public TextEditorViewModel TrainerContent { get; } = new();
+      // The trainer team editor is only needed when this event is shown in the event panel.
+      // Serializing the team (and rendering its icons) is expensive, so build it on first use.
+      private TextEditorViewModel trainerContentEditor;
+      private bool updatingTrainerContentEditor;
+      public TextEditorViewModel TrainerContent {
+         get {
+            if (trainerContentEditor == null) {
+               trainerContentEditor = new TextEditorViewModel { PreFormatter = new TrainerTextFormatter(element.Model) };
+               RefreshTrainerContentEditor();
+               trainerContentEditor.Bind(nameof(TextEditorViewModel.Content), (sender, e) => {
+                  if (updatingTrainerContentEditor) return;
+                  TrainerTeam = sender.Content;
+               });
+            }
+            return trainerContentEditor;
+         }
+      }
+
+      /// <summary>
+      /// Keep the team editor in sync with the team (for example, after picking a different trainer).
+      /// Without this, the editor keeps showing the previous trainer's team, and editing it would write that team into the new trainer.
+      /// </summary>
+      private void RefreshTrainerContentEditor() {
+         if (trainerContentEditor == null) return;
+         var text = TrainerTeam ?? string.Empty;
+         if (trainerContentEditor.Content == text) return;
+         updatingTrainerContentEditor = true;
+         try {
+            trainerContentEditor.Content = text;
+         } finally {
+            updatingTrainerContentEditor = false;
+         }
+      }
 
       public int TrainerClass {
          get {
@@ -961,7 +1043,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          for (int i = 0; i < trainers.Count; i++) {
             options.Add(CreateOption(i, trainerTable[i].GetValue(1), trainers[i]));
          }
-         TrainerOptions.Update(options, trainerContent?.TrainerIndex ?? 0);
+         trainerOptions.Update(options, trainerContent?.TrainerIndex ?? 0);
       }
 
       private TextEditorViewModel trainerBeforeText, trainerWinText, trainerAfterText;
@@ -1347,17 +1429,32 @@ show:
          ShowBerryContent
       );
 
-      public ObservableCollection<EventTextViewModel> BasicText { get; } = new();
-      public ObservableCollection<int> BasicItemAddresses { get; } = new();
-      public ObservableCollection<int> BasicFlagAddresses { get; } = new();
+      // The 'basic' content requires walking the event's script several times.
+      // It's only shown for the selected event, so it's filled the first time any of it is requested.
+      private bool basicContentLoaded;
+      private void EnsureBasicContent() {
+         if (basicContentLoaded) return;
+         basicContentLoaded = true;
+         if (ShowNoContent) FillBasicContent();
+      }
+
+      private readonly ObservableCollection<EventTextViewModel> basicText = new();
+      private readonly ObservableCollection<int> basicItemAddresses = new(), basicFlagAddresses = new();
+      private readonly FilteringComboOptions basicItem = new();
+      public ObservableCollection<EventTextViewModel> BasicText { get { EnsureBasicContent(); return basicText; } }
+      public ObservableCollection<int> BasicItemAddresses { get { EnsureBasicContent(); return basicItemAddresses; } }
+      public ObservableCollection<int> BasicFlagAddresses { get { EnsureBasicContent(); return basicFlagAddresses; } }
       private int basicFlag = -1;
-      public FilteringComboOptions BasicItem { get; } = new();
+      public FilteringComboOptions BasicItem { get { EnsureBasicContent(); return basicItem; } }
       public bool HasBasicItem => (BasicItem.AllOptions?.Count ?? 0) > 0;
-      public int BasicFlag { get => basicFlag; set => Set(ref basicFlag, value, old => NotifyPropertyChanged(nameof(HasBasicFlag))); }
-      public bool HasBasicFlag => basicFlag != -1;
+      public int BasicFlag {
+         get { EnsureBasicContent(); return basicFlag; }
+         set => Set(ref basicFlag, value, old => NotifyPropertyChanged(nameof(HasBasicFlag)));
+      }
+      public bool HasBasicFlag => BasicFlag != -1;
       private string basicFlagText = string.Empty;
       public string BasicFlagText {
-         get => basicFlagText;
+         get { EnsureBasicContent(); return basicFlagText; }
          set => Set(ref basicFlagText, value, old => {
             if (!basicFlagText.TryParseHex(out int result)) return;
             foreach (var address in BasicFlagAddresses) element.Model.WriteMultiByteValue(address, 2, Token, result);
@@ -1463,39 +1560,23 @@ show:
          this.gotoAddress = gotoAddress;
          this.eventTemplate = eventTemplate;
          this.berries = berries;
-         for (int i = 0; i < sprites.Count; i++) Options.Add(VisualComboOption.CreateFromSprite(i.ToString(), sprites[i].PixelData, sprites[i].PixelWidth, i, 2, true));
+         overworldSprites = sprites;
          DefaultOW = defaultSprite;
-         ShowGraphicsAsText = Graphics >= Options.Count;
+         ShowGraphicsAsText = Graphics >= sprites.Count;
          objectEvent.Model.TryGetList("FacingOptions", out var list);
          FacingOptions.Update(ComboOption.Convert(list), MoveType);
          FacingOptions.Bind(nameof(FacingOptions.SelectedIndex), (sender, e) => MoveType = FacingOptions.ModelValue);
-         foreach (var item in objectEvent.Model.GetOptions(HardcodeTablesModel.TrainerClassNamesTable)) ClassOptions.Add(item);
-         ItemOptions.Update(ComboOption.Convert(objectEvent.Model.GetOptions(HardcodeTablesModel.ItemsTableName)), ItemContents);
-         ItemOptions.Bind(nameof(ItemOptions.SelectedIndex), (sender, e) => ItemContents = ItemOptions.ModelValue);
-
-         RefreshTrainerOptions();
-         TrainerOptions.Bind(nameof(TrainerOptions.SelectedIndex), (options, args) => {
-            this.eventTemplate.UseTrainerFlag(TrainerOptions.SelectedIndex);
-            var trainerContent = EventTemplate.GetTrainerContent(element.Model, this);
-            element.Model.WriteMultiByteValue(trainerContent.TrainerIndexAddress, 2, () => element.Token, TrainerOptions.SelectedIndex);
-            TeamVisualizations.Clear();
-            trainerSprite = null;
-            trainerName = teamText = null;
-            trainerBeforeText = trainerWinText = trainerAfterText = null;
-            NotifyPropertiesChanged(nameof(TrainerSprite), nameof(TrainerName), nameof(TrainerBeforeTextEditor), nameof(TrainerWinTextEditor), nameof(TrainerAfterTextEditor), nameof(TrainerTeam), nameof(TrainerClass));
-         });
 
          tutorContent = new Lazy<TutorEventContent>(() => EventTemplate.GetTutorContent(element.Model, parser, this));
          martContent = new Lazy<MartEventContent>(() => EventTemplate.GetMartContent(element.Model, parser, this));
          tradeContent = new Lazy<TradeEventContent>(() => EventTemplate.GetTradeContent(element.Model, parser, this.ScriptAddress));
          legendaryContent = new Lazy<LegendaryEventContent>(() => EventTemplate.GetLegendaryEventContent(element.Model, parser, this));
-         if (ShowNoContent) FillBasicContent();
 
          UpdateScriptError(ScriptAddress);
 
-         TrainerContent.PreFormatter = new TrainerTextFormatter(objectEvent.Model);
-         TrainerContent.Content = TrainerTeam;
-         TrainerContent.Bind(nameof(TextEditorViewModel.Content), (sender, e) => TrainerTeam = sender.Content);
+         PropertyChanged += (sender, e) => {
+            if (e.PropertyName == nameof(TrainerTeam)) RefreshTrainerContentEditor();
+         };
       }
 
       public override int TopOffset => 16 - (EventRender?.PixelHeight ?? 0);
