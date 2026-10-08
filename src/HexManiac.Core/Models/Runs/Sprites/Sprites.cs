@@ -121,6 +121,14 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
                primarySource = spriteRun.PointerSources[i];
                break;
             }
+            // no array source: fall back to any table source (ex: a sprite/palette pair inside a `[sprite<> palette<>]1` sub-table)
+            if (primarySource == -1) {
+               for (int i = 0; i < pointerCount; i++) {
+                  if (!(model.GetNextRun(spriteRun.PointerSources[i]) is ITableRun)) continue;
+                  primarySource = spriteRun.PointerSources[i];
+                  break;
+               }
+            }
          }
          var spriteTable = model.GetNextRun(primarySource) as ITableRun;
          var offset = spriteTable?.ConvertByteOffsetToArrayOffset(primarySource) ?? new ArrayOffset(-1, -1, -1, -1);
@@ -163,6 +171,27 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
                if (identifierValuePair.Length == 2) {
                   var paletteTable = model.GetNextRun(model.GetAddressFromAnchor(noChange, -1, tableKeyPair[0])) as ITableRun;
                   var segment = paletteTable?.ElementContent.FirstOrDefault(seg => seg.Name == identifierValuePair[0]);
+
+                  // option 3b: the identifier names one or more palette-pointer fields of that table and the value is the (hex) element index.
+                  // Example: `osl|data.pokemon.stats:owPalette,owShinyPalette` -> frames get the hint "data.pokemon.stats:owPalette,owShinyPalette=0019"
+                  // and use the overworld palettes stored in species 0x19's own element.
+                  var fieldNames = identifierValuePair[0].Split(',');
+                  var paletteFields = paletteTable?.ElementContent.Where(seg => fieldNames.Contains(seg.Name) && seg is ArrayRunPointerSegment pSeg &&
+                     (PaletteRun.TryParsePaletteFormat(pSeg.InnerFormat, out var _) || LzPaletteRun.TryParsePaletteFormat(pSeg.InnerFormat, out var _))).ToList();
+                  if (paletteFields != null && paletteFields.Count > 0 && paletteFields.Count == fieldNames.Length) {
+                     // prefer the element that actually (transitively) points at this sprite; fall back to the index in the hint.
+                     var elementIndex = FindOwningElementIndex(model, spriteRun, paletteTable);
+                     if (elementIndex == -1 && int.TryParse(identifierValuePair[1], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hintIndex)) elementIndex = hintIndex;
+                     if (elementIndex >= 0 && elementIndex < paletteTable.ElementCount) {
+                        foreach (var field in paletteFields) {
+                           var fieldOffset = paletteTable.ElementContent.Until(seg => seg == field).Sum(seg => seg.Length);
+                           var paletteStart = model.ReadPointer(paletteTable.Start + elementIndex * paletteTable.ElementLength + fieldOffset);
+                           if (model.GetNextRun(paletteStart) is IPaletteRun fieldPalette && fieldPalette.Start == paletteStart) results.Add(fieldPalette);
+                        }
+                     }
+                     return results;
+                  }
+
                   var pSegment = paletteTable?.ElementContent.FirstOrDefault(seg => seg is ArrayRunPointerSegment pSeg && PaletteRun.TryParsePaletteFormat(pSeg.InnerFormat, out var _));
                   if (pSegment == null) pSegment = paletteTable?.ElementContent.FirstOrDefault(seg => seg is ArrayRunPointerSegment pSeg && LzPaletteRun.TryParsePaletteFormat(pSeg.InnerFormat, out var _));
                   var rawValue = identifierValuePair[1];
@@ -204,6 +233,32 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
             }
          }
          return results;
+      }
+
+      /// <summary>
+      /// Walk up the pointer chain (sprite -> frame list -> table element ...) to find which element of 'table' owns this run.
+      /// Returns -1 if the run isn't reachable from the table within a few hops.
+      /// </summary>
+      public static int FindOwningElementIndex(IDataModel model, IFormattedRun run, ITableRun table, int maxDepth = 4) {
+         var visited = new HashSet<int>();
+         var frontier = new List<IFormattedRun> { run };
+         for (int depth = 0; depth < maxDepth && frontier.Count > 0; depth++) {
+            var next = new List<IFormattedRun>();
+            foreach (var current in frontier) {
+               if (current?.PointerSources == null) continue;
+               foreach (var source in current.PointerSources) {
+                  if (source >= table.Start && source < table.Start + table.Length) {
+                     return table.ConvertByteOffsetToArrayOffset(source).ElementIndex;
+                  }
+                  var owner = model.GetNextRun(source);
+                  if (owner == null || owner.Start > source || owner is not ITableRun) continue;
+                  if (!visited.Add(owner.Start)) continue;
+                  next.Add(owner);
+               }
+            }
+            frontier = next;
+         }
+         return -1;
       }
 
       /// <summary>

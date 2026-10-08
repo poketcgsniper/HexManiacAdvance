@@ -89,7 +89,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          var width = widthOffset >= 0 ? Math.Max(1, model.ReadMultiByteValue(elementStart + widthOffset, 2)) : 0;
          var height = heightOffset >= 0 ? Math.Max(1, model.ReadMultiByteValue(elementStart + heightOffset, 2)) : 0;
          // if there was no height/width found, assume that it's square and based on the first element length
-         var pixelCount = model.ReadMultiByteValue(start + 4, 4) * 2; // number of pixels is twice the number of bytes for all OW sprites
+         // (the size is a u16: pokeemerald-expansion uses the next byte as a 'relativeFrames' flag)
+         var pixelCount = model.ReadMultiByteValue(start + 4, 2) * 2; // number of pixels is twice the number of bytes for all OW sprites
          bool adjustDimensions = true;
          if (width == 0) { width = (int)Math.Sqrt(pixelCount); adjustDimensions = true; }
          if (height == 0) { height = width; adjustDimensions = true; }
@@ -120,14 +121,30 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
             format = $"`ucs4x{tileWidth}x{tileHeight}`";
             hint = string.Empty;
          }
+
+         // pokeemerald-expansion 'relative frames': a single entry whose data is one LZ-compressed image holding every frame.
+         // Show it as one tall sprite (frames stacked top to bottom) instead of trying to read the compressed bytes as pixels.
+         var byteLength = tileWidth * tileHeight * TileSize;
+         var relativeFrames = model.ReadMultiByteValue(start + 6, 1) != 0;
+         var firstFrame = model.ReadPointer(start);
+         var compressedFrames = 0;
+         if (relativeFrames && firstFrame >= 0 && firstFrame + 4 <= model.Count && model[firstFrame] == 0x10) {
+            var decompressedLength = model.ReadMultiByteValue(firstFrame + 1, 3);
+            if (byteLength > 0 && decompressedLength % byteLength == 0 && decompressedLength / byteLength <= 64) compressedFrames = decompressedLength / byteLength;
+         }
+         if (compressedFrames > 0) {
+            format = string.IsNullOrEmpty(hint) ? $"`lzs4x{tileWidth}x{tileHeight * compressedFrames}`" : $"`lzs4x{tileWidth}x{tileHeight * compressedFrames}|{hint}`";
+         }
          segments[0] = new ArrayRunPointerSegment(model.FormatRunFactory, "sprite", format);
 
          // calculate the element count
-         var byteLength = tileWidth * tileHeight * TileSize;
          var nextAnchorStart = model.GetNextAnchor(Start + 1).Start;
          ElementCount = 0;
          Length = 0;
-         if (elementCount == -1) {
+         if (compressedFrames > 0) {
+            ElementCount = 1;
+            Length = ElementLength;
+         } else if (elementCount == -1) {
             while (Start + Length < nextAnchorStart) {
                var destination = model.ReadPointer(start + Length);
                if (destination < 0 || destination >= model.Count) break;
@@ -145,7 +162,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
 
          ElementCount = Math.Max(ElementCount, 1);
          Length = Math.Max(ElementLength, Length);
-         SpriteFormat = new SpriteFormat(4, tileWidth, tileHeight, hint);
+         SpriteFormat = new SpriteFormat(4, tileWidth, compressedFrames > 0 ? tileHeight * compressedFrames : tileHeight, hint);
          ElementNames = ElementCount.Range().Select(i => string.Empty).ToList();
       }
 
@@ -200,6 +217,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
             for (int i = 0; i < ElementCount; i++) {
                var spriteStart = model.ReadPointer(Start + ElementLength * i);
                var sprite = model.GetNextRun(spriteStart) as ISpriteRun;
+               if (sprite is LzSpriteRun) continue; // compressed relative-frame image: can't be resized in place
                if (!movedRuns.Contains(sprite) && sprite != null) {
                   sprite = Resize(model, token, sprite, newTileWidth, newTileHeight);
                   movedRuns.Add(sprite);
