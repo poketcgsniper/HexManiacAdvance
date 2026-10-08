@@ -24,7 +24,16 @@ jobs:
 
       - name: Run unit tests
         continue-on-error: true
-        run: dotnet test src/HexManiac.Tests --no-build -c Release -p:PlatformTarget=x64 --logger "trx;LogFileName=results.trx"
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue' # stderr output from dotnet must not abort the script before the summary is recorded
+          dotnet test src/HexManiac.Tests --no-build -c Release -p:PlatformTarget=x64 --logger "trx;LogFileName=results.trx" 2>&1 | Tee-Object -FilePath test-output.txt
+          # record the one-line summary (e.g. "Passed! - Failed: 0, Passed: 1234, Skipped: 0, Total: 1234") where it can be read without the full log
+          $summary = (Select-String -Path test-output.txt -Pattern '^(Passed|Failed)!.*' | Select-Object -Last 1).Line
+          if (-not $summary) { $summary = "test run did not produce a summary (see test-output.txt)" }
+          "TEST_SUMMARY=$summary" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Select-String -Path test-output.txt -Pattern '^\s*Failed ' | Select-Object -First 50 | ForEach-Object { $_.Line } | Out-File -FilePath failed-tests.txt
+          "## Unit tests`n`n$summary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
       - name: Zip the build output
         shell: pwsh
@@ -32,6 +41,8 @@ jobs:
           $version = (Select-String -Path src/SharedAssemblyInfo.cs -Pattern 'AssemblyVersion\("([^"]+)"\)').Matches[0].Groups[1].Value
           Compress-Archive -Path artifacts/HexManiac.WPF/bin/Release/net6.0-windows/* -DestinationPath "HexManiacAdvance_x64.$version-perf.zip"
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $failed = if (Test-Path failed-tests.txt) { (Get-Content failed-tests.txt) -join "`n" } else { "" }
+          "FAILED_TESTS<<EOF`n$failed`nEOF" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -44,7 +55,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: '**/results.trx'
+          path: |
+            **/results.trx
+            test-output.txt
           if-no-files-found: ignore
 
       - name: Publish release
@@ -55,4 +68,7 @@ jobs:
           body: |
             Automated build of the `perf-stability-0.6.1` branch (0.6.1 plus performance and stability fixes).
             Download the zip below, extract it anywhere, and run `HexManiacAdvance.exe`.
+
+            Unit tests: ${{ env.TEST_SUMMARY }}
+            ${{ env.FAILED_TESTS }}
           files: HexManiacAdvance_x64.*.zip
