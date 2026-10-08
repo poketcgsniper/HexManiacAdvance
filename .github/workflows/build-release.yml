@@ -27,13 +27,19 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue' # stderr output from dotnet must not abort the script before the summary is recorded
-          dotnet test src/HexManiac.Tests --no-build -c Release -p:PlatformTarget=x64 --logger "trx;LogFileName=results.trx" 2>&1 | Tee-Object -FilePath test-output.txt
+          dotnet test src/HexManiac.Tests -c Release -p:PlatformTarget=x64 --logger "trx;LogFileName=results.trx" 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath test-output.txt
+          $testExitCode = $LASTEXITCODE
           # record the one-line summary (e.g. "Passed! - Failed: 0, Passed: 1234, Skipped: 0, Total: 1234") where it can be read without the full log
-          $summary = (Select-String -Path test-output.txt -Pattern '^(Passed|Failed)!.*' | Select-Object -Last 1).Line
-          if (-not $summary) { $summary = "test run did not produce a summary (see test-output.txt)" }
+          $summary = (Select-String -Path test-output.txt -Pattern '(Passed|Failed)!\s+-' | Select-Object -Last 1).Line
+          if (-not $summary) { $summary = "no summary line found (dotnet test exit code $testExitCode)" }
           "TEST_SUMMARY=$summary" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Select-String -Path test-output.txt -Pattern '^\s*Failed ' | Select-Object -First 50 | ForEach-Object { $_.Line } | Out-File -FilePath failed-tests.txt
+          $details = @()
+          $details += Select-String -Path test-output.txt -Pattern '^\s*Failed ' | Select-Object -First 50 | ForEach-Object { $_.Line }
+          $details += "--- last 40 lines of test output ---"
+          $details += Get-Content test-output.txt -Tail 40
+          $details -join "`n" | Out-File -FilePath failed-tests.txt
           "## Unit tests`n`n$summary" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          exit $testExitCode
 
       - name: Zip the build output
         shell: pwsh
