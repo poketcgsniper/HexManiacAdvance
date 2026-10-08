@@ -34,7 +34,8 @@ jobs:
           if (-not $summary) { $summary = "no summary line found (dotnet test exit code $testExitCode)" }
           "TEST_SUMMARY=$summary" | Out-File -FilePath $env:GITHUB_ENV -Append
           $details = @()
-          $details += Select-String -Path test-output.txt -Pattern '^\s*Failed ' | Select-Object -First 50 | ForEach-Object { $_.Line }
+          # each failed test, with the error message and the first lines of its stack trace
+          $details += Select-String -Path test-output.txt -Pattern '^\s*Failed ' -Context 0,14 | Select-Object -First 20 | ForEach-Object { @($_.Line) + ($_.Context.PostContext | ForEach-Object { "    $_" }) }
           $details += "--- last 40 lines of test output ---"
           $details += Get-Content test-output.txt -Tail 40
           $details -join "`n" | Out-File -FilePath failed-tests.txt
