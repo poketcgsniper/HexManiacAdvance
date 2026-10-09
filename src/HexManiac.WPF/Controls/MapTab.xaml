@@ -1349,7 +1349,8 @@
                <local:AngleBorder  Grid.Row="1" Content="Music:" Direction="Left" />
                <Grid Grid.Row="1" Grid.Column="1" Visibility="{Binding HasMusicOptions, Converter={StaticResource BoolToVisibility}}">
                   <!-- type in the box to search the song list -->
-                  <local:AngleComboBox DataContext="{Binding MusicFilter}" Direction="Out" Margin="0,2,4,2" />
+                  <local:AngleComboBox DataContext="{Binding MusicFilter}" Direction="Out" Margin="0,2,4,2"
+                                       ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" />
                </Grid>
 
                <local:AngleBorder  Grid.Row="2" Content="Cave:" Direction="Left" />
