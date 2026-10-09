@@ -303,8 +303,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var width = PixelWidth;
          var height = PixelHeight;
          RefreshMapSize();
-         LeftEdge -= (PixelWidth - width) / 2;
-         TopEdge -= (PixelHeight - height) / 2;
+         // the picture grows or shrinks around its center. The edges are in screen pixels, but the sizes are in picture pixels: scale the change
+         // (without this the map jumps sideways whenever the borders appear or disappear while zoomed)
+         LeftEdge -= (int)((PixelWidth - width) / 2 * SpriteScale);
+         TopEdge -= (int)((PixelHeight - height) / 2 * SpriteScale);
       }
 
       private IPixelViewModel borderBlock;
@@ -651,17 +653,41 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public void Scale(double x, double y, bool enlarge) {
          (lastDrawX, lastDrawY) = (-1, -1);
          var old = spriteScale;
-
-         if (enlarge && spriteScale < 10) {
-            if (spriteScale < 1) spriteScale *= 2;
-            else spriteScale += 1;
-         } else if (!enlarge && spriteScale > .1) {
-            if (spriteScale > 1) spriteScale -= 1;
-            else spriteScale /= 2;
-         }
-
+         spriteScale = NextScale(spriteScale, enlarge);
          if (old != spriteScale) UpdateEdgesFromScale(old, x - leftEdge, y - topEdge);
          NotifyPropertyChanged(nameof(SpriteScale));
+      }
+
+      /// <summary>The scale one zoom step away: whole numbers from 1 to 10, then halves below 1 (down to 1/16).</summary>
+      public static double NextScale(double scale, bool enlarge) {
+         if (enlarge && scale < 10) {
+            if (scale < 1) return scale * 2;
+            return scale + 1;
+         } else if (!enlarge && scale > .1) {
+            if (scale > 1) return scale - 1;
+            return scale / 2;
+         }
+         return scale;
+      }
+
+      /// <summary>
+      /// One frame of a zoom animation: put the map at the given scale, so that the screen point (x, y) stays over the same spot of the map.
+      /// The position is worked out from where the map was when the zoom started (startLeft, startTop, startScale), not from where it is now,
+      /// so the rounding of one frame doesn't add up over the animation. With whole-pixel start values and the final scale this gives
+      /// the same position that Scale gives.
+      /// Returns the exact position (the edges themselves are whole pixels). A zoom that gets redirected starts from the exact position:
+      /// at a small scale one pixel of rounding is many pixels once the map is zoomed in.
+      /// </summary>
+      public (double left, double top) ZoomFrame(double startLeft, double startTop, double startScale, double x, double y, double scale) {
+         (lastDrawX, lastDrawY) = (-1, -1);
+         var changed = spriteScale != scale;
+         spriteScale = scale;
+         var factor = 1 - scale / startScale;
+         var (dx, dy) = ((x - startLeft) * factor, (y - startTop) * factor);
+         LeftEdge = (int)Math.Round(startLeft) + (int)dx;
+         TopEdge = (int)Math.Round(startTop) + (int)dy;
+         if (changed) NotifyPropertyChanged(nameof(SpriteScale));
+         return (startLeft + dx, startTop + dy);
       }
 
       // check for other warps on this same tile and see what primary/secondary blockset is expected for the new map.

@@ -34,18 +34,51 @@ namespace HavenSoft.HexManiac.WPF.Controls {
             oldContext.PropertyChanged -= HandleContextPropertyChanged;
             oldContext.AutoscrollBlocks -= AutoscrollBlocks;
             oldContext.AutoscrollTiles -= AutoscrollTiles;
+            StopZoomFrames();
+            oldContext.FinishZoomAnimation(); // nothing will draw the rest of a zoom that's still going: put the maps where it was heading
          }
          var newContext = e.NewValue as MapEditorViewModel;
          if (newContext != null) {
             newContext.PropertyChanged += HandleContextPropertyChanged;
             newContext.AutoscrollBlocks += AutoscrollBlocks;
             newContext.AutoscrollTiles += AutoscrollTiles;
+            if (newContext.IsZoomAnimating) StartZoomFrames();
          }
       }
 
       private void HandleContextPropertyChanged(object sender, PropertyChangedEventArgs e) {
-         // TODO any custom property logic here
+         if (e.PropertyName == nameof(MapEditorViewModel.IsZoomAnimating)) {
+            if (((MapEditorViewModel)sender).IsZoomAnimating) StartZoomFrames();
+            else StopZoomFrames();
+         }
       }
+
+      #region Zoom Animation
+
+      // The view model works out where the maps go in each frame (MapEditorViewModel.AdvanceZoomAnimation). This is only the metronome:
+      // one call per rendered frame while a zoom is gliding.
+      private bool isZoomFrameHooked;
+
+      private void StartZoomFrames() {
+         if (isZoomFrameHooked) return;
+         isZoomFrameHooked = true;
+         MapButtons.Visibility = Visibility.Hidden; // the buttons on the edges of the map are placed when the zoom is done: don't show them where the map used to be
+         CompositionTarget.Rendering += OnZoomFrame;
+      }
+
+      private void StopZoomFrames() {
+         if (!isZoomFrameHooked) return;
+         isZoomFrameHooked = false;
+         CompositionTarget.Rendering -= OnZoomFrame;
+         MapButtons.Visibility = Visibility.Visible;
+      }
+
+      private void OnZoomFrame(object sender, EventArgs e) {
+         var vm = DataContext as MapEditorViewModel;
+         if (vm == null || !vm.AdvanceZoomAnimation()) StopZoomFrames();
+      }
+
+      #endregion
 
       private void AutoscrollBlocks(object sender, EventArgs e) {
          var scrollRange = BlockViewer.ExtentHeight - BlockViewer.ViewportHeight;

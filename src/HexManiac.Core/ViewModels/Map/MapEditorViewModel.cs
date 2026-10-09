@@ -400,6 +400,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       public void NavigateTo(int bank, int map, int x, int y) {
+         FinishZoomAnimation();
          viewPort.Tools?.LogTool?.LogMessages.Add($"Navigate to ({x}, {y}) in map {bank}.{map}");
          if (primaryMap != null) {
             backStack.Add(primaryMap.MapID);
@@ -497,6 +498,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       private void UpdatePrimaryMap(BlockMapViewModel map) {
+         FinishZoomAnimation(); // the neighbors are placed relative to the maps, so the maps have to be where they're going
          if (!map.IsValidMap) {
             if (primaryMap != null && primaryMap.IsValidMap) return;
             map = VisibleMaps.FirstOrDefault(vis => vis.IsValidMap);
@@ -1654,21 +1656,139 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       #endregion
 
-      public void Zoom(double x, double y, bool enlarge) {
+      #region Zoom
+
+      /// <summary>Zooming glides from the old scale to the new one. Replace this to change the speed (a duration of 0 zooms instantly) or the clock (in tests).</summary>
+      public ZoomAnimator ZoomAnimator { get; set; } = new ZoomAnimator();
+
+      /// <summary>True while the maps are gliding to a new zoom. The view calls AdvanceZoomAnimation once per frame until this is false again.</summary>
+      public bool IsZoomAnimating => ZoomAnimator.IsAnimating;
+
+      // Where every map was when the current zoom started and which point stays still, so each frame can be worked out from the start.
+      private class ZoomPlacement {
+         public BlockMapViewModel Map;
+         public double StartLeft, StartTop, StartScale; // where the map was when this zoom (or the last time it was redirected) started
+         public double Left, Top;                       // where it is now. The edges are whole pixels, these aren't.
+      }
+      private readonly List<ZoomPlacement> zoomPlacements = new();
+      private BlockMapViewModel zoomMap; // the map under the cursor: it becomes the primary map when the zoom is done
+      private double zoomAnchorX, zoomAnchorY;
+
+      /// <summary>
+      /// Zoom one step in or out around the point (x, y) of the map view.
+      /// Every step goes from the scale the zoom is heading for, so a quick series of steps ends up exactly where the same number of instant steps would.
+      /// </summary>
+      public void Zoom(double x, double y, bool enlarge) => Zoom(x, y, enlarge, true);
+
+      private void Zoom(double x, double y, bool enlarge, bool animate) {
          var map = MapUnderCursor(x, y);
          if (map == null) map = primaryMap;
+         var isAnimating = ZoomAnimator.IsAnimating;
+         var current = isAnimating ? ZoomAnimator.Target : map.SpriteScale;
+         var target = BlockMapViewModel.NextScale(current, enlarge);
+         Tutorials.Complete(Tutorial.Wheel_ZoomMap);
+
+         if (animate && isAnimating && target == current) return; // already at the limit, and heading there
+
+         if (animate && target != current) {
+            BeginZoom(map, x, y, target);
+            return;
+         }
+
+         FinishZoomAnimation();
          map.Scale(x, y, enlarge);
          map.IncludeBorders = map.SpriteScale <= 3;
          UpdatePrimaryMap(map);
-         if (map.SpriteScale >= 1) ZoomLevel = $"{(int)map.SpriteScale}x Zoom";
-         else ZoomLevel = $"1/{(int)Math.Round(1 / map.SpriteScale)}x Zoom";
-         Tutorials.Complete(Tutorial.Wheel_ZoomMap);
+         UpdateZoomLevel(map.SpriteScale);
+      }
+
+      private void BeginZoom(BlockMapViewModel map, double x, double y, double target) {
+         // remember where the maps are right now (this includes any zoom that's still going): the frames are worked out from here
+         var previous = zoomPlacements.ToDictionary(placement => placement.Map);
+         zoomPlacements.Clear();
+         var includeBorders = target <= 3; // the borders around the maps are only shown when zoomed out
+         foreach (var visible in VisibleMaps) {
+            var placement = new ZoomPlacement { Map = visible, StartScale = visible.SpriteScale };
+            var (left, top) = previous.TryGetValue(visible, out var old) ? (old.Left, old.Top) : (visible.LeftEdge, visible.TopEdge);
+            if (visible.IncludeBorders != includeBorders) {
+               // the borders appear or disappear as soon as the zoom heads for the other side of that line. The picture grows or shrinks around its center.
+               var (width, height) = (visible.PixelWidth, visible.PixelHeight);
+               visible.IncludeBorders = includeBorders;
+               left -= (visible.PixelWidth - width) / 2.0 * visible.SpriteScale;
+               top -= (visible.PixelHeight - height) / 2.0 * visible.SpriteScale;
+               (visible.LeftEdge, visible.TopEdge) = ((int)Math.Round(left), (int)Math.Round(top));
+            }
+            (placement.StartLeft, placement.StartTop, placement.Left, placement.Top) = (left, top, left, top);
+            zoomPlacements.Add(placement);
+         }
+         (zoomMap, zoomAnchorX, zoomAnchorY) = (map, x, y);
+
+         if (ZoomAnimator.IsAnimating) ZoomAnimator.Retarget(target);
+         else ZoomAnimator.Start(map.SpriteScale, target);
+         UpdateZoomLevel(target);
+
+         if (ZoomAnimator.IsAnimating) {
+            NotifyPropertyChanged(nameof(IsZoomAnimating));
+         } else {
+            FinishZoom(target); // animation is turned off
+         }
+      }
+
+      /// <summary>
+      /// Move the maps one frame along the zoom animation. Returns true while there are more frames to come.
+      /// The view calls this about 60 times per second while IsZoomAnimating is true.
+      /// </summary>
+      public bool AdvanceZoomAnimation() {
+         if (!ZoomAnimator.IsAnimating) return false;
+         var scale = ZoomAnimator.Update();
+         if (ZoomAnimator.IsAnimating) {
+            PlaceMapsForZoom(scale);
+            return true;
+         }
+         FinishZoom(scale);
+         return false;
+      }
+
+      /// <summary>Jump to the end of a zoom that's still gliding. Anything that moves or replaces the maps needs them to be where they're going.</summary>
+      public void FinishZoomAnimation() {
+         if (!ZoomAnimator.IsAnimating) return;
+         var target = ZoomAnimator.Target;
+         ZoomAnimator.Snap(target);
+         FinishZoom(target);
+      }
+
+      private void PlaceMapsForZoom(double scale) {
+         foreach (var placement in zoomPlacements) {
+            if (!VisibleMaps.Contains(placement.Map)) continue;
+            (placement.Left, placement.Top) = placement.Map.ZoomFrame(placement.StartLeft, placement.StartTop, placement.StartScale, zoomAnchorX, zoomAnchorY, scale);
+         }
+      }
+
+      private void FinishZoom(double scale) {
+         PlaceMapsForZoom(scale);
+         var map = zoomMap;
+         zoomPlacements.Clear();
+         zoomMap = null;
+         if (map != null) {
+            map.IncludeBorders = map.SpriteScale <= 3;
+            UpdatePrimaryMap(map);
+            UpdateZoomLevel(map.SpriteScale);
+         }
+         NotifyPropertyChanged(nameof(IsZoomAnimating));
+      }
+
+      private void UpdateZoomLevel(double scale) {
+         if (scale >= 1) ZoomLevel = $"{(int)scale}x Zoom";
+         else ZoomLevel = $"1/{(int)Math.Round(1 / scale)}x Zoom";
       }
 
       public void ResetZoom() {
-         while (primaryMap.SpriteScale > 1) Zoom(0, 0, false);
-         while (primaryMap.SpriteScale < 1) Zoom(0, 0, true);
+         FinishZoomAnimation();
+         while (primaryMap.SpriteScale > 1) Zoom(0, 0, false, false);
+         while (primaryMap.SpriteScale < 1) Zoom(0, 0, true, false);
       }
+
+      #endregion
 
       private StubCommand panCommand, zoomCommand, deleteCommand, cancelCommand;
       public ICommand PanCommand => StubCommand<MapDirection>(ref panCommand, Pan);
@@ -1735,6 +1855,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       private void Pan(int intX, int intY) {
+         FinishZoomAnimation();
          foreach (var map in VisibleMaps) {
             map.LeftEdge += intX;
             map.TopEdge += intY;
