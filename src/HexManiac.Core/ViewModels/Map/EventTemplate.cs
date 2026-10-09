@@ -427,7 +427,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private void WriteExpansionTrainer(ModelDelta token, ModelArrayElement trainer, int trainerIndex, TrainerPreference pref, int teamSize, int teamStart) {
          // start from a clean record: ai flags, items, starting status, mugshot, ... are all 0
          for (int i = 0; i < trainer.Length; i++) token.ChangeData(model, trainer.Start + i, 0);
-         trainer.SetStringValue("name", "NAME ME");
+         trainer.SetStringValue("name", "Name Me");
          trainer.SetValue("class", pref.TrainerClass);
          trainer.SetValue("introMusicAndGender", pref.MusicAndGender);
          trainer.SetValue("sprite", pref.Sprite);
