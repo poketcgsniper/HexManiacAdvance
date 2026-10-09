@@ -229,7 +229,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       public void RunQuickEdit(IQuickEditItem edit) {
-         var tab = tabs[SelectedIndex];
+         var tab = SelectedIndex.InRange(0, tabs.Count) ? tabs[SelectedIndex] : null;
+         if (tab == null && edit is not IStandaloneQuickEdit) return; // only standalone utilities can run without an open tab
          if (tab is MapEditorViewModel map) { TabChangeRequested(map, new(map.ViewPort)); tab = map.ViewPort; }
          var viewPort = tab as IViewPort;
          gotoViewModel.ControlVisible = false;
@@ -237,7 +238,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          errorTask.ContinueWith(ContinueQuickEdit, TaskContinuationOptions.ExecuteSynchronously);
       }
       private void ContinueQuickEdit(Task<ErrorInfo> completedTask) {
-         var viewPort = tabs[SelectedIndex] as IViewPort;
+         var viewPort = SelectedIndex.InRange(0, tabs.Count) ? tabs[SelectedIndex] as IViewPort : null;
          if (viewPort is IEditableViewPort editableViewPort) editableViewPort.ClearProgress();
          var error = completedTask.Result;
          if (!error.HasError) return;
@@ -547,6 +548,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             new RomOverview(),
             new DecapNames(),
             new ApplyCFRUPatch { Editor = this },
+            new ApplyCubePatch(this),
             new OpenSpriteGallery(),
             new OpenSoundEditor(),
             new OpenAnimatedTiles(),
@@ -780,6 +782,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       public void CopyMessage() => fileSystem.CopyText = InformationMessage;
+
+      /// <summary>Lets a long-running utility tell the user what it is doing (shown like any other information message).</summary>
+      public void ShowStatus(string message) => InformationMessage = message;
 
       public void CopyError() => fileSystem.CopyText = ErrorMessage;
 

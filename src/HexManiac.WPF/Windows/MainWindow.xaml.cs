@@ -245,6 +245,7 @@ namespace HavenSoft.HexManiac.WPF.Windows {
       private ICommand CreateQuickEditCommand(IQuickEditItem edit) {
          var command = new StubCommand {
             CanExecute = arg => {
+               if (edit is IStandaloneQuickEdit) return true; // works without an open tab (it asks for the file)
                if (ViewModel.SelectedIndex < 0) return false;
                var tab = ViewModel[ViewModel.SelectedIndex];
                if (tab is MapEditorViewModel map) tab = map.ViewPort;
