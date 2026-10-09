@@ -53,6 +53,24 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
       public int Phase { get; init; }
    }
 
+   /// <summary>How the tileset's own picture of the tiles an animation covers compares with the animation's first frame.</summary>
+   public enum FirstFrameState {
+      /// <summary>The frame or the tileset graphics can't be read.</summary>
+      Unknown,
+      /// <summary>The tileset shows the first frame: the map editor's tile picker and the game (before the first tick) show the same thing.</summary>
+      InSync,
+      /// <summary>Every one of the tileset's tiles in that range is blank, so the animation can't be seen in the tileset (nothing to pick in the block editor).</summary>
+      TilesetBlank,
+      /// <summary>The tileset has a different picture there.</summary>
+      Different,
+   }
+
+   /// <summary>What <see cref="TilesetAnimations.ShowFirstFrameInTileset"/> did.</summary>
+   /// <param name="ChangedTiles">How many tiles of the tileset now have a different picture.</param>
+   /// <param name="SkippedTiles">How many tiles could not be written (past what the tileset can hold, or past the end of a tileset that is not compressed).</param>
+   /// <param name="Failed">True if the tileset's graphics could not be read or written at all.</param>
+   public record TilesetSyncResult(int ChangedTiles, int SkippedTiles, bool Failed);
+
    /// <summary>
    /// Installs and edits table-driven tileset animations in a pokeemerald/pokeemerald-expansion ROM.
    /// The table format is the same one HexManiacAdvance uses for FireRed: [animations{mat} frames: timer. tiles. tileOffset::]!FEFEFEFE,
@@ -394,7 +412,9 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
                   model.ClearFormatAndData(token, frameAddress, 32 * tileCount);
                }
             }
-            model.ClearPointer(token, entry, framesAddress);
+            // clear the frame table while the table that points at it still says how long it is:
+            // once its pointer is cleared the run loses its length (the element count is read through that pointer),
+            // and clearing it then would wipe everything that follows (up to 256KB) instead of the 4*frameCount bytes
             model.ClearFormatAndData(token, framesAddress, 4 * frameCount);
          }
          // shift later entries down
@@ -461,6 +481,143 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          Array.Copy(model.RawData, frameAddress, data, 0, data.Length);
          return data;
       }
+
+      #region The first frame in the tileset
+
+      // The game copies each frame into video memory when the animation ticks, so the tileset graphics HexManiac shows (the Animated Tiles tab, the map editor's tile picker
+      // and block editor) never contain an animated tile unless the first frame is also stored in the tileset's own picture. Frame 1 is what the game shows before the first tick, too.
+
+      /// <summary>How many tiles fit in the tileset's half of video memory.</summary>
+      private int VideoTileLimit(bool isSecondary) {
+         var primaryTiles = TilesetAnimationConstants.TryRead(model, out var constants) ? constants.PrimaryTiles : (model.IsFRLG() ? 640 : 512);
+         return isSecondary ? Math.Max(1, 1024 - primaryTiles) : primaryTiles;
+      }
+
+      /// <summary>
+      /// The run that holds the tileset's compressed tiles. The tileset header is passed along as its pointer source, so that moving the tiles (they usually get a few bytes
+      /// longer when they are compressed again) also changes the header, even when nothing registered the data as a tileset yet.
+      /// </summary>
+      private LzTilesetRun FindTilesetRun(int tilesetStart) {
+         var start = model.ReadPointer(tilesetStart + 4);
+         if (start < 0 || start >= model.Count) return null;
+         if (model.GetNextRun(start) is LzTilesetRun registered && registered.Start == start) return registered;
+         // reading the tiles registers them as a tileset (replacing a plain pointer target or a fixed-size picture), as every other reader of a tileset does
+         new BlocksetModel(model, tilesetStart).ReadTiles();
+         if (model.GetNextRun(start) is LzTilesetRun created && created.Start == start) return created;
+         return new LzTilesetRun(new TilesetFormat(4, null), model, start, SortedSpan.One(tilesetStart + 4));
+      }
+
+      /// <summary>The tileset's own graphics as one block of 4bpp tiles (32 bytes each), or null if they can't be read.</summary>
+      public byte[] ReadTilesetData(int tilesetStart) {
+         if (tilesetStart < 0 || tilesetStart + 8 > model.Count) return null;
+         var start = model.ReadPointer(tilesetStart + 4);
+         if (start < 0 || start >= model.Count) return null;
+         var blockset = new BlocksetModel(model, tilesetStart);
+         if (blockset.IsCompressed) return FindTilesetRun(tilesetStart)?.GetData();
+         var tiles = blockset.ReadTiles();
+         if (tiles == null) return null;
+         var data = new byte[Math.Min(tiles.Length * 32, model.Count - start)];
+         Array.Copy(model.RawData, start, data, 0, data.Length);
+         return data;
+      }
+
+      /// <summary>Compare the first frame of an animation with the tileset's graphics (see <see cref="ReadTilesetData"/>).</summary>
+      public FirstFrameState CompareFirstFrame(byte[] tilesetData, TilesetAnimationEntry entry) {
+         if (tilesetData == null || entry == null || entry.FirstTile < 0) return FirstFrameState.Unknown;
+         var frame = ReadFrame(entry, 0);
+         if (frame == null) return FirstFrameState.Unknown;
+         var offset = entry.FirstTile * 32;
+         bool same = true, blank = true;
+         for (int i = 0; i < frame.Length; i++) {
+            var have = offset + i < tilesetData.Length ? tilesetData[offset + i] : (byte)0;
+            if (have != frame[i]) same = false;
+            if (have != 0) blank = false;
+         }
+         if (same) return FirstFrameState.InSync;
+         return blank ? FirstFrameState.TilesetBlank : FirstFrameState.Different;
+      }
+
+      /// <summary>
+      /// Store the first frame of the animation in the tileset's own graphics (over the tiles the animation covers), so the tileset picture, the map editor's tile picker
+      /// and block editor, and the game before its first animation tick all show it. The animation code still replaces the tiles when it ticks, exactly as before.
+      /// The tiles are compressed again (the tileset moves to free space if they got longer) and everything is written to 'token', so undo takes it all back at once.
+      /// A tileset with fewer tiles than the animation reaches grows by blank tiles (as far as video memory has room for them).
+      /// </summary>
+      public TilesetSyncResult ShowFirstFrameInTileset(ModelDelta token, int tilesetStart, TilesetAnimationEntry entry) {
+         if (entry == null || entry.IsBuiltIn || entry.FirstTile < 0 || tilesetStart < 0 || tilesetStart + 8 > model.Count) return new(0, 0, true);
+         var frame = ReadFrame(entry, 0);
+         var start = model.ReadPointer(tilesetStart + 4);
+         if (frame == null || start < 0 || start >= model.Count) return new(0, 0, true);
+         var blockset = new BlocksetModel(model, tilesetStart);
+         var firstByte = entry.FirstTile * 32;
+         var limitBytes = VideoTileLimit(blockset.IsSecondary) * 32;
+         // frame tiles that would land past video memory are not stored
+         var storable = Math.Max(0, Math.Min(frame.Length, limitBytes - firstByte));
+         var skipped = (frame.Length - storable + 31) / 32;
+
+         if (!blockset.IsCompressed) {
+            // a tileset that is not compressed has no room to grow: only the tiles it already has can be written
+            var tileCount = blockset.ReadTiles()?.Length ?? 0;
+            var writable = Math.Max(0, Math.Min(storable, tileCount * 32 - firstByte));
+            skipped += (storable - writable + 31) / 32;
+            int changedPlain = 0;
+            for (int t = 0; t * 32 < writable; t++) {
+               bool tileChanged = false;
+               for (int i = 0; i < 32; i++) {
+                  if (model[start + firstByte + t * 32 + i] == frame[t * 32 + i]) continue;
+                  token.ChangeData(model, start + firstByte + t * 32 + i, frame[t * 32 + i]);
+                  tileChanged = true;
+               }
+               if (tileChanged) changedPlain++;
+            }
+            return new(changedPlain, skipped, false);
+         }
+
+         var run = FindTilesetRun(tilesetStart);
+         var data = run?.GetData();
+         if (data == null) return new(0, 0, true);
+         var newData = new byte[Math.Max(data.Length, firstByte + storable)];
+         Array.Copy(data, newData, data.Length);
+         Array.Copy(frame, 0, newData, firstByte, storable);
+         int changed = 0;
+         for (int t = 0; t * 32 < newData.Length; t++) {
+            for (int i = 0; i < 32 && t * 32 + i < newData.Length; i++) {
+               var before = t * 32 + i < data.Length ? data[t * 32 + i] : (byte)0;
+               if (newData[t * 32 + i] == before) continue;
+               changed++;
+               break;
+            }
+         }
+         if (changed == 0 && newData.Length == data.Length) return new(0, skipped, false);
+
+         var compressed = LZRun.Compress(newData, 0, newData.Length);
+         var newRun = model.RelocateForExpansion(token, run, compressed.Count);
+         for (int i = 0; i < compressed.Count; i++) token.ChangeData(model, newRun.Start + i, compressed[i]);
+         for (int i = compressed.Count; i < run.Length; i++) token.ChangeData(model, newRun.Start + i, 0xFF);
+         model.ObserveRunWritten(token, new LzTilesetRun(run.TilesetFormat, model, newRun.Start, newRun.PointerSources));
+         return new(changed, skipped, false);
+      }
+
+      /// <summary>
+      /// Animations made before the tileset showed their first frame leave the tileset's tiles blank, so there is nothing to pick in the map editor's block editor.
+      /// For every animation that was added with HexManiac to this tileset and has nothing but blank tiles under it in the tileset, store the first frame there.
+      /// A tileset that has some other picture there is never overwritten here (<see cref="ShowFirstFrameInTileset"/> does that when asked).
+      /// Returns how many animations got their first frame stored.
+      /// </summary>
+      public int ShowFirstFramesInBlankTiles(ModelDelta token, int tilesetStart, bool isSecondary, TilesetAnimationConstants constants) {
+         if (!TryGetTable(tilesetStart, out var table, out _)) return 0;
+         int count = 0;
+         byte[] tileset = null;
+         foreach (var entry in ReadEntries(table, isSecondary, constants)) {
+            tileset ??= ReadTilesetData(tilesetStart);
+            if (CompareFirstFrame(tileset, entry) != FirstFrameState.TilesetBlank) continue;
+            if (ShowFirstFrameInTileset(token, tilesetStart, entry).ChangedTiles > 0) count++;
+            tileset = null; // the tileset's data changed
+         }
+         return count;
+      }
+
+      #endregion
 
       /// <summary>
       /// The game's InitTilesetAnim_* routines are tiny: they store a counter max and a callback pointer that sits in their literal pool.

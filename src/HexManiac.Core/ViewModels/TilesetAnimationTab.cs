@@ -376,12 +376,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             var count = Math.Min(tileCount, VideoTileLimit(pane) - firstTile);
             if (count < 1) { OnError?.Invoke(this, "Pick a tile inside the tileset first."); return; }
             var table = animations.EnsureTable(blockset.Start, pane.IsSecondary, constants, out _);
-            animations.AddEntry(table, firstTile, count, frameCount, speed, pane.IsSecondary, constants, pane.RawTiles);
+            var added = animations.AddEntry(table, firstTile, count, frameCount, speed, pane.IsSecondary, constants, pane.RawTiles);
+            // frame 1 is also stored as the tileset's own picture of these tiles (a tileset that is shorter than the animation reaches grows to hold them),
+            // so the tiles exist in the tileset picture and in the map editor's tile picker, where blocks can use them
+            animations.ShowFirstFrameInTileset(viewPort.CurrentChange, blockset.Start, added);
             viewPort.ChangeHistory.ChangeCompleted();
             viewPort.Refresh();
             Reload();
             SelectedEntry = Entries.LastOrDefault(item => item.Pane == pane && !item.IsBuiltIn);
-            OnMessage?.Invoke(this, $"Added an animation for tiles {firstTile}-{firstTile + count - 1} with {frameCount} frames." + (count < tileCount ? $" (Only {count} tiles fit: an animation can't run into the other tileset's tiles.)" : string.Empty) + " Every frame starts as a copy of the tiles: edit or import the frames to make it move.");
+            OnMessage?.Invoke(this, $"Added an animation for tiles {firstTile}-{firstTile + count - 1} with {frameCount} frames." + (count < tileCount ? $" (Only {count} tiles fit: an animation can't run into the other tileset's tiles.)" : string.Empty) + " Every frame starts as a copy of the tiles: edit or import the frames to make it move. Frame 1 is also the picture of these tiles in the tileset, so you can pick them in the map editor to build blocks.");
          } catch (Exception e) {
             OnError?.Invoke(this, "Could not add the animation: " + e.Message);
          }
@@ -416,6 +419,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             NotifyPropertyChanged();
             NotifyPropertyChanged(nameof(HasSelectedEntry));
             removeEntry?.RaiseCanExecuteChanged();
+            updateTileset?.RaiseCanExecuteChanged();
             importFrames?.RaiseCanExecuteChanged();
             exportFrames?.RaiseCanExecuteChanged();
             editFrames?.RaiseCanExecuteChanged();
@@ -424,10 +428,36 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
       public bool HasSelectedEntry => selectedEntry != null;
 
-      private StubCommand removeEntry, importFrames, exportFrames, editFrames, gotoTable, refresh;
+      private StubCommand removeEntry, importFrames, exportFrames, editFrames, gotoTable, refresh, updateTileset;
       /// <summary>Open the selected animation in the image editor (all its frames are in that one tab).</summary>
       public ICommand EditFrames => StubCommand(ref editFrames, () => EditFrame(selectedEntry, 0), () => selectedEntry != null);
       public ICommand RemoveEntry => StubCommand(ref removeEntry, ExecuteRemoveEntry, () => selectedEntry != null && !selectedEntry.IsBuiltIn);
+      /// <summary>Store frame 1 of the selected animation as the tileset's own picture of its tiles (what the map editor's tile picker and block editor show).</summary>
+      public ICommand UpdateTileset => StubCommand(ref updateTileset, ExecuteUpdateTileset, () => selectedEntry != null && !selectedEntry.IsBuiltIn);
+
+      private void ExecuteUpdateTileset() {
+         if (selectedEntry == null || selectedEntry.IsBuiltIn) return;
+         var item = selectedEntry;
+         var blockset = item.Pane.Blockset;
+         if (blockset == null) return;
+         try {
+            var result = animations.ShowFirstFrameInTileset(viewPort.CurrentChange, blockset.Start, item.Entry);
+            viewPort.ChangeHistory.ChangeCompleted();
+            viewPort.Refresh();
+            var (pane, index) = (item.Pane, item.Entry.Index);
+            Reload();
+            SelectedEntry = Entries.FirstOrDefault(other => other.Pane == pane && !other.IsBuiltIn && other.Entry.Index == index);
+            if (result.Failed) OnError?.Invoke(this, "Could not read or write this tileset's tiles.");
+            else if (result.ChangedTiles == 0 && result.SkippedTiles == 0) OnMessage?.Invoke(this, "The tileset already shows frame 1 of this animation.");
+            else OnMessage?.Invoke(this, $"Frame 1 is now the tileset's picture of tiles {item.Entry.FirstTile}-{item.Entry.FirstTile + item.Entry.TileCount - 1} ({result.ChangedTiles} tile{(result.ChangedTiles == 1 ? "" : "s")} changed)." + (result.SkippedTiles > 0 ? $" {result.SkippedTiles} tile{(result.SkippedTiles == 1 ? " doesn't" : "s don't")} fit in this tileset's graphics." : string.Empty));
+         } catch (Exception e) {
+            OnError?.Invoke(this, "Could not update the tileset: " + e.Message);
+         }
+      }
+
+      /// <summary>How the tileset's picture of an animation's tiles compares with the animation's first frame.</summary>
+      public FirstFrameState CompareFirstFrame(TilesetPane pane, TilesetAnimationEntry entry) =>
+         entry.IsBuiltIn || pane?.RawTiles == null ? FirstFrameState.InSync : animations.CompareFirstFrame(pane.RawTiles, entry);
       public ICommand ImportFrames => StubCommand(ref importFrames, ExecuteImportFrames, () => selectedEntry != null);
       public ICommand ExportFrames => StubCommand(ref exportFrames, ExecuteExportFrames, () => selectedEntry != null);
       public ICommand GotoTable => StubCommand(ref gotoTable, ExecuteGotoTable, () => true);
@@ -444,6 +474,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          viewPort.ChangeHistory.ChangeCompleted();
          viewPort.Refresh();
          Reload();
+         // the tileset keeps its picture of the tiles (frame 1 as it was): blocks the map editor built from them keep looking right, and the tiles can be drawn on as part of the tileset
+         OnMessage?.Invoke(this, "Removed the animation. The tiles keep frame 1 as their picture in the tileset, so blocks that use them still look the same (they just stop moving).");
       }
 
       public void SetEntrySpeed(TilesetAnimationItem item, int timer) {
@@ -646,6 +678,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             }
             animations.WriteFrame(entry, f, data);
          }
+         // frame 1 is the tileset's picture of these tiles too
+         if (!entry.IsBuiltIn) animations.ShowFirstFrameInTileset(viewPort.CurrentChange, blockset.Start, entry);
          viewPort.ChangeHistory.ChangeCompleted();
          viewPort.Refresh();
          var builtIn = entry.IsBuiltIn;
@@ -981,6 +1015,25 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       #endregion
 
+      /// <summary>
+      /// Animations added before the tileset showed their first frame (or whose first frame was drawn in the main tab's sprite view) leave the tileset's tiles blank,
+      /// so there is nothing to pick in the map editor's block editor. Where the tileset has nothing at all under an animation, store frame 1 there (undoable).
+      /// A tileset that has some other picture there is never overwritten on its own: the animation's 'Update tileset' button does that when you ask for it.
+      /// </summary>
+      private int HealBlankTilesetTiles() {
+         int healed = 0;
+         foreach (var pane in Panes) {
+            var blockset = GetBlockset(pane.IsSecondary);
+            if (blockset == null || blockset.Start < 0 || blockset.Start + 24 > model.Count) continue;
+            healed += animations.ShowFirstFramesInBlankTiles(viewPort.CurrentChange, blockset.Start, pane.IsSecondary, constants);
+         }
+         if (healed > 0) {
+            viewPort.ChangeHistory.ChangeCompleted();
+            viewPort.Refresh();
+         }
+         return healed;
+      }
+
       public void Reload() {
          // remember what was selected, so a refresh (or an edit that reloads) keeps it
          var keepEntry = selectedEntry == null ? null : new { selectedEntry.Pane, selectedEntry.IsBuiltIn, selectedEntry.Entry.Index };
@@ -1005,6 +1058,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             return;
          }
          var problems = new List<string>();
+         var healed = 0;
+         try {
+            healed = HealBlankTilesetTiles();
+         } catch (Exception e) {
+            problems.Add("tileset tiles: " + e.Message);
+         }
          try {
             LoadPalettes();
          } catch (Exception e) {
@@ -1037,10 +1096,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Status = problems.Count > 0
             ? "Could not read everything: " + string.Join("; ", problems)
             : $"{builtIn} animation{(builtIn == 1 ? "" : "s")} built into the game, {custom} added with HexManiac, and {Doors.Count} door{(Doors.Count == 1 ? "" : "s")} on these tilesets."
-              + (animations.HasBuiltInTable ? string.Empty : " (This ROM doesn't list the game's own animations.)");
+              + (animations.HasBuiltInTable ? string.Empty : " (This ROM doesn't list the game's own animations.)")
+              + (healed > 0 ? $" Frame 1 of {healed} animation{(healed == 1 ? "" : "s")} was copied into blank tileset tiles, so the tiles show up in the map editor." : string.Empty);
+         if (healed > 0) OnMessage?.Invoke(this, healed == 1
+            ? "The tileset's tiles under one of your animations were still blank, so its frame 1 was copied into them: the animated tiles now show up in the tileset and in the map editor's tile picker."
+            : $"The tileset's tiles under {healed} of your animations were still blank, so their frame 1 was copied into them: the animated tiles now show up in the tileset and in the map editor's tile picker.");
          addAnimation?.RaiseCanExecuteChanged();
          addDoor?.RaiseCanExecuteChanged();
          removeEntry?.RaiseCanExecuteChanged();
+         updateTileset?.RaiseCanExecuteChanged();
          importFrames?.RaiseCanExecuteChanged();
          exportFrames?.RaiseCanExecuteChanged();
          editFrames?.RaiseCanExecuteChanged();
@@ -1195,7 +1259,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public string Label => IsBuiltIn
          ? $"{Entry.Name}: tiles {Entry.FirstTile}-{Entry.FirstTile + Entry.TileCount - 1}, {Entry.FrameCount} frame{(Entry.FrameCount == 1 ? "" : "s")}"
          : $"#{Entry.Index + 1}: tiles {Entry.FirstTile}-{Entry.FirstTile + Entry.TileCount - 1}, {Entry.FrameCount} frame{(Entry.FrameCount == 1 ? "" : "s")}";
-      public string Details => $"Changes {TilesetAnimationTab.DescribeSpeed(Entry.Timer)}. Frames at {Entry.FramesAddress:X6}." + (IsBuiltIn ? " Speed and frame count are set by the game's code." : string.Empty);
+      public string Details => $"Changes {TilesetAnimationTab.DescribeSpeed(Entry.Timer)}. Frames at {Entry.FramesAddress:X6}." + (IsBuiltIn ? " Speed and frame count are set by the game's code." : string.Empty) + TilesetNote;
+
+      private FirstFrameState tilesetState = FirstFrameState.InSync;
+      /// <summary>True when the tileset's own picture of these tiles is not frame 1 (so the map editor's tile picker shows something else than the animation).</summary>
+      public bool TilesetDiffers => tilesetState == FirstFrameState.Different || tilesetState == FirstFrameState.TilesetBlank;
+      private string TilesetNote => !TilesetDiffers ? string.Empty
+         : tilesetState == FirstFrameState.TilesetBlank ? " The tileset's tiles are still blank, so there is nothing to pick in the map editor: press Update tileset."
+         : " The tileset shows a different picture of these tiles than frame 1 (the game replaces it with the animation): press Update tileset to use frame 1.";
 
       private IPixelViewModel baseTiles;
       /// <summary>What these tiles look like in the tileset itself (frame 0 of the animation replaces them in game).</summary>
@@ -1249,6 +1320,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             rawFrames.Add(tab.ReadRawFrame(entry, f));
          }
          BaseTiles = new TilesetAnimationFrame(this, -1, tab.RenderTileRow(Pane, entry.FirstTile, entry.TileCount, Pane.RawTiles)) { SpriteScale = spriteScale };
+         tilesetState = tab.CompareFirstFrame(Pane, entry);
+         NotifyPropertyChanged(nameof(TilesetDiffers));
          liveIndex = Frames.Count == 0 ? 0 : entry.Phase % Frames.Count;
          NotifyPropertyChanged(nameof(LiveFrame));
          NotifyPropertyChanged(nameof(Label));

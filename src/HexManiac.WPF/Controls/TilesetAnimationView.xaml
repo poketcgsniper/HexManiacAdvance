@@ -184,6 +184,7 @@
                   <Button Content="Edit frames" Command="{Binding EditFrames}" Style="{StaticResource ToolButton}" ToolTip="Open the selected animation in the image editor (every frame is in that one tab)"/>
                   <Button Content="Import frames…" Command="{Binding ImportFrames}" Style="{StaticResource ToolButton}" ToolTip="Replace every frame of the selected animation from one picture: each frame is (tiles x 8) pixels wide and 8 pixels tall, stacked top to bottom"/>
                   <Button Content="Export frames…" Command="{Binding ExportFrames}" Style="{StaticResource ToolButton}" ToolTip="Save the selected animation's frames as one picture"/>
+                  <Button Content="Update tileset" Command="{Binding UpdateTileset}" Style="{StaticResource ToolButton}" ToolTip="Store frame 1 of the selected animation in the tileset itself, so the tiles show it in the map editor's tile picker. Done automatically when you add an animation or edit its first frame; use this after changing the tileset tiles by hand"/>
                   <Button Content="Remove" Command="{Binding RemoveEntry}" Style="{StaticResource ToolButton}" ToolTip="Delete the selected animation you added (the game's own animations can't be removed here)"/>
                   <Button Content="Open table" Command="{Binding GotoTable}" Style="{StaticResource ToolButton}" ToolTip="Show the animation table in the main tab"/>
                </WrapPanel>

@@ -280,7 +280,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Frame = ((frame + step) % count + count) % count;
       }
 
+      private bool frameEditPending;
+
+      /// <summary>The source is told once an edit of a frame is over, not for every pixel of a stroke (see <see cref="IImageFrameSource.EditCompleted"/>).</summary>
+      private void CompleteFrameEdit(int editedFrame) {
+         if (!frameEditPending) return;
+         frameEditPending = false;
+         frameSource?.EditCompleted(history.CurrentChange, editedFrame);
+      }
+
       private void FrameChanged(int oldValue) {
+         CompleteFrameEdit(oldValue); // an edit that never got its pen-up still belongs to the frame it was made on
          history.ChangeCompleted(); // what is drawn on this frame is a separate undo step from what was drawn on the last one
          if (toolStrategy is SelectionTool selection) selection.ClearSelection(); // a selection belongs to the frame it was made on
          Refresh();
@@ -749,6 +759,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public void ToolUp(Point point) {
          toolStrategy.ToolUp(point);
          withinInteraction = false;
+         CompleteFrameEdit(frame); // before the step is closed, so what the source stores elsewhere is undone together with the stroke
          history.ChangeCompleted();
          undoWrapper.RaiseCanExecuteChanged();
          if (HasMultipleEditOptions) EditOptions[SelectedEditOption].Refresh();
@@ -894,6 +905,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (frameSource != null) {
             // the source stores the picture wherever the frame lives
             frameSource.WriteFrame(history.CurrentChange, frame, currentTilesetWidth, pixels);
+            frameEditPending = true;
+            if (!withinInteraction) CompleteFrameEdit(frame); // a paste or a flip is one edit; a stroke is finished by ToolUp
             return;
          }
          var spriteAddress = model.ReadPointer(SpritePointer);

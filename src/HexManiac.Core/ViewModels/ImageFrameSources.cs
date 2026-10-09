@@ -37,6 +37,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       /// <summary>Store an edited picture of the shape ReadFrame returned.</summary>
       void WriteFrame(ModelDelta token, int frame, int widthTiles, int[,] pixels);
+
+      /// <summary>
+      /// Called when an edit of a frame is over (the pen was lifted, something was pasted...) with the change that edit is part of, so that a source which keeps another copy
+      /// of the picture can update it once per edit instead of once per pixel. The animation sources use it to show the first frame in the tileset.
+      /// </summary>
+      void EditCompleted(ModelDelta token, int frame) { }
    }
 
    /// <summary>The frames of one tileset animation (the game's own, or one added with HexManiac): each frame is a run of tiles of its own.</summary>
@@ -107,6 +113,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public void WriteFrame(ModelDelta token, int frame, int widthTiles, int[,] pixels) {
          var entry = Entry;
          if (entry != null) animations.WriteFramePixels(token, entry, frame, widthTiles, pixels);
+      }
+
+      /// <summary>
+      /// The first frame is also what the tileset shows (and what the map editor's tile picker offers, and what the game shows before the first tick):
+      /// once an edit of it is over, store it in the tileset's own graphics too, as part of the same undo step. The game's own animations keep their tiles.
+      /// </summary>
+      public void EditCompleted(ModelDelta token, int frame) {
+         var entry = Entry;
+         if (frame != 0 || entry == null || entry.IsBuiltIn) return;
+         animations.ShowFirstFrameInTileset(token, tilesetStart, entry);
       }
    }
 

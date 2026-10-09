@@ -1,3 +1,4 @@
+using HavenSoft.HexManiac.Core;
 using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
@@ -543,6 +544,395 @@ namespace HavenSoft.HexManiac.Tests {
 
          Model.WritePointer(Token, entry.EntryAddress + 4, 0x40); // the door now belongs to another tileset
          Assert.False(source.IsValid);
+      }
+
+      #endregion
+
+      #region The first frame in the tileset (so the animated tiles can be picked in the map editor)
+
+      /// <summary>Tiles whose bytes are all different from zero, so a blank tile can't be mistaken for one.</summary>
+      private static byte[] Tiles(int count) => Enumerable.Range(0, count * 32).Select(i => (byte)((i / 32) * 16 + (i % 32 > 15 ? 3 : 0) + 1)).ToArray();
+
+      private void WriteTileset(byte[] tiles, bool registered = true) {
+         var compressed = LZRun.Compress(tiles, 0, tiles.Length);
+         for (int i = 0; i < compressed.Count; i++) Model[0x800 + i] = compressed[i];
+         if (registered) Model.ObserveRunWritten(Token, new LzTilesetRun(new TilesetFormat(4, null), Model, 0x800, SortedSpan.One(TilesetStart + 4)));
+      }
+
+      private TilesetAnimationEntry AddAnimation(TilesetAnimations animations, byte[] tilesetTiles, int firstTile, int tileCount, int frameCount = 2) {
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+         animations.TryGetTable(TilesetStart, out var existing, out _);
+         var table = existing ?? animations.EnsureTable(TilesetStart, false, constants, out _);
+         return animations.AddEntry(table, firstTile, tileCount, frameCount, 4, false, constants, tilesetTiles);
+      }
+
+      private static byte[] Slice(byte[] data, int tile, int count) => data.Skip(tile * 32).Take(count * 32).ToArray();
+
+      [Fact]
+      public void FirstFrame_IsStoredAsTheTilesetsPictureOfTheTiles() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var entry = AddAnimation(animations, tiles, 4, 2);
+         Assert.Equal(FirstFrameState.InSync, animations.CompareFirstFrame(animations.ReadTilesetData(TilesetStart), entry));
+         var picture = animations.ReadFramePixels(entry, 0, 0);
+         picture[11, 3] = 7; // the second tile of the two
+         animations.WriteFramePixels(Token, entry, 0, 0, picture);
+         Assert.Equal(FirstFrameState.Different, animations.CompareFirstFrame(animations.ReadTilesetData(TilesetStart), entry));
+
+         var result = animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+
+         Assert.False(result.Failed);
+         Assert.Equal(1, result.ChangedTiles);
+         Assert.Equal(0, result.SkippedTiles);
+         var after = animations.ReadTilesetData(TilesetStart);
+         Assert.Equal(16 * 32, after.Length);
+         Assert.Equal(animations.ReadFrame(entry, 0), Slice(after, 4, 2));
+         Assert.Equal(Slice(tiles, 0, 4), Slice(after, 0, 4));   // the tiles around the animation are as they were
+         Assert.Equal(Slice(tiles, 6, 10), Slice(after, 6, 10));
+         Assert.Equal(FirstFrameState.InSync, animations.CompareFirstFrame(after, entry));
+         // the animation itself is untouched: the other frames still start as copies of the old tiles
+         Assert.Equal(Slice(tiles, 4, 2), animations.ReadFrame(entry, 1));
+      }
+
+      [Fact]
+      public void FirstFrame_AlreadyInTheTileset_ChangesNothing() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var entry = AddAnimation(animations, tiles, 4, 2);
+         var before = Model.RawData.ToArray();
+
+         var result = animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+
+         Assert.Equal(0, result.ChangedTiles);
+         Assert.False(result.Failed);
+         Assert.Equal(before, Model.RawData);
+      }
+
+      [Fact]
+      public void FirstFrame_WorksForTilesetsNothingRegisteredAsTiles() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles, registered: false);
+         var entry = AddAnimation(animations, tiles, 4, 2);
+         animations.WriteFrame(entry, 0, Enumerable.Repeat((byte)0x5A, 64).ToArray());
+
+         var result = animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+
+         Assert.Equal(2, result.ChangedTiles);
+         Assert.Equal(Enumerable.Repeat((byte)0x5A, 64), Slice(animations.ReadTilesetData(TilesetStart), 4, 2));
+      }
+
+      [Fact]
+      public void FirstFrame_BlankTilesetTilesAreRecognizedAndFilledIn() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         for (int i = 8 * 32; i < 10 * 32; i++) tiles[i] = 0; // tiles 8 and 9 are free space in the tileset
+         WriteTileset(tiles);
+         var blank = AddAnimation(animations, tiles, 8, 2);
+         var used = AddAnimation(animations, tiles, 0, 1);
+         animations.TryGetTable(TilesetStart, out var table, out _);
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+         var entries = animations.ReadEntries(table, false, constants);
+         blank = entries[0];
+         used = entries[1];
+         animations.WriteFrame(blank, 0, Enumerable.Range(0, 64).Select(i => (byte)(i + 1)).ToArray());
+         animations.WriteFrame(used, 0, Enumerable.Repeat((byte)0x77, 32).ToArray());
+         var tileset = animations.ReadTilesetData(TilesetStart);
+         Assert.Equal(FirstFrameState.TilesetBlank, animations.CompareFirstFrame(tileset, blank));
+         Assert.Equal(FirstFrameState.Different, animations.CompareFirstFrame(tileset, used));
+
+         var healed = animations.ShowFirstFramesInBlankTiles(Token, TilesetStart, false, constants);
+
+         Assert.Equal(1, healed);
+         var after = animations.ReadTilesetData(TilesetStart);
+         Assert.Equal(FirstFrameState.InSync, animations.CompareFirstFrame(after, blank));
+         Assert.Equal(Slice(tiles, 0, 1), Slice(after, 0, 1)); // a tile that has its own picture is never replaced on its own
+         Assert.Equal(FirstFrameState.Different, animations.CompareFirstFrame(after, used));
+         Assert.Equal(0, animations.ShowFirstFramesInBlankTiles(Token, TilesetStart, false, constants));
+
+         // asked for explicitly, the tile does follow its animation
+         Assert.Equal(1, animations.ShowFirstFrameInTileset(Token, TilesetStart, used).ChangedTiles);
+         Assert.Equal(Enumerable.Repeat((byte)0x77, 32), Slice(animations.ReadTilesetData(TilesetStart), 0, 1));
+      }
+
+      [Fact]
+      public void FirstFrame_TilesetGrowsToHoldTilesPastItsEnd() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var entry = AddAnimation(animations, tiles, 14, 4);   // tiles 16 and 17 are not part of the tileset yet
+         var frame = Enumerable.Range(0, 128).Select(i => (byte)(i % 13 + 1)).ToArray();
+         animations.WriteFrame(entry, 0, frame);
+
+         var result = animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+
+         Assert.Equal(4, result.ChangedTiles);
+         Assert.Equal(0, result.SkippedTiles);
+         var after = animations.ReadTilesetData(TilesetStart);
+         Assert.Equal(18 * 32, after.Length);
+         Assert.Equal(frame, Slice(after, 14, 4));
+         Assert.Equal(Slice(tiles, 0, 14), Slice(after, 0, 14));
+      }
+
+      [Fact]
+      public void FirstFrame_StopsAtTheEndOfVideoMemory() {
+         Model.SetUnmappedConstant(Token, TilesetAnimationConstants.Prefix + "primarytiles", 16);
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var entry = AddAnimation(animations, tiles, 14, 4);
+         animations.WriteFrame(entry, 0, Enumerable.Repeat((byte)0x33, 128).ToArray());
+
+         var result = animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+
+         Assert.Equal(2, result.ChangedTiles);
+         Assert.Equal(2, result.SkippedTiles); // the primary tileset only has room for 16 tiles here; the rest is the secondary tileset's
+         var after = animations.ReadTilesetData(TilesetStart);
+         Assert.Equal(16 * 32, after.Length);
+         Assert.Equal(Enumerable.Repeat((byte)0x33, 64), Slice(after, 14, 2));
+      }
+
+      [Theory]
+      [InlineData(true)]
+      [InlineData(false)]
+      public void FirstFrame_TilesGetMovedWhenTheyGetLonger_AndTheTilesetFollows(bool registered) {
+         var animations = CreateAnimations();
+         var tiles = new byte[16 * 32];                         // all blank: it compresses to almost nothing...
+         WriteTileset(tiles, registered);
+         var oldLength = LZRun.Compress(tiles, 0, tiles.Length).Count;
+         for (int i = 0; i < 4; i++) Model[0x800 + oldLength + i] = 0x12;   // ...and something else starts right behind it
+         var entry = AddAnimation(animations, tiles, 2, 2);
+         var frame = Enumerable.Range(0, 64).Select(i => (byte)(i * 37 + 11)).ToArray(); // does not compress
+         animations.WriteFrame(entry, 0, frame);
+
+         var result = animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+
+         Assert.Equal(2, result.ChangedTiles);
+         var moved = Model.ReadPointer(TilesetStart + 4);
+         Assert.NotEqual(0x800, moved);                          // the header follows the tiles
+         Assert.Equal(0xFF, Model[0x800]);                       // the old copy is cleared
+         Assert.Equal(0x12, Model[0x800 + oldLength]);           // what was behind it is intact
+         var after = animations.ReadTilesetData(TilesetStart);
+         Assert.Equal(frame, Slice(after, 2, 2));
+         Assert.Equal(Slice(tiles, 0, 2), Slice(after, 0, 2));
+         var run = Assert.IsType<LzTilesetRun>(Model.GetNextRun(moved));
+         Assert.Equal(moved, run.Start);
+         Assert.Contains(TilesetStart + 4, run.PointerSources);
+      }
+
+      [Fact]
+      public void FirstFrame_UndoTakesBackTheTilesetAndItsPointerTogether() {
+         var animations = CreateAnimations();
+         var tiles = new byte[16 * 32];
+         WriteTileset(tiles);
+         var oldLength = LZRun.Compress(tiles, 0, tiles.Length).Count;
+         for (int i = 0; i < 4; i++) Model[0x800 + oldLength + i] = 0x12;
+         var entry = AddAnimation(animations, tiles, 2, 2);
+         animations.WriteFrame(entry, 0, Enumerable.Range(0, 64).Select(i => (byte)(i * 37 + 11)).ToArray());
+         ViewPort.ChangeHistory.ChangeCompleted();
+         var compressedBefore = Model.RawData.Skip(0x800).Take(oldLength).ToArray();
+
+         animations.ShowFirstFrameInTileset(ViewPort.CurrentChange, TilesetStart, entry);
+         ViewPort.ChangeHistory.ChangeCompleted();
+         Assert.NotEqual(0x800, Model.ReadPointer(TilesetStart + 4));
+         ViewPort.Undo.Execute();
+
+         Assert.Equal(0x800, Model.ReadPointer(TilesetStart + 4));
+         Assert.Equal(compressedBefore, Model.RawData.Skip(0x800).Take(oldLength).ToArray());
+         Assert.Equal(tiles, animations.ReadTilesetData(TilesetStart));
+      }
+
+      [Fact]
+      public void FirstFrame_TilesetsThatAreNotCompressedAreWrittenInPlace() {
+         Model[TilesetStart] = 0;
+         var animations = CreateAnimations();
+         var tiles = Tiles(8);
+         for (int i = 0; i < tiles.Length; i++) Model[0x800 + i] = tiles[i];
+         var entry = AddAnimation(animations, ReadRaw(0x800, 8), 2, 2);
+         animations.WriteFrame(entry, 0, Enumerable.Repeat((byte)0x44, 64).ToArray());
+
+         var result = animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+
+         Assert.False(result.Failed);
+         Assert.Equal(2, result.ChangedTiles);
+         Assert.Equal(0x800, Model.ReadPointer(TilesetStart + 4));
+         Assert.Equal(Enumerable.Repeat((byte)0x44, 64), Slice(animations.ReadTilesetData(TilesetStart), 2, 2));
+         Assert.Equal(Slice(tiles, 0, 2), Slice(animations.ReadTilesetData(TilesetStart), 0, 2));
+      }
+
+      private byte[] ReadRaw(int address, int tileCount) => Model.RawData.Skip(address).Take(tileCount * 32).ToArray();
+
+      [Fact]
+      public void FirstFrame_BuiltInAnimationsAreNotTouched() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var entry = new TilesetAnimationEntry { FirstTile = 4, TileCount = 2, FrameCount = 1, IsBuiltIn = true, FramesAddress = 0x300 };
+         Model.WritePointer(Token, 0x300, 0x400);
+
+         var result = animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+
+         Assert.True(result.Failed);
+         Assert.Equal(tiles, animations.ReadTilesetData(TilesetStart));
+      }
+
+      [Fact]
+      public void FirstFrame_RemovingTheAnimationLeavesTheTilesetsTiles() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var entry = AddAnimation(animations, tiles, 4, 2);
+         animations.WriteFrame(entry, 0, Enumerable.Repeat((byte)0x66, 64).ToArray());
+         animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+         var before = animations.ReadTilesetData(TilesetStart);
+
+         animations.TryGetTable(TilesetStart, out var table, out _);
+         animations.RemoveEntry(table, 0);
+
+         // the blocks that were built from these tiles keep looking right: the tiles stay as frame 1 was
+         Assert.Equal(before, animations.ReadTilesetData(TilesetStart));
+         Assert.Equal(Enumerable.Repeat((byte)0x66, 64), Slice(animations.ReadTilesetData(TilesetStart), 4, 2));
+      }
+
+      [Fact]
+      public void RemoveEntry_OnlyClearsTheAnimationsOwnFramesAndFrameTable() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var first = AddAnimation(animations, tiles, 4, 2);
+         var second = AddAnimation(animations, tiles, 8, 2, 3);
+         animations.TryGetTable(TilesetStart, out var table, out _);
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+         second = animations.ReadEntries(table, false, constants)[1];
+         for (int f = 0; f < 3; f++) animations.WriteFrame(second, f, Enumerable.Repeat((byte)(0x10 + f), 64).ToArray());
+         var tilesetBefore = animations.ReadTilesetData(TilesetStart);
+         var compressedBefore = Model.RawData.Skip(0x800).Take(0x100).ToArray();
+
+         animations.RemoveEntry(table, 0);
+
+         // the frame table of the removed animation is only 4 bytes per frame: nothing after it may be erased
+         animations.TryGetTable(TilesetStart, out table, out _);
+         var entries = animations.ReadEntries(table, false, constants);
+         Assert.Single(entries);
+         Assert.Equal(3, entries[0].FrameCount);
+         for (int f = 0; f < 3; f++) Assert.Equal(Enumerable.Repeat((byte)(0x10 + f), 64), animations.ReadFrame(entries[0], f));
+         Assert.Equal(tilesetBefore, animations.ReadTilesetData(TilesetStart));
+         Assert.Equal(compressedBefore, Model.RawData.Skip(0x800).Take(0x100).ToArray());
+         Assert.Equal(1, table.ElementCount);
+      }
+
+      private ImageEditorViewModel CreateAnimationEditor(TilesetAnimations animations, byte[] tiles, int firstTile, int tileCount, out AnimationFrameSource source) {
+         var entry = AddAnimation(animations, tiles, firstTile, tileCount, 3);
+         source = new AnimationFrameSource(Model, animations, TilesetStart, entry, "Anim", () => CurrentFirstEntry(animations));
+         Assert.True(source.Prepare());
+         ViewPort.ChangeHistory.ChangeCompleted();
+         var editor = ViewPort.CreateImageEditor(Model.ReadPointer(source.SpritePointer(0)), 0, 0);
+         editor.SpriteScale = 1;
+         editor.SetFrameSource(source, 0);
+         return editor;
+      }
+
+      private static void Draw(ImageEditorViewModel editor, int paletteIndex, int pixelX, int pixelY, bool lift = true) {
+         editor.SelectedTool = ImageEditorTools.Draw;
+         editor.Palette.SelectionStart = paletteIndex;
+         var point = new Point(pixelX - editor.PixelWidth / 2, pixelY - editor.PixelHeight / 2);
+         editor.ToolDown(point);
+         if (lift) editor.ToolUp(point);
+      }
+
+      [Fact]
+      public void ImageEditor_DrawingOnTheFirstFrameStoresItInTheTilesetWhenThePenIsLifted() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var editor = CreateAnimationEditor(animations, tiles, 4, 1, out var source);
+
+         Draw(editor, 5, 2, 3, lift: false);
+         var entry = CurrentFirstEntry(animations);
+         Assert.Equal(Slice(tiles, 4, 1), animations.ReadFrame(entry, 0));                        // the pen is still down: nothing is stored yet
+         Assert.Equal(Slice(tiles, 4, 1), Slice(animations.ReadTilesetData(TilesetStart), 4, 1));
+         editor.ToolUp(new Point(2 - editor.PixelWidth / 2, 3 - editor.PixelHeight / 2));
+         Assert.Equal(5, animations.ReadFramePixels(entry, 0, 0)[2, 3]);                          // the stroke is in the frame...
+
+         var tileset = animations.ReadTilesetData(TilesetStart);
+         Assert.Equal(animations.ReadFrame(entry, 0), Slice(tileset, 4, 1));
+         Assert.Equal(Slice(tiles, 0, 4), Slice(tileset, 0, 4));
+         Assert.Equal(Slice(tiles, 5, 11), Slice(tileset, 5, 11));
+         Assert.Equal(FirstFrameState.InSync, animations.CompareFirstFrame(tileset, entry));
+      }
+
+      [Fact]
+      public void ImageEditor_OtherFramesDoNotTouchTheTileset() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var editor = CreateAnimationEditor(animations, tiles, 4, 1, out var source);
+         var before = Model.RawData.Skip(0x800).Take(0x100).ToArray();
+         var pointerBefore = Model.ReadPointer(TilesetStart + 4);
+
+         editor.Frame = 1;
+         Draw(editor, 9, 1, 1);
+
+         var entry = CurrentFirstEntry(animations);
+         Assert.Equal(9, animations.ReadFramePixels(entry, 1, 0)[1, 1]);
+         Assert.Equal(pointerBefore, Model.ReadPointer(TilesetStart + 4));
+         Assert.Equal(before, Model.RawData.Skip(0x800).Take(0x100).ToArray());
+         Assert.Equal(tiles, animations.ReadTilesetData(TilesetStart));
+      }
+
+      [Fact]
+      public void ImageEditor_UndoTakesBackTheFrameAndTheTilesetTogether() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var editor = CreateAnimationEditor(animations, tiles, 4, 1, out var source);
+
+         Draw(editor, 5, 2, 3);
+         var entry = CurrentFirstEntry(animations);
+         Assert.NotEqual(Slice(tiles, 4, 1), Slice(animations.ReadTilesetData(TilesetStart), 4, 1));
+         ViewPort.Undo.Execute();
+
+         Assert.Equal(Slice(tiles, 4, 1), animations.ReadFrame(entry, 0));
+         Assert.Equal(tiles, animations.ReadTilesetData(TilesetStart));
+      }
+
+      [Fact]
+      public void ImageEditor_ThePictureIsStoredOnceNotForEveryPixel() {
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         var editor = CreateAnimationEditor(animations, tiles, 4, 1, out var source);
+         var writes = 0;
+         var counting = new CountingFrameSource(source, () => writes++);
+         editor.SetFrameSource(counting, 0);
+
+         editor.SelectedTool = ImageEditorTools.Draw;
+         editor.Palette.SelectionStart = 6;
+         var start = new Point(0 - 4, 0 - 4);
+         editor.ToolDown(start);
+         for (int x = 1; x < 8; x++) editor.Hover(new Point(x - 4, 0 - 4));
+         editor.ToolUp(new Point(7 - 4, 0 - 4));
+
+         Assert.Equal(1, writes);
+      }
+
+      private class CountingFrameSource : IImageFrameSource {
+         private readonly IImageFrameSource inner;
+         private readonly System.Action onCompleted;
+         public CountingFrameSource(IImageFrameSource inner, System.Action onCompleted) => (this.inner, this.onCompleted) = (inner, onCompleted);
+         public string Title => inner.Title;
+         public bool IsValid => inner.IsValid;
+         public int FrameCount => inner.FrameCount;
+         public string FrameNote(int frame) => inner.FrameNote(frame);
+         public int SpritePointer(int frame) => inner.SpritePointer(frame);
+         public bool CanChooseWidth => inner.CanChooseWidth;
+         public int DefaultWidthTiles => inner.DefaultWidthTiles;
+         public int MaxWidthTiles => inner.MaxWidthTiles;
+         public int[,] ReadFrame(int frame, int widthTiles) => inner.ReadFrame(frame, widthTiles);
+         public void WriteFrame(ModelDelta token, int frame, int widthTiles, int[,] pixels) => inner.WriteFrame(token, frame, widthTiles, pixels);
+         public void EditCompleted(ModelDelta token, int frame) { onCompleted(); inner.EditCompleted(token, frame); }
       }
 
       #endregion
