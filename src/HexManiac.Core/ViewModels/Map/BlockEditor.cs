@@ -750,8 +750,57 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       #region Cache
 
-      public void RefreshPaletteCache(short[][] palette) => this.palettes = palette;
-      public void RefreshTileCache(int[][,] tiles) => this.tiles = tiles;
+      public void RefreshPaletteCache(short[][] palette) {
+         var changed = !SamePalettes(this.palettes, palette);
+         this.palettes = palette;
+         if (changed) RedrawTiles();
+      }
+
+      public void RefreshTileCache(int[][,] tiles) {
+         var changed = !SameTiles(this.tiles, tiles);
+         this.tiles = tiles;
+         if (changed) RedrawTiles();
+      }
+
+      /// <summary>
+      /// The tile picker, the tile that is picked and the eight pictures of the block being edited are drawn from the tileset's tiles and palettes when they are first needed.
+      /// When the tileset changed since (a tile was drawn in the image editor, an animated tile was added to a blank spot of the tileset...) they have to be drawn again,
+      /// or the picker keeps showing the old tiles until the map is closed and opened again.
+      /// </summary>
+      private void RedrawTiles() {
+         if (tiles == null || palettes == null) return;
+         tileRender = null;
+         if (showTiles) UpdateTileRender(drawPalette); // draws the picked tile again, too
+         else if (drawTile < tiles.Length && drawPalette < palettes.Length) UpdateDrawTileRender();
+         if (blocks != null && blockIndex >= 0 && blockIndex < blocks.Length) UpdateBlockUI(0);
+      }
+
+      private static bool SameTiles(int[][,] a, int[][,] b) {
+         if (ReferenceEquals(a, b)) return true;
+         if (a == null || b == null || a.Length != b.Length) return false;
+         for (int i = 0; i < a.Length; i++) {
+            if (ReferenceEquals(a[i], b[i])) continue;
+            if (a[i] == null || b[i] == null || a[i].GetLength(0) != b[i].GetLength(0) || a[i].GetLength(1) != b[i].GetLength(1)) return false;
+            for (int x = 0; x < a[i].GetLength(0); x++) {
+               for (int y = 0; y < a[i].GetLength(1); y++) {
+                  if (a[i][x, y] != b[i][x, y]) return false;
+               }
+            }
+         }
+         return true;
+      }
+
+      private static bool SamePalettes(short[][] a, short[][] b) {
+         if (ReferenceEquals(a, b)) return true;
+         if (a == null || b == null || a.Length != b.Length) return false;
+         for (int i = 0; i < a.Length; i++) {
+            if (ReferenceEquals(a[i], b[i])) continue;
+            if (a[i] == null || b[i] == null || a[i].Length != b[i].Length) return false;
+            for (int j = 0; j < a[i].Length; j++) if (a[i][j] != b[i][j]) return false;
+         }
+         return true;
+      }
+
       public void RefreshBlockCache(byte[][] blocks) {
          this.blocks = blocks;
          BlockIndex = blockIndex;
