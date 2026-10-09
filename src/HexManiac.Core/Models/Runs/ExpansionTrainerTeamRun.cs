@@ -262,6 +262,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
 
       public ITrainerTeamRun DeserializeRun(string content, ModelDelta token, bool setDefaultMoves, bool setDefaultItems, out IReadOnlyList<int> changedOffsets) {
          var changed = new List<int>();
+         content = NormalizeShowdown(content);
          var lines = content.Split('\n').Select(line => line.Trim('\r').Trim()).ToList();
          var species = Names(SpeciesTable);
          var moves = Names(MovesTable);
@@ -349,6 +350,144 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          changedOffsets = changed;
          return new ExpansionTrainerTeamRun(model, workingRun.Start, workingRun.PointerSources);
       }
+
+      #region Showdown / .party paste support
+
+      private static readonly string[] statOrder = { "hp", "atk", "def", "spe", "spa", "spd" }; // the game's stat order: HP, Attack, Defense, Speed, Sp.Atk, Sp.Def
+
+      /// <summary>
+      /// Accepts Pokémon Showdown sets and pokeemerald-expansion .party sets (the format trainerproc reads) and converts them into this run's native text.
+      /// Native lines pass through unchanged, so the two formats can be mixed. Example input:
+      ///   Geodude @ Oran Berry
+      ///   Level: 12
+      ///   Ability: Rock Head
+      ///   EVs: 252 Atk / 4 Def
+      ///   IVs: 31 HP / 0 Atk
+      ///   Adamant Nature
+      ///   - Tackle
+      /// </summary>
+      public static string NormalizeShowdown(string content) {
+         var output = new StringBuilder();
+         string header = null;         // native header text (level species (IVs) @item), or null while a Showdown block is being collected
+         string species = null, item = null, ivs = null;
+         int level = 100;
+         bool showdownBlock = false;
+         var moves = new List<string>();
+         var extras = new List<string>();
+
+         void Flush() {
+            if (header == null && species == null) return;
+            if (showdownBlock) {
+               header = $"{level} {Quote(species)}";
+               if (ivs != null) header += $" (IVs={ivs})";
+               if (!string.IsNullOrEmpty(item)) header += $" @{Quote(item)}";
+            } else if (level >= 0 && header != null) {
+               // a 'Level:' line under a native header replaces the level in the header
+               var parts = header.Split(' ', 2);
+               if (parts.Length == 2 && int.TryParse(parts[0], out _)) header = $"{level} {parts[1]}";
+            }
+            output.AppendLine(header);
+            foreach (var move in moves) output.AppendLine("- " + move);
+            if (extras.Count > 0) output.AppendLine("* " + " ".Join(extras));
+            header = species = item = ivs = null;
+            level = -1;
+            showdownBlock = false;
+            moves.Clear();
+            extras.Clear();
+         }
+
+         foreach (var raw in content.Split('\n')) {
+            var line = raw.Trim('\r').Trim();
+            if (line.Length == 0) continue;
+            if (line.StartsWith("-")) {
+               if (header == null && species == null) output.AppendLine(line); else moves.Add(line.Substring(1).Trim());
+               continue;
+            }
+            if (line.StartsWith("*")) {
+               if (header == null && species == null) output.AppendLine(line); else extras.Add(line.Substring(1).Trim());
+               continue;
+            }
+            if (char.IsDigit(line[0])) {
+               // native header: level species ...
+               Flush();
+               header = line;
+               level = -1;
+               continue;
+            }
+            var colon = line.IndexOf(':');
+            var inBlock = header != null || species != null;
+            if (colon > 0) {
+               var scratchLevel = level; string scratchIvs = ivs; var scratchExtras = inBlock ? extras : new List<string>();
+               if (TryShowdownKey(line.Substring(0, colon).Trim(), line.Substring(colon + 1).Trim(), ref scratchLevel, ref scratchIvs, scratchExtras)) {
+                  if (inBlock) { level = scratchLevel; ivs = scratchIvs; }
+                  continue; // a key line outside of any block has nothing to apply to
+               }
+            }
+            if (line.EndsWith(" Nature", StringComparison.OrdinalIgnoreCase)) {
+               if (inBlock) extras.Add("nature=" + line.Substring(0, line.Length - " Nature".Length).Trim());
+               continue;
+            }
+            // anything else starts a Showdown block: [Nickname (]Species[)] [(M|F)] [@ Item]
+            Flush();
+            showdownBlock = true;
+            level = 100;
+            var text = line;
+            var at = text.IndexOf('@');
+            if (at >= 0) { item = text.Substring(at + 1).Trim(); text = text.Substring(0, at).Trim(); }
+            while (text.EndsWith(")")) {
+               var open = text.LastIndexOf('(');
+               if (open < 0) break;
+               var inner = text.Substring(open + 1, text.Length - open - 2).Trim();
+               text = text.Substring(0, open).Trim();
+               if (inner.Equals("M", StringComparison.OrdinalIgnoreCase)) extras.Add("gender=male");
+               else if (inner.Equals("F", StringComparison.OrdinalIgnoreCase)) extras.Add("gender=female");
+               else if (inner.Length > 0) text = inner; // 'Nickname (Species)': use the species, drop the nickname
+            }
+            species = text.Trim();
+         }
+         Flush();
+         return output.ToString();
+      }
+
+      private static bool TryShowdownKey(string key, string value, ref int level, ref string ivs, List<string> extras) {
+         switch (key.ToLowerInvariant()) {
+            case "level": if (int.TryParse(value, out var lv)) level = lv; return true;
+            case "ability": extras.Add("ability=" + value); return true;
+            case "evs": extras.Add("evs=" + ParseStatList(value, 0)); return true;
+            case "ivs": ivs = ParseStatList(value, 31); return true;
+            case "shiny": extras.Add("shiny=" + (IsYes(value) ? "yes" : "no")); return true;
+            case "ball": extras.Add("ball=" + value); return true;
+            case "happiness": case "friendship": extras.Add("friendship=" + value); return true;
+            case "gender": extras.Add("gender=" + value); return true;
+            case "nature": extras.Add("nature=" + value); return true;
+            case "tera type": case "tera": extras.Add("tera=" + value); return true;
+            case "dynamax level": extras.Add("dmaxlevel=" + value); return true;
+            case "gigantamax": extras.Add("gmax=" + (IsYes(value) ? "yes" : "no")); return true;
+            case "dynamax": extras.Add("dynamax=" + (IsYes(value) ? "yes" : "no")); return true;
+            case "nickname": return true; // nicknames are edited in the table itself
+            default: return false;
+         }
+      }
+
+      /// <summary>
+      /// '252 Atk / 4 Def / 252 Spe' -> 'hp/atk/def/spe/spa/spd' values in the game's order; unspecified stats get the default.
+      /// </summary>
+      private static string ParseStatList(string text, int defaultValue) {
+         var values = Enumerable.Repeat(defaultValue, 6).ToArray();
+         foreach (var part in text.Split('/')) {
+            var tokens = part.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length < 2 || !int.TryParse(tokens[0], out var amount)) continue;
+            var stat = tokens[1].ToLowerInvariant() switch {
+               "hp" => "hp", "atk" or "attack" => "atk", "def" or "defense" => "def", "spe" or "speed" => "spe",
+               "spa" or "spatk" or "sp.atk" or "sp.att" or "spattack" => "spa", "spd" or "spdef" or "sp.def" or "spdefense" => "spd", _ => null,
+            };
+            var index = Array.IndexOf(statOrder, stat);
+            if (index >= 0) values[index] = amount;
+         }
+         return "/".Join(values.Select(v => v.ToString()));
+      }
+
+      #endregion
 
       /// <summary>
       /// The last 4 level-up moves the species knows at the given level, read from the species' levelUpMoves list ([move: level:] records).
