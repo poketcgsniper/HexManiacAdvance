@@ -3,6 +3,7 @@ using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.Models.Runs.Sprites;
 using HavenSoft.HexManiac.Core.ViewModels.DataFormats;
+using HexManiac.Core.Models.Runs.Sprites;
 using System.Linq;
 using Xunit;
 
@@ -187,5 +188,153 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(96, steam.FirstTile);      // secondary tilesets count from the end of the primary tiles
          Assert.Equal(1, steam.Phase);
       }
+
+      #region Block numbers and door layout
+
+      [Fact]
+      public void ReadAllBlocks_NumbersTheSecondaryBlocksFromThePrimaryBlockCount() {
+         // block 512 is the secondary blockset's block 0 (the doors list used to show block N+1 for every secondary door)
+         const int secondaryStart = 0x60;
+         Model[secondaryStart] = 0; Model[secondaryStart + 1] = 1;
+         Model.WritePointer(Token, secondaryStart + 4, 0x800);
+         Model.WritePointer(Token, secondaryStart + 8, 0x900);
+         Model.WritePointer(Token, secondaryStart + 12, 0xC00);
+         Model.WritePointer(Token, secondaryStart + 16, 0xD00);
+         for (int i = 0; i < 4; i++) { Model[0xA00 + i * 16] = (byte)(0x10 + i); Model[0xC00 + i * 16] = (byte)(0xA0 + i); }
+         // each blockset's attributes follow its blocks (16 blocks each here), which is how the length of the blocks is found
+         foreach (var attributes in new[] { 0xB00, 0xD00 }) Model.ObserveRunWritten(Token, new SpriteRun(Model, attributes, new SpriteFormat(4, 1, 1, string.Empty)));
+         var primary = new BlocksetModel(Model, TilesetStart);
+         var secondary = new BlocksetModel(Model, secondaryStart);
+
+         var all = BlockmapRun.ReadAllBlocks(primary, secondary);
+
+         Assert.Equal(0x10, all[0][0]);
+         Assert.Equal(0x12, all[2][0]);
+         Assert.Equal(0xA0, all[primary.PrimaryBlocks][0]);
+         Assert.Equal(0xA1, all[primary.PrimaryBlocks + 1][0]);
+         Assert.Equal(0xA3, all[primary.PrimaryBlocks + 3][0]);
+         Assert.Equal(primary.PrimaryBlocks + secondary.ReadBlocks(-1).Length, all.Length);
+      }
+
+      [Fact]
+      public void DoorTileLayout_FollowsTheOrderTheGameDrawsTheTilesIn() {
+         // one and two block tall doors are stored in rows, two tiles wide
+         Assert.Equal((1, 0), DoorEntry.TilePositionFor(0, 1));
+         Assert.Equal((0, 1), DoorEntry.TilePositionFor(1, 2));
+         Assert.Equal((1, 3), DoorEntry.TilePositionFor(1, 7));
+         // a 2x2 door is four blocks of four tiles: top left, bottom left, top right, bottom right
+         Assert.Equal((0, 0), DoorEntry.TilePositionFor(2, 0));
+         Assert.Equal((1, 1), DoorEntry.TilePositionFor(2, 3));
+         Assert.Equal((0, 2), DoorEntry.TilePositionFor(2, 4));
+         Assert.Equal((1, 3), DoorEntry.TilePositionFor(3, 7));
+         Assert.Equal((2, 0), DoorEntry.TilePositionFor(3, 8));
+         Assert.Equal((3, 1), DoorEntry.TilePositionFor(3, 11));
+         Assert.Equal((2, 2), DoorEntry.TilePositionFor(2, 12));
+         Assert.Equal((3, 3), DoorEntry.TilePositionFor(2, 15));
+         // and the two directions agree
+         for (int size = 0; size < 4; size++) {
+            var count = DoorEntry.WidthTilesFor(size) * DoorEntry.HeightTilesFor(size);
+            var seen = new System.Collections.Generic.HashSet<(int, int)>();
+            for (int i = 0; i < count; i++) {
+               var (x, y) = DoorEntry.TilePositionFor(size, i);
+               Assert.True(x < DoorEntry.WidthTilesFor(size) && y < DoorEntry.HeightTilesFor(size));
+               Assert.True(seen.Add((x, y)));
+               Assert.Equal(i, DoorEntry.TileIndexFor(size, x, y));
+            }
+         }
+      }
+
+      [Fact]
+      public void EnsureTilesFormat_ReshapesDoorTilesRegisteredWithTheWrongSize() {
+         // a 2x2 door: 16 tiles per frame, 3 frames. It was registered 4 tiles wide (as if the tiles were stored row by row).
+         var tableStart = 0x600;
+         Model.WriteMultiByteValue(tableStart, 2, Token, 600);
+         Model.WritePointer(Token, tableStart + 4, TilesetStart);
+         Model[tableStart + 8] = 0; Model[tableStart + 9] = 2;
+         Model.WritePointer(Token, tableStart + 12, 0x800);
+         Model.WritePointer(Token, tableStart + 16, 0xF00);
+         for (int i = 20; i < 40; i++) Model[tableStart + i] = 0;
+         ViewPort.Edit($"@{tableStart:X6} ^{DoorAnimations.TableName}[metatile: unused: tileset<> sound. size. unused: tiles<`ucs4x4x12`> palettes<>]2 ");
+         var doors = new DoorAnimations(Model, () => Token);
+         var entry = doors.ReadEntries()[0];
+         Assert.Equal(4, ((ISpriteRun)Model.GetNextRun(0x800)).SpriteFormat.TileWidth);
+
+         doors.EnsureTilesFormat(entry);
+
+         var format = ((ISpriteRun)Model.GetNextRun(0x800)).SpriteFormat;
+         Assert.Equal(2, format.TileWidth);
+         Assert.Equal(24, format.TileHeight);
+         Assert.Equal(entry.TilesLength, format.ExpectedByteLength);
+         Assert.Equal(DoorAnimations.PaletteHint, format.PaletteHint);
+         Assert.Contains(tableStart + 12, Model.GetNextRun(0x800).PointerSources);
+      }
+
+      #endregion
+
+      #region Init routines
+
+      private void WriteThumb(int address, params int[] instructions) {
+         for (int i = 0; i < instructions.Length; i++) Model.WriteMultiByteValue(address + i * 2, 2, Token, instructions[i]);
+      }
+
+      [Fact]
+      public void FindCallbackInInit_StopsAtTheEndOfTheRoutine() {
+         // init A installs no callback ("bx lr"); init B, right behind it, loads one from its own literal pool:
+         //    A: 0x300  bx lr
+         //    B: 0x304  push {lr} / ldr r0, [pc, #8] / pop {pc};  literal pool: 0x310 = 0x08000321
+         WriteThumb(0x300, 0x4770, 0x0000);
+         WriteThumb(0x304, 0xB500, 0x4802, 0xBD00);
+         Model.WriteMultiByteValue(0x310, 4, Token, 0x08000321);
+
+         Assert.Equal(Pointer.NULL, TilesetAnimations.FindCallbackInInit(Model, 0x301));
+         Assert.Equal(0x321, TilesetAnimations.FindCallbackInInit(Model, 0x305));
+      }
+
+      [Fact]
+      public void FindCallbackInInit_IgnoresWordsThatAreNotLoadedByTheRoutine() {
+         // "push {lr} / pop {pc}" followed by some data that happens to look like a thumb pointer
+         WriteThumb(0x300, 0xB500, 0xBD00);
+         Model.WriteMultiByteValue(0x304, 4, Token, 0x08000321);
+         Assert.Equal(Pointer.NULL, TilesetAnimations.FindCallbackInInit(Model, 0x301));
+      }
+
+      private int ReadChainedCallback(int callbackAddress) {
+         // the generated callback starts: push {r4-r7, lr} / mov r6, r0 / ldr r7, =<the tileset's own callback or 0>
+         var ldr = Model.ReadMultiByteValue(callbackAddress + 4, 2);
+         Assert.Equal(0x4F00, ldr & 0xFF00);
+         return Model.ReadMultiByteValue(((callbackAddress + 8) & ~3) + (ldr & 0xFF) * 4, 4);
+      }
+
+      [Fact]
+      public void EnsureTable_DoesNotChainTheNeighbouringInitsCallback() {
+         // the tileset's init (0x300) has no callback, but the init behind it (0x304) does: only a tileset that really has a callback may chain it
+         WriteThumb(0x300, 0x4770, 0x0000);
+         WriteThumb(0x304, 0xB500, 0x4802, 0xBD00);
+         Model.WriteMultiByteValue(0x310, 4, Token, 0x08000321);
+         Model.WritePointer(Token, TilesetStart + 20, 0x301);
+         var animations = CreateAnimations();
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+
+         animations.EnsureTable(TilesetStart, false, constants, out var baseName);
+
+         var callback = Model.GetAddressFromAnchor(Token, -1, baseName + ".callback");
+         Assert.Equal(0, ReadChainedCallback(callback & ~1));
+      }
+
+      [Fact]
+      public void EnsureTable_ChainsTheTilesetsOwnCallback() {
+         WriteThumb(0x304, 0xB500, 0x4802, 0xBD00);
+         Model.WriteMultiByteValue(0x310, 4, Token, 0x08000321);
+         Model.WritePointer(Token, TilesetStart + 20, 0x305);
+         var animations = CreateAnimations();
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+
+         animations.EnsureTable(TilesetStart, false, constants, out var baseName);
+
+         var callback = Model.GetAddressFromAnchor(Token, -1, baseName + ".callback");
+         Assert.Equal(0x08000320, ReadChainedCallback(callback & ~1));
+      }
+
+      #endregion
    }
 }

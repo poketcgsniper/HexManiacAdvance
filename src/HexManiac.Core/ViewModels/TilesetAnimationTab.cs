@@ -237,7 +237,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var counts = new Dictionary<int, int[]>();
          var tileBase = pane.IsSecondary ? constants.PrimaryTiles : 0;
          try {
-            var blocks = blockset.ReadBlocks(blockset.PrimaryBlocks);
+            var blocks = blockset.ReadBlocks(-1);
             foreach (var block in blocks) {
                for (int i = 0; i < 8; i++) {
                   var value = block[i * 2] | (block[i * 2 + 1] << 8);
@@ -366,13 +366,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var blockset = pane.Blockset;
          if (blockset == null || constants == null) return;
          try {
+            // an animation can't reach past the end of its tileset: those tiles would be drawn over the other tileset's
+            var count = Math.Min(tileCount, pane.TileCount - firstTile);
+            if (count < 1) { OnError?.Invoke(this, "Pick a tile inside the tileset first."); return; }
             var table = animations.EnsureTable(blockset.Start, pane.IsSecondary, constants, out _);
-            animations.AddEntry(table, firstTile, tileCount, frameCount, speed, pane.IsSecondary, constants, pane.RawTiles);
+            animations.AddEntry(table, firstTile, count, frameCount, speed, pane.IsSecondary, constants, pane.RawTiles);
             viewPort.ChangeHistory.ChangeCompleted();
             viewPort.Refresh();
             Reload();
             SelectedEntry = Entries.LastOrDefault(item => item.Pane == pane && !item.IsBuiltIn);
-            OnMessage?.Invoke(this, $"Added an animation for tiles {firstTile}-{firstTile + tileCount - 1} with {frameCount} frames. Every frame starts as a copy of the tiles: edit or import the frames to make it move.");
+            OnMessage?.Invoke(this, $"Added an animation for tiles {firstTile}-{firstTile + count - 1} with {frameCount} frames." + (count < tileCount ? $" (Only {count} tiles fit in the {pane.Title.ToLower()}.)" : string.Empty) + " Every frame starts as a copy of the tiles: edit or import the frames to make it move.");
          } catch (Exception e) {
             OnError?.Invoke(this, "Could not add the animation: " + e.Message);
          }
@@ -648,12 +651,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public ICommand ExportDoorFrames => StubCommand(ref exportDoorFrames, ExecuteExportDoorFrames, () => selectedDoor != null);
       public ICommand GotoDoorTable => StubCommand(ref gotoDoorTable, () => { var table = doors.Table; if (table == null) return; viewPort.Goto.Execute(table.Start); RequestTabChange?.Invoke(this, new TabChangeRequestedEventArgs(viewPort)); }, () => HasDoors);
 
-      private byte[][] allBlocks;          // every block of the map (primary + secondary), for metatile previews
+      private byte[][] allBlocks;          // every block of the map (primary + secondary), numbered the way the game numbers them
+      private byte[][] allAttributes;      // the attributes (behavior, layer type) of those blocks
       private int[][,] allTiles;           // every tile of the map (primary + secondary)
 
       private void LoadDoors(TilesetPane pane) {
          if (!HasDoors || pane.Blockset == null) return;
          foreach (var entry in doors.ReadEntries()) {
+            // the game plays a door when its tileset is either one of the map's two tilesets: so a door belongs to the tileset it names, and no other
             if (entry.TilesetAddress != pane.Blockset.Start) continue;
             Doors.Add(new DoorItem(entry, this, pane) { SpriteScale = spriteScale });
          }
@@ -668,11 +673,50 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             var primary = layout.PrimaryBlockset.FullBlocksetModel;
             var secondary = layout.SecondaryBlockset.FullBlocksetModel;
             allTiles = BlockmapRun.ReadTiles(primary, secondary, constants?.PrimaryTiles ?? 512);
-            allBlocks = BlockmapRun.ReadBlocks(primary.PrimaryBlocks, 1024 - primary.PrimaryBlocks, primary, secondary);
+            // the doors may sit on blocks past where the blockset data seems to end: make sure those blocks are read too
+            int maxPrimary = -1, maxSecondary = -1;
+            foreach (var entry in doors.ReadEntries()) {
+               if (entry.TilesetAddress == primary.Start) maxPrimary = Math.Max(maxPrimary, Math.Min(entry.Metatile, primary.PrimaryBlocks - 1));
+               if (entry.TilesetAddress == secondary.Start && entry.Metatile >= primary.PrimaryBlocks) maxSecondary = Math.Max(maxSecondary, entry.Metatile - primary.PrimaryBlocks);
+            }
+            maxSecondary = Math.Min(maxSecondary, 1023 - primary.PrimaryBlocks);
+            // block numbers 512 and up (640 in FRLG) are the secondary tileset's own blocks 0, 1, 2...
+            try {
+               allBlocks = BlockmapRun.ReadBlocks(maxPrimary, maxSecondary, primary, secondary);
+            } catch (Exception) {
+               allBlocks = BlockmapRun.ReadAllBlocks(primary, secondary); // a door pointing past the end of the ROM must not hide the others
+            }
+            try {
+               allAttributes = BlockmapRun.ReadBlockAttributes(maxPrimary, maxSecondary, primary, secondary);
+            } catch (Exception) {
+               try { allAttributes = BlockmapRun.ReadAllBlockAttributes(primary, secondary); } catch (Exception) { allAttributes = null; }
+            }
          } catch (Exception) {
             allBlocks = null;
+            allAttributes = null;
             allTiles = null;
          }
+      }
+
+      /// <summary>The metatile behavior of a block of the current map, or -1 if it can't be read.</summary>
+      public int BlockBehavior(int metatile) {
+         EnsureBlocks();
+         if (allAttributes == null || metatile < 0 || metatile >= allAttributes.Length) return -1;
+         var attribute = allAttributes[metatile];
+         if (attribute == null || attribute.Length == 0) return -1;
+         // Emerald: one byte of behavior, then layer bits. FireRed/LeafGreen: nine bits of behavior in a 4-byte attribute.
+         return model.IsFRLG() && attribute.Length >= 2 ? (attribute[0] | ((attribute[1] & 1) << 8)) : attribute[0];
+      }
+
+      /// <summary>Why the game would never play this door on the current map (null if nothing seems wrong).</summary>
+      public string DescribeDoorProblem(DoorEntry entry) {
+         EnsureBlocks();
+         if (allBlocks == null) return null;
+         if (entry.Metatile >= allBlocks.Length) return $"Block {entry.Metatile} doesn't exist in this map's tilesets (they have {allBlocks.Length} blocks).";
+         var behavior = BlockBehavior(entry.Metatile);
+         var isDoor = DoorAnimations.IsDoorBehavior(model, behavior);
+         if (isDoor == false) return $"Block {entry.Metatile} has the behavior {DoorAnimations.BehaviorName(model, behavior)}, so the game won't play this door on it. Give the block the ANIMATED_DOOR behavior in the map editor.";
+         return null;
       }
 
       /// <summary>Render one 16x16 block of the current map (for door previews).</summary>
@@ -697,7 +741,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var tilesetPalettes = ReadTilesetPalettes(entry.TilesetAddress);
          for (int t = 0; t < entry.TilesPerFrame; t++) {
             var palette = tilesetPalettes[paletteIndices[t] & 15];
-            int tx = (t % entry.WidthTiles) * 8, ty = (t / entry.WidthTiles) * 8;
+            var (tileX, tileY) = entry.TilePosition(t); // the tiles of a 2x2 door are stored block by block, not row by row
+            int tx = tileX * 8, ty = tileY * 8;
             int offset = (frame * entry.TilesPerFrame + t) * 32;
             for (int y = 0; y < 8; y++) {
                for (int x = 0; x < 8; x++) {
@@ -797,7 +842,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          for (int f = 0; f < DoorEntry.FrameCount; f++) {
             for (int t = 0; t < entry.TilesPerFrame; t++) {
                var palette = tilesetPalettes[paletteIndices[t] & 15];
-               int tx = (t % entry.WidthTiles) * 8, ty = f * entry.HeightTiles * 8 + (t / entry.WidthTiles) * 8;
+               var (tileX, tileY) = entry.TilePosition(t);
+               int tx = tileX * 8, ty = f * entry.HeightTiles * 8 + tileY * 8;
                int offset = (f * entry.TilesPerFrame + t) * 32;
                for (int y = 0; y < 8; y++) {
                   for (int x = 0; x < 8; x++) {
@@ -1119,6 +1165,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private IPixelViewModel block;
       public IPixelViewModel Block { get => block; private set { block = value; NotifyPropertyChanged(); } }
 
+      /// <summary>Set when something keeps the game from ever playing this door on the map being shown (for example the block isn't an animated door block).</summary>
+      public string Warning { get; private set; } = string.Empty;
+      public bool HasWarning => !string.IsNullOrEmpty(Warning);
+
       public int Sound { get => Entry.Sound; set { if (value != Entry.Sound) tab.SetDoorSound(this, value); } }
       public int Metatile { get => Entry.Metatile; set { if (value != Entry.Metatile) tab.SetDoorMetatile(this, value); } }
 
@@ -1153,6 +1203,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Frames.Clear();
          for (int f = 0; f < DoorEntry.FrameCount; f++) Frames.Add(new TilesetAnimationFrame(null, f, tab.RenderDoorFrame(entry, f)) { SpriteScale = spriteScale, Door = this });
          Block = tab.RenderBlock(entry.Metatile);
+         Warning = tab.DescribeDoorProblem(entry) ?? string.Empty;
+         NotifyPropertyChanged(nameof(Warning));
+         NotifyPropertyChanged(nameof(HasWarning));
          timelineStep = 0; stepTicks = 0;
          NotifyPropertyChanged(nameof(LiveFrame));
          NotifyPropertyChanged(nameof(Label));

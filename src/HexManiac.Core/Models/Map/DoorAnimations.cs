@@ -29,6 +29,25 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
       public string SoundName => Sound switch { 0 => "normal", 1 => "sliding", 2 => "arena", _ => Sound.ToString() };
       public static int WidthTilesFor(int size) => size >= 2 ? 4 : 2;
       public static int HeightTilesFor(int size) => size == 0 ? 2 : 4;
+
+      /// <summary>
+      /// Where tile number 'index' of a frame (the order the tiles are stored in) is drawn in the door's picture, counted in tiles.
+      /// One and two block tall doors store their tiles in rows, two tiles wide (the top block's 4 tiles, then the bottom block's).
+      /// A 2x2 door is four blocks of 4 tiles stored top left, bottom left, top right, bottom right (that is the order the game draws them in).
+      /// </summary>
+      public (int x, int y) TilePosition(int index) => TilePositionFor(Size, index);
+      public static (int x, int y) TilePositionFor(int size, int index) {
+         if (size < 2) return (index % 2, index / 2);
+         int block = index / 4, within = index % 4;
+         return (block / 2 * 2 + within % 2, block % 2 * 2 + within / 2);
+      }
+
+      /// <summary>The storage order of the tile drawn at (x, y) of the door's picture: the inverse of <see cref="TilePosition"/>.</summary>
+      public int TileIndexAt(int x, int y) => TileIndexFor(Size, x, y);
+      public static int TileIndexFor(int size, int x, int y) {
+         if (size < 2) return y * 2 + x;
+         return (x / 2 * 2 + y / 2) * 4 + y % 2 * 2 + x % 2;
+      }
    }
 
    /// <summary>
@@ -99,16 +118,41 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          for (int i = 0; i < entry.TilesPerFrame; i++) token.ChangeData(model, entry.PalettesAddress + i, (byte)(palette & 15));
       }
 
+      /// <summary>
+      /// The shape the door's tiles are registered with: two tiles wide, and tall enough for all the tiles of all three frames.
+      /// That is the order the tiles are stored in (see <see cref="DoorEntry.TilePosition"/> for how a frame is laid out when it is shown as a picture).
+      /// </summary>
+      public static SpriteFormat TilesFormat(DoorEntry entry) => new SpriteFormat(4, 2, entry.TilesPerFrame / 2 * DoorEntry.FrameCount, PaletteHint);
+
       /// <summary>Make sure the door's tiles are registered as a sprite that knows its palette (the tileset's), so the image editor shows them in colour.</summary>
       public void EnsureTilesFormat(DoorEntry entry) {
          if (entry.TilesAddress < 0 || entry.TilesAddress + entry.TilesLength > model.Count) return;
          var existing = model.GetNextRun(entry.TilesAddress);
-         if (existing is ISpriteRun sprite && sprite.Start == entry.TilesAddress && sprite.SpriteFormat.PaletteHint == PaletteHint && sprite.PointerSources.Count > 0) return;
+         var format = TilesFormat(entry);
+         if (existing is ISpriteRun sprite && sprite.Start == entry.TilesAddress && sprite.SpriteFormat.PaletteHint == PaletteHint &&
+            sprite.SpriteFormat.TileWidth == format.TileWidth && sprite.SpriteFormat.TileHeight == format.TileHeight && sprite.SpriteFormat.BitsPerPixel == 4 &&
+            sprite.PointerSources.Count > 0) return;
          var token = tokenFactory();
          var sources = existing.Start == entry.TilesAddress && existing.PointerSources != null ? existing.PointerSources : SortedSpan<int>.None;
          sources = sources.Add1(entry.EntryAddress + 12);
          if (existing.Start != entry.TilesAddress) model.ClearFormat(token, entry.TilesAddress, entry.TilesLength);
-         model.ObserveRunWritten(token, new SpriteRun(model, entry.TilesAddress, new SpriteFormat(4, entry.WidthTiles, entry.HeightTiles * DoorEntry.FrameCount, PaletteHint), sources));
+         model.ObserveRunWritten(token, new SpriteRun(model, entry.TilesAddress, format, sources));
+      }
+
+      /// <summary>
+      /// Does this metatile behavior make the game play a door animation? True or false if the ROM's behavior names say, null if they can't be read.
+      /// The game only animates blocks with the ANIMATED_DOOR behavior (and the Petalburg gym door).
+      /// </summary>
+      public static bool? IsDoorBehavior(IDataModel model, int behavior) {
+         if (behavior < 0 || !model.TryGetList("MapAttributeBehaviors", out var list) || behavior >= list.Count) return null;
+         var name = list[behavior].ToUpperInvariant().Replace(" ", "_");
+         if (name.StartsWith("MB_")) name = name.Substring(3);
+         return name == "ANIMATED_DOOR" || name == "PETALBURG_GYM_DOOR";
+      }
+
+      public static string BehaviorName(IDataModel model, int behavior) {
+         if (behavior >= 0 && model.TryGetList("MapAttributeBehaviors", out var list) && behavior < list.Count) return list[behavior];
+         return behavior.ToString();
       }
 
       public void SetSound(DoorEntry entry, int sound) => tokenFactory().ChangeData(model, entry.EntryAddress + 8, (byte)sound.LimitToRange(0, 2));
@@ -125,6 +169,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          size = size.LimitToRange(0, 3);
          int width = DoorEntry.WidthTilesFor(size), height = DoorEntry.HeightTilesFor(size);
          int tilesPerFrame = width * height, tilesLength = tilesPerFrame * 32 * DoorEntry.FrameCount;
+         var tilesFormat = new SpriteFormat(4, 2, tilesPerFrame / 2 * DoorEntry.FrameCount, PaletteHint);
 
          // the game reads the table until an entry with no tiles, so the new door goes in front of that terminator
          var index = TerminatorIndex(table);
@@ -146,7 +191,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          var tilesAddress = model.FindFreeSpace(model.FreeSpaceStart, tilesLength);
          if (tilesAddress < 0) { tilesAddress = model.Count; model.ExpandData(token, model.Count + tilesLength + 0x10); }
          for (int i = 0; i < tilesLength; i++) token.ChangeData(model, tilesAddress + i, initialTiles != null && i < initialTiles.Length ? initialTiles[i] : (byte)0);
-         model.ObserveRunWritten(token, new SpriteRun(model, tilesAddress, new SpriteFormat(4, width, height * DoorEntry.FrameCount, PaletteHint), SortedSpan.One(entry + 12)));
+         model.ObserveRunWritten(token, new SpriteRun(model, tilesAddress, tilesFormat, SortedSpan.One(entry + 12)));
 
          // the entry
          model.WriteMultiByteValue(entry, 2, token, metatile.LimitToRange(0, 0x3FF));
@@ -160,7 +205,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          element.SetAddress("palettes", palettesAddress);
          element.SetAddress("tiles", tilesAddress, writeDestinationFormat: false);
          if (model.GetNextRun(tilesAddress) is not ISpriteRun) {
-            model.ObserveRunWritten(token, new SpriteRun(model, tilesAddress, new SpriteFormat(4, width, height * DoorEntry.FrameCount, PaletteHint), SortedSpan.One(entry + 12)));
+            model.ObserveRunWritten(token, new SpriteRun(model, tilesAddress, tilesFormat, SortedSpan.One(entry + 12)));
          }
          return ReadEntries()[index];
       }

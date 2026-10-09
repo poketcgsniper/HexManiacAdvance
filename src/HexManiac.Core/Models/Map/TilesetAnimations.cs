@@ -429,17 +429,34 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
       /// The game's InitTilesetAnim_* routines are tiny: they store a counter max and a callback pointer that sits in their literal pool.
       /// Find that pointer (a thumb address in the ROM) so the generated code can keep calling it.
       /// </summary>
-      private int FindCallbackInInit(int initAddress) {
+      private int FindCallbackInInit(int initAddress) => FindCallbackInInit(model, initAddress);
+
+      /// <summary>
+      /// Decode the init routine (a few thumb instructions up to the first return) and return the thumb pointer it loads from its own literal pool, or NULL.
+      /// Only literals that the routine itself loads with 'ldr rN, [pc, #imm]' count: some inits (Petalburg, Fallarbor, Fortree, Lilycove, Mossdeep) install no callback,
+      /// and looking at the words after them instead finds the literal pool of the NEXT init routine (Rustboro's windy water animation, which then corrupted the tiles
+      /// of every map that used the tileset once an animation was added to it).
+      /// </summary>
+      public static int FindCallbackInInit(IDataModel model, int initAddress) {
          int start = initAddress & ~1;
-         for (int offset = 0; offset < 0x40 && start + offset + 4 <= model.Count; offset += 4) {
-            var word = model.ReadMultiByteValue(start + offset, 4);
-            if (word < BaseModel.PointerOffset || word >= BaseModel.PointerOffset + model.Count) continue;
-            if ((word & 1) == 0) continue;
-            var candidate = word - BaseModel.PointerOffset;
-            if (candidate == start + 1) continue;
-            return candidate;
+         int result = Pointer.NULL;
+         for (int offset = 0; offset < 0x40 && start + offset + 2 <= model.Count; offset += 2) {
+            var instruction = model.ReadMultiByteValue(start + offset, 2);
+            if ((instruction & 0xF800) == 0x4800) {
+               // ldr rN, [pc, #imm8 * 4]: the address is word aligned, relative to the instruction + 4
+               var literal = ((start + offset + 4) & ~3) + (instruction & 0xFF) * 4;
+               if (literal + 4 <= model.Count) {
+                  var word = model.ReadMultiByteValue(literal, 4);
+                  if (word >= BaseModel.PointerOffset && word < BaseModel.PointerOffset + model.Count && (word & 1) != 0) {
+                     var candidate = word - BaseModel.PointerOffset;
+                     if (candidate != start + 1) result = candidate; // the routine stores the last one it loads
+                  }
+               }
+            } else if (instruction == 0x4770 || (instruction & 0xFF00) == 0xBD00 || (instruction & 0xFF87) == 0x4700) {
+               break; // bx lr, pop {.., pc}, bx rN: the routine is over, whatever follows belongs to something else
+            }
          }
-         return Pointer.NULL;
+         return result;
       }
 
       private int InsertCallback(string name, int tableAddress, int originalCallback, TilesetAnimationConstants constants) {

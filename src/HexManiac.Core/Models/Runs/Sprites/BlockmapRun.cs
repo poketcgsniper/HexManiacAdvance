@@ -116,6 +116,16 @@ namespace HexManiac.Core.Models.Runs.Sprites {
          return result.ToArray();
       }
 
+      /// <summary>
+      /// Every block of a map's two blocksets in the game's own numbering: block 0..PrimaryBlocks-1 come from the primary blockset (padded with
+      /// empty blocks if it is shorter), and block PrimaryBlocks and up are the secondary blockset's blocks 0, 1, 2...
+      /// (Passing the primary block count as the 'highest block in use' instead would read one block too many and shift every secondary block by one.)
+      /// </summary>
+      public static byte[][] ReadAllBlocks(BlocksetModel primary, BlocksetModel secondary) => ReadBlocks(-1, -1, primary, secondary);
+
+      /// <summary>The attributes (behavior and layer data) of every block, numbered the same way as <see cref="ReadAllBlocks"/>.</summary>
+      public static byte[][] ReadAllBlockAttributes(BlocksetModel primary, BlocksetModel secondary) => ReadBlockAttributes(-1, -1, primary, secondary);
+
       public static void WriteBlocks(Func<ModelDelta> tokenFactory, int maxUsedPrimary, int maxUsedSecondary, BlocksetModel blockModel1, BlocksetModel blockModel2, byte[][] blocks) {
          var primary = new List<byte[]>();
          var secondary = new List<byte[]>();
