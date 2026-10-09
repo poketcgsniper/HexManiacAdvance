@@ -1,4 +1,4 @@
-﻿using HavenSoft.HexManiac.Core.Models;
+using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Code;
 using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
@@ -2549,6 +2549,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       public void OpenDexReorderTab(string dexTableName) {
          var newTab = new DexReorderTab(fs, this, dexTableName, HardcodeTablesModel.DexInfoTableName, dexTableName == HardcodeTablesModel.NationalDexTableName);
+         var args = new TabChangeRequestedEventArgs(newTab);
+         RequestTabChange(this, args);
+         if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);
+      }
+
+      public void OpenSpriteGalleryTab() {
+         var newTab = new SpriteGalleryTab(this);
          var args = new TabChangeRequestedEventArgs(newTab);
          RequestTabChange(this, args);
          if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);

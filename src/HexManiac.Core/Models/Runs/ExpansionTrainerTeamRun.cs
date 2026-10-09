@@ -13,6 +13,11 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
    /// </summary>
    public interface ITrainerTeamRun : IStreamRun, ITableRun {
       IEnumerable<int> Search(string parentArrayName, int id);
+      /// <summary>
+      /// Like IStreamRun.DeserializeRun, but can also fill in each Pokémon's moves (the last 4 level-up moves at its level)
+      /// and/or reset the held items to the species default.
+      /// </summary>
+      ITrainerTeamRun DeserializeRun(string content, ModelDelta token, bool setDefaultMoves, bool setDefaultItems, out IReadOnlyList<int> changedOffsets);
    }
 
    /// <summary>
@@ -252,6 +257,10 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
 
       public IStreamRun DeserializeRun(string content, ModelDelta token, out IReadOnlyList<int> changedOffsets, out IReadOnlyList<int> movedChildren) {
          movedChildren = new List<int>();
+         return DeserializeRun(content, token, false, false, out changedOffsets);
+      }
+
+      public ITrainerTeamRun DeserializeRun(string content, ModelDelta token, bool setDefaultMoves, bool setDefaultItems, out IReadOnlyList<int> changedOffsets) {
          var changed = new List<int>();
          var lines = content.Split('\n').Select(line => line.Trim('\r').Trim()).ToList();
          var species = Names(SpeciesTable);
@@ -304,6 +313,19 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
             }
          }
          if (records.Count == 0) records.Add(TemplateFor(0));
+         if (setDefaultMoves || setDefaultItems) {
+            foreach (var record in records) {
+               var speciesID = record[Offset_Species] | (record[Offset_Species + 1] << 8);
+               if (setDefaultMoves) {
+                  var defaults = GetDefaultMoves(speciesID, record[Offset_Level]);
+                  for (int j = 0; j < 4; j++) WriteValue(record, Offset_Moves + j * 2, 2, defaults[j]);
+               }
+               if (setDefaultItems) {
+                  var pokemonTable = model.GetTable(SpeciesTable);
+                  WriteValue(record, Offset_Item, 2, pokemonTable?.ReadValue(model, speciesID, "item1") ?? 0);
+               }
+            }
+         }
 
          // step 2: make room
          var workingRun = this;
@@ -326,6 +348,38 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
 
          changedOffsets = changed;
          return new ExpansionTrainerTeamRun(model, workingRun.Start, workingRun.PointerSources);
+      }
+
+      /// <summary>
+      /// The last 4 level-up moves the species knows at the given level, read from the species' levelUpMoves list ([move: level:] records).
+      /// </summary>
+      private IReadOnlyList<int> GetDefaultMoves(int speciesID, int level) {
+         var results = new List<int>();
+         if (model.GetTable(SpeciesTable) is ITableRun species && speciesID < species.ElementCount) {
+            int offset = 0, listOffset = -1;
+            foreach (var segment in species.ElementContent) {
+               if (segment.Name == "levelUpMoves") { listOffset = offset; break; }
+               offset += segment.Length;
+            }
+            if (listOffset >= 0) {
+               var listStart = model.ReadPointer(species.Start + species.ElementLength * speciesID + listOffset);
+               if (model.GetNextRun(listStart) is ITableRun list && list.Start == listStart && list.ElementContent.Count >= 2) {
+                  var moveWidth = list.ElementContent[0].Length;
+                  var levelWidth = list.ElementContent[1].Length;
+                  for (int i = 0; i < list.ElementCount; i++) {
+                     var move = model.ReadMultiByteValue(list.Start + i * list.ElementLength, moveWidth);
+                     var moveLevel = model.ReadMultiByteValue(list.Start + i * list.ElementLength + moveWidth, levelWidth);
+                     if (move == 0 && moveLevel == 0) break;
+                     if (moveLevel > level) continue;
+                     results.Remove(move);
+                     results.Add(move);
+                  }
+               }
+            }
+         }
+         while (results.Count > 4) results.RemoveAt(0);
+         while (results.Count < 4) results.Add(0);
+         return results;
       }
 
       private byte[] TemplateFor(int index) {

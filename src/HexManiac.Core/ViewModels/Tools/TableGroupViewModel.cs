@@ -1,4 +1,4 @@
-﻿using HavenSoft.HexManiac.Core.Models;
+using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.Models.Runs.Sprites;
@@ -228,12 +228,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             }
          }
 
+         // Pick the most specific view model first. LZ sprites are also IStreamRuns, and building a text view model for one
+         // serializes the whole compressed image as text before it gets thrown away: with a dozen sprites per table element
+         // (decomp-style species structs) that was most of the time spent switching between elements.
          IStreamArrayElementViewModel streamElement = null;
-         if (streamRun == null || streamRun is IStreamRun || streamRun is ITableRun) streamElement = new TextStreamElementViewModel(viewPort, item.Name, itemAddress, pointerSegment.InnerFormat);
          var parentStart = parent is StreamElementViewModel streamParent ? streamParent.Start : -1;
-         if (streamRun is ISpriteRun spriteRun) streamElement = new SpriteElementViewModel(viewPort, item.Name, spriteRun.FormatString, spriteRun.SpriteFormat, itemAddress);
-         if (streamRun is IPaletteRun paletteRun) streamElement = new PaletteElementViewModel(viewPort, viewPort.ChangeHistory, item.Name, paletteRun.FormatString, paletteRun.PaletteFormat, itemAddress);
-         if (streamRun is TrainerPokemonTeamRun tptRun) streamElement = new TrainerPokemonTeamElementViewModel(viewPort, tptRun, item.Name, itemAddress);
+         if (streamRun is ITrainerTeamRun tptRun) streamElement = new TrainerPokemonTeamElementViewModel(viewPort, tptRun, item.Name, itemAddress);
+         else if (streamRun is IPaletteRun paletteRun) streamElement = new PaletteElementViewModel(viewPort, viewPort.ChangeHistory, item.Name, paletteRun.FormatString, paletteRun.PaletteFormat, itemAddress);
+         else if (streamRun is ISpriteRun spriteRun) streamElement = new SpriteElementViewModel(viewPort, item.Name, spriteRun.FormatString, spriteRun.SpriteFormat, itemAddress);
+         else if (streamRun == null || streamRun is IStreamRun || streamRun is ITableRun) streamElement = new TextStreamElementViewModel(viewPort, item.Name, itemAddress, pointerSegment.InnerFormat);
          if (streamElement == null) return;
          streamElement.Parent = header;
 
@@ -244,10 +247,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             var run = viewPort.Model.GetNextRun(closure_destination) as IStreamRun;
             IStreamArrayElementViewModel newStream = null;
 
-            if (run == null || run is IStreamRun) newStream = new TextStreamElementViewModel(viewPort, item.Name, streamAddress, pointerSegment.InnerFormat);
             var parentStart = parent is StreamElementViewModel streamParent ? streamParent.Start : -1;
-            if (run is ISpriteRun spriteRun1) newStream = new SpriteElementViewModel(viewPort, item.Name, spriteRun1.FormatString, spriteRun1.SpriteFormat, streamAddress);
             if (run is IPaletteRun paletteRun1) newStream = new PaletteElementViewModel(viewPort, viewPort.ChangeHistory, item.Name, paletteRun1.FormatString, paletteRun1.PaletteFormat, streamAddress);
+            else if (run is ISpriteRun spriteRun1) newStream = new SpriteElementViewModel(viewPort, item.Name, spriteRun1.FormatString, spriteRun1.SpriteFormat, streamAddress);
+            else if (run == null || run is IStreamRun) newStream = new TextStreamElementViewModel(viewPort, item.Name, streamAddress, pointerSegment.InnerFormat);
 
             ForwardModelChanged(newStream);
             ForwardModelDataMoved(newStream);

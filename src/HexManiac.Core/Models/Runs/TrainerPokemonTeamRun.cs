@@ -1,4 +1,4 @@
-﻿using HavenSoft.HexManiac.Core.Models.Code;
+using HavenSoft.HexManiac.Core.Models.Code;
 using HavenSoft.HexManiac.Core.Models.Runs.Sprites;
 using HavenSoft.HexManiac.Core.ViewModels;
 using HavenSoft.HexManiac.Core.ViewModels.DataFormats;
@@ -197,6 +197,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          changedRuns = new List<int>();
          return DeserializeRun(content, token, false, false, out changedOffsets);
       }
+      ITrainerTeamRun ITrainerTeamRun.DeserializeRun(string content, ModelDelta token, bool setDefaultMoves, bool setDefaultItems, out IReadOnlyList<int> changedOffsets) => DeserializeRun(content, token, setDefaultMoves, setDefaultItems, out changedOffsets);
       public TrainerPokemonTeamRun DeserializeRun(string content, ModelDelta token, bool setDefaultMoves, bool setDefaultItems, out IReadOnlyList<int> changedOffsets) {
          var changedAddresses = new HashSet<int>();
          var lines = content.Split(Environment.NewLine).Select(line => line.Trim()).ToArray();

@@ -1,4 +1,4 @@
-﻿using HavenSoft.HexManiac.Core.Models;
+using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.Models.Runs.Sprites;
 using HavenSoft.HexManiac.Core.ViewModels.DataFormats;
@@ -526,6 +526,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             new RomOverview(),
             new DecapNames(),
             new ApplyCFRUPatch { Editor = this },
+            new OpenSpriteGallery(),
          };
 
          tabs = new List<ITabContent>();
