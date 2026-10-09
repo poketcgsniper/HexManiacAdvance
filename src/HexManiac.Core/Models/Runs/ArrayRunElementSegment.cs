@@ -234,6 +234,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
             .ToList();
          if (!(model.GetNextRun(model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, EnumName)) is ITableRun tableRun)) return defaultOptions;
          if (!(tableRun.ElementContent[0] is ArrayRunPointerSegment pointerSegment)) return defaultOptions;
+         if (OverworldComboOptions.IsOverworldSpriteTable(pointerSegment.InnerFormat)) return model.CurrentCacheScope.GetOrAdd("combo-options:" + EnumName, () => OverworldComboOptions.Render(model, tableRun, defaultOptions));
          if (!IsSpriteFormat(pointerSegment.InnerFormat) && !IsStructStartingWithSprite(pointerSegment.InnerFormat)) return defaultOptions;
 
          // Rendering an image for every option (every trainer sprite, every overworld sprite, ...) is expensive,

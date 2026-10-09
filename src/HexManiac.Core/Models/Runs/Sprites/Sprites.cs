@@ -147,6 +147,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
          }
 
          if (!string.IsNullOrEmpty(hint)) {
+            hint = ChoosePaletteTable(model, noChange, hint);
             var address = model.GetAddressFromAnchor(noChange, -1, hint);
             var run = model.GetNextRun(address);
             if (run is IPaletteRun palRun && palRun.Start == address) {
@@ -257,6 +258,34 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
             }
          }
          return results;
+      }
+
+      /// <summary>
+      /// A key=value hint may name several palette tables, separated by commas: `tableA,tableB:id=1004`.
+      /// The first table with an element that has the key is the one to use (field effects have their own palettes besides the overworld ones).
+      /// If none has the key, the first table is used, like it is for a hint that names a single table.
+      /// </summary>
+      private static string ChoosePaletteTable(IDataModel model, ModelDelta noChange, string hint) {
+         var colon = hint.IndexOf(':');
+         if (colon < 0 || !hint.Substring(0, colon).Contains(',')) return hint;
+         var names = hint.Substring(0, colon).Split(',');
+         var rest = hint.Substring(colon);
+         var identifierValuePair = rest.Substring(1).Split("=");
+         if (identifierValuePair.Length != 2) return names[0] + rest;
+         foreach (var name in names) {
+            if (!(model.GetNextRun(model.GetAddressFromAnchor(noChange, -1, name)) is ITableRun table)) continue;
+            var segment = table.ElementContent.FirstOrDefault(seg => seg.Name == identifierValuePair[0]);
+            if (segment == null) continue;
+            int keyValue;
+            if (segment is ArrayRunEnumSegment eSegment) keyValue = eSegment.GetOptions(model).ToList().IndexOf(identifierValuePair[1]);
+            else if (segment is ArrayRunHexSegment) int.TryParse(identifierValuePair[1], NumberStyles.HexNumber, CultureInfo.CurrentCulture, out keyValue);
+            else int.TryParse(identifierValuePair[1], out keyValue);
+            var segmentOffset = table.ElementContent.Until(seg => seg == segment).Sum(seg => seg.Length);
+            for (int i = 0; i < table.ElementCount; i++) {
+               if (model.ReadMultiByteValue(table.Start + i * table.ElementLength + segmentOffset, segment.Length) == keyValue) return name + rest;
+            }
+         }
+         return names[0] + rest;
       }
 
       /// <summary>

@@ -85,7 +85,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          if (heightOffset == parentLength) heightOffset = -1;
          if (keyOffset == parentLength) keyOffset = -1;
 
-         var elementStart = sources[0] - listOffset;
+         var elementStart = ParentSource(model, parent, sources) - listOffset;
          var width = widthOffset >= 0 ? Math.Max(1, model.ReadMultiByteValue(elementStart + widthOffset, 2)) : 0;
          var height = heightOffset >= 0 ? Math.Max(1, model.ReadMultiByteValue(elementStart + heightOffset, 2)) : 0;
          // if there was no height/width found, assume that it's square and based on the first element length
@@ -230,6 +230,21 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
 
          // if the parent paletteid changed, we just need to update the format, no data change is required.
          return new OverworldSpriteListRun(model, parent, PaletteHint, RunIndex, Start, PointerSources);
+      }
+
+      /// <summary>
+      /// A list of frames can be pointed at from more than one table: a berry tree's picture table is used by the berry tree graphics
+      /// and also listed in the berry stats. The size and palette come from the table that is laid out like the parent segments,
+      /// not from whichever pointer happens to be first.
+      /// </summary>
+      private static int ParentSource(IDataModel model, IReadOnlyList<ArrayRunElementSegment> parent, SortedSpan<int> sources) {
+         foreach (var source in sources) {
+            if (!(model.GetNextRun(source) is ITableRun table) || table.ElementContent.Count != parent.Count) continue;
+            var sameLayout = true;
+            for (int i = 0; i < parent.Count && sameLayout; i++) sameLayout = table.ElementContent[i].Name == parent[i].Name && table.ElementContent[i].Length == parent[i].Length;
+            if (sameLayout) return source;
+         }
+         return sources[0];
       }
 
       private static int GetOffset<T>(IReadOnlyList<ArrayRunElementSegment> segments, Func<T, bool> segmentIdentifier) where T : ArrayRunElementSegment
