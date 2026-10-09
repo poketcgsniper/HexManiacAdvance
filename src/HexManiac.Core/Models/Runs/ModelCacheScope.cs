@@ -163,11 +163,12 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          var bankTable = model.GetTable(HardcodeTablesModel.MapBankTable);
          if (bankTable == null) return results;
          var banks = new ModelTable(model, bankTable.Start, null, bankTable);
+         var names = new MapNameLookup(model); // the same lookup for every map, so the name table and the bank tables are only looked up once
          for (int i = 0; i < banks.Count; i++) {
             var maps = banks[i].GetSubTable("maps");
             if (maps == null) continue;
             for (int j = 0; j < maps.Count; j++) {
-               var name = BlockMapViewModel.MapIDToText(model, i, j);
+               var name = names.Text(i, j);
                var mapText = $"maps.bank{i}.{name}";
                results.Add(new(i, j, mapText));
             }

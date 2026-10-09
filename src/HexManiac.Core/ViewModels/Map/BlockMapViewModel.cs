@@ -2800,25 +2800,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          return MapIDToText(model, group, map);
       }
 
-      public static string MapIDToText(IDataModel model, int group, int map) {
-         var offset = model.IsFRLG() ? 0x58 : 0;
-
-         var mapBanks = new ModelTable(model, model.GetTable(HardcodeTablesModel.MapBankTable).Start);
-         var bank = mapBanks[group].GetSubTable("maps");
-         if (bank == null) return $"{group}-{map}";
-         if (bank.Count <= map) return $"{group}-{map}";
-         var mapTable = bank[map]?.GetSubTable("map");
-         if (mapTable == null) return $"{group}-{map}";
-         if (!mapTable[0].HasField("regionSectionID")) return $"{group}-{map}";
-         var key = mapTable[0].GetValue("regionSectionID") - offset;
-
-         var names = model.GetTableModel(HardcodeTablesModel.MapNameTable);
-         var name = names == null ? string.Empty : names[key].GetStringValue("name");
-         name = SanitizeName(name);
-         if (name.Length == 0) name = "(unnamed)";
-
-         return $"{name}.{group}-{map}";
-      }
+      public static string MapIDToText(IDataModel model, int group, int map) => new MapNameLookup(model).Text(group, map);
 
       #endregion
 
@@ -3061,5 +3043,45 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       None = 0,
       Shrink = 1,
       Enlarge = 2,
+   }
+
+   /// <summary>
+   /// Works out the display names of maps ("Littleroot Town.0-9").
+   /// Everything that is the same for every map (the bank table, the name table, the name of a region) is looked up once,
+   /// so listing all of a ROM's maps (hundreds of them) doesn't do it all again for each one.
+   /// </summary>
+   public sealed class MapNameLookup {
+      private readonly int offset;
+      private readonly ModelTable mapBanks, names;
+      private readonly Dictionary<int, ModelTable> banks = new();
+      private readonly Dictionary<int, string> regionNames = new();
+
+      public MapNameLookup(IDataModel model) {
+         offset = model.IsFRLG() ? 0x58 : 0;
+         mapBanks = new ModelTable(model, model.GetTable(HardcodeTablesModel.MapBankTable).Start);
+         names = model.GetTableModel(HardcodeTablesModel.MapNameTable);
+      }
+
+      public string Text(int group, int map) {
+         if (!banks.TryGetValue(group, out var bank)) {
+            bank = mapBanks[group].GetSubTable("maps");
+            banks[group] = bank;
+         }
+         if (bank == null) return $"{group}-{map}";
+         if (bank.Count <= map) return $"{group}-{map}";
+         var mapTable = bank[map]?.GetSubTable("map");
+         if (mapTable == null) return $"{group}-{map}";
+         if (!mapTable[0].HasField("regionSectionID")) return $"{group}-{map}";
+         var key = mapTable[0].GetValue("regionSectionID") - offset;
+
+         if (!regionNames.TryGetValue(key, out var name)) {
+            name = names == null ? string.Empty : names[key].GetStringValue("name");
+            name = BlockMapViewModel.SanitizeName(name);
+            if (name.Length == 0) name = "(unnamed)";
+            regionNames[key] = name;
+         }
+
+         return $"{name}.{group}-{map}";
+      }
    }
 }
