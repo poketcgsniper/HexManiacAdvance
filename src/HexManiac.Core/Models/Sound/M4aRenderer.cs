@@ -31,6 +31,50 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          return ToWav(left, right, OutputRate);
       }
 
+      /// <summary>
+      /// Plays a single note of one instrument (the 12 byte ToneData at 'toneAddress') so it can be auditioned without a song:
+      /// held for 'holdSeconds', then released, for at most 'maxSeconds'. Key splits and drum kits pick their sub-instrument from 'key', like in a song.
+      /// </summary>
+      public byte[] RenderPreviewNote(int toneAddress, int key = 60, int velocity = 100, double holdSeconds = 0.9, double maxSeconds = 3) {
+         var (left, right) = RenderPreview(toneAddress, key, velocity, holdSeconds, maxSeconds);
+         return ToWav(left, right, OutputRate);
+      }
+
+      public (float[] left, float[] right) RenderPreview(int toneAddress, int key = 60, int velocity = 100, double holdSeconds = 0.9, double maxSeconds = 3) {
+         var tone = ReadTone(toneAddress);
+         var player = new Player { Priority = 0 };
+         for (int i = 1; i <= 4; i++) player.Cgb[i] = new Channel { CgbNumber = i };
+         // a track that never runs a command: it only exists to own the note (the long wait keeps MPlayMain from reading the ROM)
+         var track = new Track { Tone = tone, Wait = int.MaxValue / 2, Vol = 100, Key = key, Velocity = velocity, GateTime = (int)Math.Round(holdSeconds * FramesPerSecond) };
+         track.VolChanged = track.PitChanged = true;
+         TrkVolPitSet(track);
+         player.Tracks.Add(track);
+         StartNote(player, track);
+
+         var left = new List<float>();
+         var right = new List<float>();
+         double sampleCarry = 0;
+         int maxFrames = (int)(maxSeconds * FramesPerSecond);
+         for (int frame = 0; frame < maxFrames; frame++) {
+            MPlayMain(player);
+            sampleCarry += OutputRate / FramesPerSecond;
+            int samples = (int)sampleCarry;
+            sampleCarry -= samples;
+            var (l, r) = MixFrame(player, samples);
+            for (int i = 0; i < samples; i++) { left.Add((float)l[i]); right.Add((float)r[i]); }
+            if (!player.DirectSound.Any(c => c.On) && !player.Cgb.Skip(1).Any(c => c.On)) break;
+         }
+         var leftArray = left.ToArray();
+         var rightArray = right.ToArray();
+         float peak = 0;
+         for (int i = 0; i < leftArray.Length; i++) { peak = Math.Max(peak, Math.Abs(leftArray[i])); peak = Math.Max(peak, Math.Abs(rightArray[i])); }
+         float scale = peak > 0.95f ? 0.95f / peak : 1f;
+         if (scale != 1f) {
+            for (int i = 0; i < leftArray.Length; i++) { leftArray[i] *= scale; rightArray[i] *= scale; }
+         }
+         return (leftArray, rightArray);
+      }
+
       #region Data structures
 
       private class Tone {
@@ -402,6 +446,11 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
                if (track.Pc < model.Count && model[track.Pc] < 0x80) track.GateTime += model[track.Pc++];
             }
          }
+         StartNote(player, track);
+      }
+
+      /// <summary>Starts the track's current key/velocity/gate time on a channel, using the track's current tone.</summary>
+      private void StartNote(Player player, Track track) {
          var tone = track.Tone;
          if (tone == null) return;
          int key = track.Key;

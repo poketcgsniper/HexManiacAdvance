@@ -630,11 +630,9 @@ namespace HavenSoft.HexManiac.WPF.Implementations {
          return (short)((r << 10) | (g << 5) | (b << 0));
       }
 
-      private static string CreateFilterFromOptions(string description, params string[] extensionOptions) {
-         if (description == null) return string.Empty;
-         var extensions = string.Join(",", extensionOptions.Select(option => $"*.{option}"));
-         return $"{description}|{extensions}|All Files|*.*";
-      }
+      // the dialogs separate the patterns of one filter with ';' (not ','): see FileDialogFilter
+      private static string CreateFilterFromOptions(string description, params string[] extensionOptions)
+         => FileDialogFilter.Create(description, extensionOptions);
 
       #region StackOverflow: how to open a file's properties dialog (https://stackoverflow.com/questions/1936682/how-do-i-display-a-files-properties-dialog-from-c)
 
