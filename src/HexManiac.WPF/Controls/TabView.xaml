@@ -711,6 +711,58 @@
                                           </StackPanel>
                                           </Grid>
                                        </DataTemplate>
+                                       <!-- a list of wild encounters: one row per pokemon, one box per value (min level, max level, species), so Tab walks across the row and down the list -->
+                                       <DataTemplate DataType="{x:Type hsg3hvmtr:TableRowsStreamElementViewModel}">
+                                          <Grid HorizontalAlignment="Stretch" Visibility="{Binding Visible, Converter={StaticResource BoolToVisibility}}">
+                                          <StackPanel ToolTip="{Binding ParentName}">
+                                             <hsg3hv:CommonTableStreamControl />
+                                             <StackPanel Margin="20,2,2,2" Background="{DynamicResource Backlight}"
+                                                   Visibility="{Binding ShowContent, Converter={StaticResource BoolToVisibility}}">
+                                                <DockPanel LastChildFill="True" Margin="2,2,2,0">
+                                                   <Border DockPanel.Dock="Left" Width="96" Margin="2,0" Visibility="{Binding HasRowLabels, Converter={StaticResource BoolToVisibility}}"/>
+                                                   <ItemsControl ItemsSource="{Binding Columns}" IsTabStop="False">
+                                                      <ItemsControl.ItemsPanel>
+                                                         <ItemsPanelTemplate>
+                                                            <DockPanel LastChildFill="True"/>
+                                                         </ItemsPanelTemplate>
+                                                      </ItemsControl.ItemsPanel>
+                                                      <ItemsControl.ItemTemplate>
+                                                         <DataTemplate>
+                                                            <TextBlock Width="{Binding Width}" Margin="2,0" Text="{Binding Header}" Foreground="{DynamicResource Secondary}"/>
+                                                         </DataTemplate>
+                                                      </ItemsControl.ItemTemplate>
+                                                   </ItemsControl>
+                                                </DockPanel>
+                                                <ItemsControl ItemsSource="{Binding Rows}" IsTabStop="False">
+                                                   <ItemsControl.ItemTemplate>
+                                                      <DataTemplate>
+                                                         <DockPanel LastChildFill="True" Margin="2,1">
+                                                            <TextBlock DockPanel.Dock="Left" Width="96" Margin="2,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                               Text="{Binding Label}" Foreground="{DynamicResource Secondary}"
+                                                               Visibility="{Binding ShowLabel, Converter={StaticResource BoolToVisibility}}"/>
+                                                            <ItemsControl ItemsSource="{Binding Cells}" IsTabStop="False">
+                                                               <ItemsControl.ItemsPanel>
+                                                                  <ItemsPanelTemplate>
+                                                                     <DockPanel LastChildFill="True"/>
+                                                                  </ItemsPanelTemplate>
+                                                               </ItemsControl.ItemsPanel>
+                                                               <ItemsControl.Resources>
+                                                                  <DataTemplate DataType="{x:Type hsg3hvmtr:NumericTableCellViewModel}">
+                                                                     <hsg3hv:AngleTextBox Width="56" Height="18" Margin="2,0" Direction="Out" PreviewKeyDown="UpdateTableCellValue"/>
+                                                                  </DataTemplate>
+                                                                  <DataTemplate DataType="{x:Type hsg3hvmtr:EnumTableCellViewModel}">
+                                                                     <hsg3hv:AngleComboBox DataContext="{Binding FilteringComboOptions}" MinWidth="120" Margin="2,0" Direction="Out"/>
+                                                                  </DataTemplate>
+                                                               </ItemsControl.Resources>
+                                                            </ItemsControl>
+                                                         </DockPanel>
+                                                      </DataTemplate>
+                                                   </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                             </StackPanel>
+                                          </StackPanel>
+                                          </Grid>
+                                       </DataTemplate>
                                        <DataTemplate DataType="{x:Type hsg3hvmtr:TupleArrayElementViewModel}">
                                           <Grid Visibility="{Binding Visible, Converter={StaticResource BoolToVisibility}}">
                                           <StackPanel>

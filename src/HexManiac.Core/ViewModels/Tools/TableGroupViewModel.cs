@@ -105,22 +105,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          isOpen = false;
       }
 
-      public void AddChildrenFromTable(ViewPort viewPort, Selection selection, ITableRun table, int index, SplitterArrayElementViewModel header, TableGroupViewModel helperGroup, int splitPortion = -1) {
+      /// <param name="splitPortion">Only add the fields of this partition (partitions are separated by '|' in the table's format). -1 adds every field.</param>
+      /// <param name="fields">If not empty, add just these fields (names, or partition numbers) in this order, instead of the partition: this is how a group re-orders a table.</param>
+      public void AddChildrenFromTable(ViewPort viewPort, Selection selection, ITableRun table, int index, SplitterArrayElementViewModel header, TableGroupViewModel helperGroup, int splitPortion = -1, IReadOnlyList<string> fields = null) {
          var itemAddress = table.Start + table.ElementLength * index;
          var originalItemAddress = itemAddress;
-         var currentPartition = 0;
-         foreach (var itemSegment in table.ElementContent) {
-            var item = itemSegment;
-            if (item is ArrayRunRecordSegment recordItem) item = recordItem.CreateConcrete(viewPort.Model, table, itemAddress);
 
-            if (itemSegment is ArrayRunSplitterSegment) {
-               currentPartition += 1;
-               continue;
-            } else if (splitPortion != -1 && splitPortion != currentPartition) {
-               itemAddress += item.Length;
-               continue;
-            }
-
+         foreach (var (item, address) in SelectFields(viewPort, table, itemAddress, splitPortion, fields)) {
+            itemAddress = address;
             IArrayElementViewModel viewModel = null;
             if (item.Type == ElementContentType.Unknown) viewModel = new FieldArrayElementViewModel(viewPort, item.Name, itemAddress, item.Length, HexFieldStrategy.Instance);
             else if (item.Type == ElementContentType.PCS) viewModel = new FieldArrayElementViewModel(viewPort, item.Name, itemAddress, item.Length, new TextFieldStrategy());
@@ -162,9 +154,48 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                Add(viewModel);
                helperGroup.AddChildrenFromPointerSegment(viewPort, itemAddress, item, viewModel, header, recursionLevel: 0);
             }
-            itemAddress += item.Length;
          }
          AddAdhocSpecialElementsToGroup(viewPort, table);
+      }
+
+      /// <summary>
+      /// Works out which fields of one table element to show, with the address of each, in the order to show them.
+      /// By default that is memory order, limited to one partition of the table. With a field list, it is the order of the list.
+      /// </summary>
+      public static IReadOnlyList<(ArrayRunElementSegment item, int address)> SelectFields(ViewPort viewPort, ITableRun table, int elementAddress, int splitPortion, IReadOnlyList<string> fields) {
+         // first, where does every field live? ('|' splitters take no space: they only start the next partition)
+         var layout = new List<(ArrayRunElementSegment item, int address, int partition)>();
+         var itemAddress = elementAddress;
+         var currentPartition = 0;
+         foreach (var itemSegment in table.ElementContent) {
+            var item = itemSegment;
+            if (item is ArrayRunRecordSegment recordItem) item = recordItem.CreateConcrete(viewPort.Model, table, itemAddress);
+            if (itemSegment is ArrayRunSplitterSegment) {
+               currentPartition += 1;
+               continue;
+            }
+            layout.Add((item, itemAddress, currentPartition));
+            itemAddress += item.Length;
+         }
+
+         var result = new List<(ArrayRunElementSegment item, int address)>();
+         if (fields == null || fields.Count == 0) {
+            foreach (var entry in layout) {
+               if (splitPortion != -1 && splitPortion != entry.partition) continue;
+               result.Add((entry.item, entry.address));
+            }
+            return result;
+         }
+
+         var used = new HashSet<int>(); // indexes into layout: a field is only shown once, even if the list mentions it twice
+         foreach (var field in fields) {
+            var isPartition = int.TryParse(field, out var partition);
+            for (int i = 0; i < layout.Count; i++) {
+               var matches = isPartition ? layout[i].partition == partition : layout[i].item.Name.Equals(field, StringComparison.OrdinalIgnoreCase);
+               if (matches && used.Add(i)) result.Add((layout[i].item, layout[i].address));
+            }
+         }
+         return result;
       }
 
       private void AddAdhocSpecialElementsToGroup(IViewPort viewPort, ITableRun table) {
@@ -210,6 +241,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          Add(new ButtonArrayElementViewModel("Edit Map", () => viewPort.Goto.Execute(name)));
       }
 
+      /// <summary>
+      /// Most streams are edited as text. A list of encounters (min level, max level, species) gets a row of boxes per element instead.
+      /// </summary>
+      private static TextStreamElementViewModel CreateTextStream(ViewPort viewPort, IFormattedRun streamRun, string name, int address, string format) {
+         if (streamRun is ITableRun table && TableRowsStreamElementViewModel.Supports(table)) return new TableRowsStreamElementViewModel(viewPort, name, address, format);
+         return new TextStreamElementViewModel(viewPort, name, address, format);
+      }
+
       private void AddChildrenFromPointerSegment(ViewPort viewPort, int itemAddress, ArrayRunElementSegment item, IArrayElementViewModel parent, SplitterArrayElementViewModel header, int recursionLevel) {
          if (!(item is ArrayRunPointerSegment pointerSegment)) return;
          if (pointerSegment.InnerFormat == string.Empty) return;
@@ -236,7 +275,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          if (streamRun is ITrainerTeamRun tptRun) streamElement = new TrainerPokemonTeamElementViewModel(viewPort, tptRun, item.Name, itemAddress);
          else if (streamRun is IPaletteRun paletteRun) streamElement = new PaletteElementViewModel(viewPort, viewPort.ChangeHistory, item.Name, paletteRun.FormatString, paletteRun.PaletteFormat, itemAddress);
          else if (streamRun is ISpriteRun spriteRun) streamElement = new SpriteElementViewModel(viewPort, item.Name, spriteRun.FormatString, spriteRun.SpriteFormat, itemAddress);
-         else if (streamRun == null || streamRun is IStreamRun || streamRun is ITableRun) streamElement = new TextStreamElementViewModel(viewPort, item.Name, itemAddress, pointerSegment.InnerFormat);
+         else if (streamRun == null || streamRun is IStreamRun || streamRun is ITableRun) streamElement = CreateTextStream(viewPort, streamRun, item.Name, itemAddress, pointerSegment.InnerFormat);
          if (streamElement == null) return;
          streamElement.Parent = header;
 
@@ -250,7 +289,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             var parentStart = parent is StreamElementViewModel streamParent ? streamParent.Start : -1;
             if (run is IPaletteRun paletteRun1) newStream = new PaletteElementViewModel(viewPort, viewPort.ChangeHistory, item.Name, paletteRun1.FormatString, paletteRun1.PaletteFormat, streamAddress);
             else if (run is ISpriteRun spriteRun1) newStream = new SpriteElementViewModel(viewPort, item.Name, spriteRun1.FormatString, spriteRun1.SpriteFormat, streamAddress);
-            else if (run == null || run is IStreamRun) newStream = new TextStreamElementViewModel(viewPort, item.Name, streamAddress, pointerSegment.InnerFormat);
+            else if (run == null || run is IStreamRun) newStream = CreateTextStream(viewPort, run, item.Name, streamAddress, pointerSegment.InnerFormat);
 
             ForwardModelChanged(newStream);
             ForwardModelDataMoved(newStream);

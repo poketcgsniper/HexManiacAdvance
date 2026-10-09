@@ -343,6 +343,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          foreach (var group in Groups) {
             foreach (var member in group.Members) {
                if (member is ComboBoxArrayElementViewModel box && box.FilteringComboOptions.DropDownIsOpen) return;
+               if (member is TableRowsStreamElementViewModel rows && rows.IsDropDownOpen) return;
             }
          }
 
@@ -400,6 +401,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             if (array is not ArrayRun arrayRun) {
                if (Groups.Count == 2) {
                   streamGroup = Groups[1];
+                  streamGroup.GroupName = TableGroupViewModel.DefaultName; // don't keep the title this group had for the previous table (a stray "Icon" bar above a wild encounter list)
                   streamGroup.Open();
                } else {
                   streamGroup = new TableGroupViewModel(viewPort) {
@@ -438,12 +440,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                   while (Groups.Count <= childIndexGroup) AddGroup();
                   var helperGroup = streamGroup ?? Groups[childIndexGroup];
                   foreach (var table in group.Tables) {
-                     var (tableName, partition) = (table, 0);
-                     var parts = table.Split(ArrayRunSplitterSegment.Separator);
-                     if (parts.Length == 2) {
-                        tableName = parts[0];
-                        if (!int.TryParse(parts[1], out partition)) partition = 0;
-                     }
+                     var member = TableGroupMember.Parse(table);
+                     var (tableName, partition) = (member.TableName, member.Partition);
 
                      var currentArrayStart = model.GetAddressFromAnchor(new(), -1, tableName);
                      if (model.GetNextRun(currentArrayStart) is not ArrayRun currentArray) continue;
@@ -452,11 +450,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                         elementOffset = currentArray.Start + currentArray.ElementLength * currentIndex;
                         var header = new SplitterArrayElementViewModel(viewPort, tableName, elementOffset);
                         AddChild(header);
-                        Groups[childIndexGroup].AddChildrenFromTable(viewPort, selection, currentArray, currentIndex, header, helperGroup, partition);
+                        Groups[childIndexGroup].AddChildrenFromTable(viewPort, selection, currentArray, currentIndex, header, helperGroup, partition, member.Fields);
                         // a picture is worth a thousand clicks: offer the gallery of every overworld sprite
                         if (tableName == HardcodeTablesModel.OverworldSprites) AddChild(new SpriteGalleryElementViewModel(viewPort, currentIndex));
                         // expansion trainers: the battle messages (trainer slides) live in their own table, one click away
-                        if (tableName == HardcodeTablesModel.TrainerTableName && partition == 2 && model.GetTable(TrainerSlidesTable) is ITableRun slides && currentIndex < slides.ElementCount) {
+                        if (tableName == HardcodeTablesModel.TrainerTableName && (member.HasFieldList ? member.ShowsField("name") : partition == 2) && model.GetTable(TrainerSlidesTable) is ITableRun slides && currentIndex < slides.ElementCount) {
                            var slideIndex = currentIndex;
                            AddChild(new ButtonArrayElementViewModel("Battle messages…", "Edit what this trainer says during battle (first turn, last Pokémon, low HP, ...)", () => viewPort.Goto.Execute($"{TrainerSlidesTable}/{slideIndex}")));
                         }
@@ -478,6 +476,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                streamGroup.Close();
                childIndexGroup++;
             }
+            if (array is not ArrayRun && streamGroup != null) streamGroup.GroupName = NameForStreamGroup(streamGroup);
             AddChildrenFromStreams(array, basename, index);
          }
 
@@ -507,6 +506,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
          foreach (var group in Groups) Debug.Assert(!group.IsOpen, "You forgot to close a group! " + group.GroupName);
          NotifyPropertyChanged(nameof(Children));
+      }
+
+      /// <summary>
+      /// An embedded table (one found through a pointer, like a wild encounter list) is titled with its address on the left,
+      /// so the group of linked data on the right gets a title as well: the name of the field it came from, if there is just one.
+      /// </summary>
+      private static string NameForStreamGroup(TableGroupViewModel group) {
+         var streams = group.Members.OfType<StreamElementViewModel>().Where(stream => stream.Parent != null).ToList();
+         return streams.Count == 1 ? streams[0].ParentName : TableGroupViewModel.DefaultName;
       }
 
       private void AddHandlers(IArrayElementViewModel member) {
