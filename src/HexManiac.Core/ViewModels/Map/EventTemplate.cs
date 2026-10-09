@@ -384,7 +384,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       /// <summary>
       /// pokeemerald-expansion (1.17+) trainer scripts start with the unified 41-byte trainerbattle command:
-      /// 5C flags localIdA trainerA: introA<> loseA<> scriptA<> localIdB trainerB: introB<> loseB<> scriptB<> victory<> cannotBattle<> rivalFlags
+      /// 5C flags localIdA trainerA: introA(pointer) loseA(pointer) scriptA(pointer) localIdB trainerB: introB(pointer) loseB(pointer) scriptB(pointer) victory(pointer) cannotBattle(pointer) rivalFlags
       /// The post-battle text is the first msgbox of scriptA (0F 00 text ...), when there is one.
       /// </summary>
       private static TrainerEventContent GetExpansionTrainerContent(IDataModel model, int address, ModelTable trainers, TrainerLayout layout) {
@@ -1164,7 +1164,7 @@ end
 
    /// <summary>
    /// Where the fields the trainer editors care about live inside a trainer record.
-   /// Vanilla: [structType. class. introMusic. sprite. name""12 ... pokemonCount:: pokemon<>] (class +1, sprite +3, name +4, team +36).
+   /// Vanilla: [structType. class. introMusic. sprite. name""12 ... pokemonCount:: pokemon(pointer)] (class +1, sprite +3, name +4, team +36).
    /// Other layouts (decomp hacks) are read from the table's segment names: class, sprite, name, pokemon.
    /// </summary>
    public record TrainerLayout(int ClassOffset, int SpriteOffset, int NameOffset, int NameLength, int TeamOffset) {

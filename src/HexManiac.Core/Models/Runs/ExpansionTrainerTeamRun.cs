@@ -18,7 +18,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
    /// <summary>
    /// Format Specifier: `tpte`
    /// A trainer's party in pokeemerald-expansion (struct TrainerMon, 36 bytes per Pokémon):
-   ///    0 nickname<>  4 evs<>  8 ivs::  12 move1: move2: move3: move4:  20 species:  22 item:  24 ability:  26 level.  27 ball.
+   ///    0 nickname(pointer)  4 evs(pointer)  8 ivs::  12 move1: move2: move3: move4:  20 species:  22 item:  24 ability:  26 level.  27 ball.
    ///    28 friendship.  29 nature:5 gender:2 shiny:1  30 teraType:5 gmax:1 dynamax:1 pad:1  31 dynamaxLevel:4 pad:4  32 tags::
    /// The number of Pokémon comes from the 'pokemonCount' field of the trainer that points here.
    /// The text form is the same as HexManiac's vanilla team editor (level, species, IVs, item, moves), plus an optional
