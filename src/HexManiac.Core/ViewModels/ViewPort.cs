@@ -2604,12 +2604,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);
       }
 
+      /// <summary>
+      /// Create an image editor for the sprite (or palette) at the address, without showing it. The caller shows it by raising RequestTabChange.
+      /// Throws ImageEditorViewModelCreationException if the address is not a sprite the editor can work with.
+      /// </summary>
+      public ImageEditorViewModel CreateImageEditor(int address, int spritePage, int palettePage) {
+         return new ImageEditorViewModel(history, Model, address, Save, tools.SpriteTool.PaletteAddress) {
+            SpritePage = spritePage,
+            PalettePage = palettePage,
+         };
+      }
+
       public void OpenImageEditorTab(int address, int spritePage, int palettePage, int preferredTileWidth = -1) {
          try {
-            var newTab = new ImageEditorViewModel(history, Model, address, Save, tools.SpriteTool.PaletteAddress) {
-               SpritePage = spritePage,
-               PalettePage = palettePage,
-            };
+            var newTab = CreateImageEditor(address, spritePage, palettePage);
             var args = new TabChangeRequestedEventArgs(newTab);
             RequestTabChange(this, args);
             if (!args.RequestAccepted && MapEditor?.IsValidState == true) {

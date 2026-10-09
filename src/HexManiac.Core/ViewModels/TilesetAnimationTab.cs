@@ -358,6 +358,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (covering != null && covering != selectedEntry) SelectedEntry = covering;
       }
 
+      /// <summary>How many tiles the game has room for in the tileset's half of video memory (512 for Emerald's primary tileset and 512 for the secondary one).</summary>
+      private int VideoTileLimit(TilesetPane pane) {
+         var primaryTiles = constants?.PrimaryTiles ?? (model.IsFRLG() ? 640 : 512);
+         return pane.IsSecondary ? Math.Max(1, 1024 - primaryTiles) : primaryTiles;
+      }
+
       private StubCommand addAnimation;
       public ICommand AddAnimation => StubCommand(ref addAnimation, ExecuteAddAnimation, () => activePane.Tiles != null && constants != null);
 
@@ -366,8 +372,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var blockset = pane.Blockset;
          if (blockset == null || constants == null) return;
          try {
-            // an animation can't reach past the end of its tileset: those tiles would be drawn over the other tileset's
-            var count = Math.Min(tileCount, pane.TileCount - firstTile);
+            // an animation can't run into the other tileset's tiles (it may run past the last tile of its own tileset: that is free video memory)
+            var count = Math.Min(tileCount, VideoTileLimit(pane) - firstTile);
             if (count < 1) { OnError?.Invoke(this, "Pick a tile inside the tileset first."); return; }
             var table = animations.EnsureTable(blockset.Start, pane.IsSecondary, constants, out _);
             animations.AddEntry(table, firstTile, count, frameCount, speed, pane.IsSecondary, constants, pane.RawTiles);
@@ -375,7 +381,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             viewPort.Refresh();
             Reload();
             SelectedEntry = Entries.LastOrDefault(item => item.Pane == pane && !item.IsBuiltIn);
-            OnMessage?.Invoke(this, $"Added an animation for tiles {firstTile}-{firstTile + count - 1} with {frameCount} frames." + (count < tileCount ? $" (Only {count} tiles fit in the {pane.Title.ToLower()}.)" : string.Empty) + " Every frame starts as a copy of the tiles: edit or import the frames to make it move.");
+            OnMessage?.Invoke(this, $"Added an animation for tiles {firstTile}-{firstTile + count - 1} with {frameCount} frames." + (count < tileCount ? $" (Only {count} tiles fit: an animation can't run into the other tileset's tiles.)" : string.Empty) + " Every frame starts as a copy of the tiles: edit or import the frames to make it move.");
          } catch (Exception e) {
             OnError?.Invoke(this, "Could not add the animation: " + e.Message);
          }
@@ -412,12 +418,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             removeEntry?.RaiseCanExecuteChanged();
             importFrames?.RaiseCanExecuteChanged();
             exportFrames?.RaiseCanExecuteChanged();
+            editFrames?.RaiseCanExecuteChanged();
             RefreshHighlights();
          }
       }
       public bool HasSelectedEntry => selectedEntry != null;
 
-      private StubCommand removeEntry, importFrames, exportFrames, gotoTable, refresh;
+      private StubCommand removeEntry, importFrames, exportFrames, editFrames, gotoTable, refresh;
+      /// <summary>Open the selected animation in the image editor (all its frames are in that one tab).</summary>
+      public ICommand EditFrames => StubCommand(ref editFrames, () => EditFrame(selectedEntry, 0), () => selectedEntry != null);
       public ICommand RemoveEntry => StubCommand(ref removeEntry, ExecuteRemoveEntry, () => selectedEntry != null && !selectedEntry.IsBuiltIn);
       public ICommand ImportFrames => StubCommand(ref importFrames, ExecuteImportFrames, () => selectedEntry != null);
       public ICommand ExportFrames => StubCommand(ref exportFrames, ExecuteExportFrames, () => selectedEntry != null);
@@ -429,6 +438,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var blockset = selectedEntry.Pane.Blockset;
          if (blockset == null) return;
          if (!animations.TryGetTable(blockset.Start, out var table, out _)) return;
+         var removedPane = selectedEntry.Pane;
+         CloseFrameEditors(key => key.StartsWith($"anim:{removedPane.IsSecondary}:False:")); // the animations behind the removed one move up
          animations.RemoveEntry(table, selectedEntry.Entry.Index);
          viewPort.ChangeHistory.ChangeCompleted();
          viewPort.Refresh();
@@ -457,37 +468,114 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          SelectedEntry = Entries.FirstOrDefault(entry => entry.Pane == pane && !entry.IsBuiltIn && entry.Entry.Index == index);
       }
 
-      /// <summary>Open the frame in the image editor (with the palette these tiles use), where it can be drawn on or imported over.</summary>
+      #region Image editor tabs
+
+      // One image editor tab per animation (and per door): its dots choose the frame, the palette has a row of its own.
+      private readonly Dictionary<string, (ImageEditorViewModel editor, IImageFrameSource source)> frameEditors = new();
+
+      private static string AnimationKey(TilesetAnimationItem item) => $"anim:{item.Pane.IsSecondary}:{item.IsBuiltIn}:{item.Entry.Index}";
+      private static string DoorKey(int doorIndex) => $"door:{doorIndex}";
+
+      private TilesetAnimationEntry ResolveEntry(int tilesetStart, bool secondary, bool builtIn, int index) {
+         if (constants == null) return null;
+         if (builtIn) return animations.ReadBuiltInEntries(tilesetStart, secondary, constants).FirstOrDefault(entry => entry.Index == index);
+         if (!animations.TryGetTable(tilesetStart, out var table, out _)) return null;
+         var entries = animations.ReadEntries(table, secondary, constants);
+         return index >= 0 && index < entries.Count ? entries[index] : null;
+      }
+
+      /// <summary>The palette (0-15) most of the given tiles are drawn with, which is where the image editor starts.</summary>
+      private static int MostCommonPalette(IEnumerable<int> palettes, int fallback) {
+         var counts = new int[16];
+         foreach (var palette in palettes) counts[palette & 15]++;
+         int best = -1;
+         for (int p = 0; p < 16; p++) if (counts[p] > 0 && (best < 0 || counts[p] > counts[best])) best = p;
+         return best < 0 ? fallback : best;
+      }
+
+      /// <summary>
+      /// The image editor for an animation, showing the given frame: the one already open for this animation if there is one (it is brought up on that frame),
+      /// otherwise a new one. Returns null if the frames can't be edited as pictures.
+      /// </summary>
+      public ImageEditorViewModel GetFrameEditor(TilesetAnimationItem item, int frame) {
+         if (item == null || frame < 0 || frame >= item.Entry.FrameCount) return null;
+         var blockset = item.Pane.Blockset;
+         if (blockset == null) return null;
+         var key = AnimationKey(item);
+         if (TryReuseFrameEditor(key, frame, out var existing)) return existing;
+
+         var (tilesetStart, secondary, builtIn, index) = (blockset.Start, item.Pane.IsSecondary, item.IsBuiltIn, item.Entry.Index);
+         var title = builtIn ? $"Anim: {item.Entry.Name}" : $"Anim #{index + 1} ({(secondary ? "secondary" : "primary")})";
+         var source = new AnimationFrameSource(model, animations, tilesetStart, item.Entry, title, () => ResolveEntry(tilesetStart, secondary, builtIn, index));
+         if (!source.Prepare()) return null;
+         var tilePalette = item.Pane.TilePalette;
+         var tiles = tilePalette == null ? Enumerable.Empty<int>() : Enumerable.Range(item.Entry.FirstTile, item.Entry.TileCount).Where(tile => tile >= 0 && tile < tilePalette.Length).Select(tile => tilePalette[tile]);
+         var page = MostCommonPalette(tiles, secondary ? (model.IsFRLG() ? 7 : 6) : 0);
+         return CreateFrameEditor(key, source, model.ReadPointer(source.SpritePointer(frame)), page, frame);
+      }
+
+      /// <summary>Open the animation's frames in the image editor tab (with the palette these tiles use), where each frame can be drawn on or imported over.</summary>
       public void EditFrame(TilesetAnimationItem item, int frame) {
          if (item == null || frame < 0 || frame >= item.Entry.FrameCount) return;
-         var blockset = item.Pane.Blockset;
-         var frameAddress = blockset == null ? -1 : animations.EnsureFrameFormat(blockset.Start, item.Entry, frame);
-         if (frameAddress < 0) frameAddress = model.ReadPointer(item.Entry.FramesAddress + 4 * frame);
-         if (frameAddress < 0 || frameAddress >= model.Count) return;
-         viewPort.ChangeHistory.ChangeCompleted();
-         var tilePalette = item.Pane.TilePalette;
-         var page = tilePalette != null && item.Entry.FirstTile >= 0 && item.Entry.FirstTile < tilePalette.Length ? tilePalette[item.Entry.FirstTile] : 0;
-         if (model.GetNextRun(frameAddress) is ISpriteRun && TryOpenImageEditor(frameAddress, page, item.Entry.TileCount)) return;
+         var editor = GetFrameEditor(item, frame);
+         if (editor != null && ShowEditor(editor)) return;
+         // the frames can't be shown as a picture: show their data in the main tab instead
+         var frameAddress = animations.FrameAddress(item.Entry, frame);
+         if (frameAddress < 0) return;
          viewPort.Goto.Execute(frameAddress);
          RequestTabChange?.Invoke(this, new TabChangeRequestedEventArgs(viewPort));
       }
 
-      /// <summary>
-      /// Open the image editor on a sprite. The editor is created by the main tab; if nothing is listening for new tabs, fall back to the main tab.
-      /// </summary>
-      private bool TryOpenImageEditor(int address, int palettePage, int preferredTileWidth) {
-         bool opened = false;
-         void Capture(object sender, TabChangeRequestedEventArgs e) {
-            if (e.NewTab is ImageEditorViewModel) { RequestTabChange?.Invoke(this, e); opened = e.RequestAccepted; }
-         }
-         viewPort.RequestTabChange += Capture;
-         try {
-            viewPort.OpenImageEditorTab(address, 0, palettePage, preferredTileWidth);
-         } finally {
-            viewPort.RequestTabChange -= Capture;
-         }
-         return opened;
+      private bool ShowEditor(ImageEditorViewModel editor) {
+         var args = new TabChangeRequestedEventArgs(editor);
+         RequestTabChange?.Invoke(this, args);
+         return args.RequestAccepted;
       }
+
+      private bool TryReuseFrameEditor(string key, int frame, out ImageEditorViewModel editor) {
+         editor = null;
+         if (!frameEditors.TryGetValue(key, out var existing)) return false;
+         existing.editor.Frame = frame; // an editor whose animation is gone closes itself here
+         if (!frameEditors.TryGetValue(key, out existing)) return false;
+         editor = existing.editor;
+         return true;
+      }
+
+      private ImageEditorViewModel CreateFrameEditor(string key, IImageFrameSource source, int address, int palettePage, int frame) {
+         // registering the frames as sprites is not something undo should be able to take back from under the editor
+         viewPort.ChangeHistory.ChangeCompleted();
+         ImageEditorViewModel editor;
+         try {
+            editor = viewPort.CreateImageEditor(address, 0, palettePage);
+         } catch (ImageEditorViewModelCreationException e) {
+            OnError?.Invoke(this, e.Message);
+            return null;
+         }
+         editor.SetFrameSource(source, frame);
+         frameEditors[key] = (editor, source);
+         editor.Closed += (sender, e) => { if (frameEditors.TryGetValue(key, out var current) && current.editor == editor) frameEditors.Remove(key); };
+         return editor;
+      }
+
+      /// <summary>Close the editors whose animation or door is about to move or disappear (the lists shift when one is removed).</summary>
+      private void CloseFrameEditors(Func<string, bool> which) {
+         foreach (var key in frameEditors.Keys.Where(which).ToList()) {
+            if (frameEditors.TryGetValue(key, out var info)) info.editor.Close.Execute(null);
+            frameEditors.Remove(key);
+         }
+      }
+
+      /// <summary>Frames can have been added since an editor opened: make sure every frame of every open editor is a registered sprite.</summary>
+      private void PrepareFrameEditors() {
+         if (frameEditors.Count == 0) return;
+         foreach (var info in frameEditors.Values.ToList()) {
+            if (info.source is AnimationFrameSource animation) animation.Prepare();
+            else if (info.source is DoorFrameSource door) door.Prepare();
+         }
+         viewPort.ChangeHistory.ChangeCompleted();
+      }
+
+      #endregion
 
       private void ExecuteGotoTable() {
          int address = -1;
@@ -631,6 +719,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             removeDoor?.RaiseCanExecuteChanged();
             importDoorFrames?.RaiseCanExecuteChanged();
             exportDoorFrames?.RaiseCanExecuteChanged();
+            editDoorFrames?.RaiseCanExecuteChanged();
          }
       }
       public bool HasSelectedDoor => selectedDoor != null;
@@ -644,7 +733,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public int NewDoorSound { get => newDoorSound; set => Set(ref newDoorSound, value.LimitToRange(0, 2)); }
       public IPixelViewModel NewDoorPreview => RenderBlock(newDoorMetatile);
 
-      private StubCommand addDoor, removeDoor, importDoorFrames, exportDoorFrames, gotoDoorTable;
+      private StubCommand addDoor, removeDoor, importDoorFrames, exportDoorFrames, editDoorFrames, gotoDoorTable;
+      /// <summary>Open the selected door in the image editor (its 3 frames are in that one tab).</summary>
+      public ICommand EditDoorFrames => StubCommand(ref editDoorFrames, () => EditDoorFrame(selectedDoor, 0), () => selectedDoor != null);
       public ICommand AddDoor => StubCommand(ref addDoor, ExecuteAddDoor, () => HasDoors && activePane.Tiles != null);
       public ICommand RemoveDoor => StubCommand(ref removeDoor, ExecuteRemoveDoor, () => selectedDoor != null);
       public ICommand ImportDoorFrames => StubCommand(ref importDoorFrames, ExecuteImportDoorFrames, () => selectedDoor != null);
@@ -789,22 +880,35 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private void ExecuteRemoveDoor() {
          if (selectedDoor == null) return;
+         var removedIndex = selectedDoor.Entry.Index;
+         CloseFrameEditors(key => key.StartsWith("door:") && int.Parse(key.Substring("door:".Length)) >= removedIndex); // the doors behind the removed one move up
          doors.RemoveDoor(selectedDoor.Entry.Index);
          viewPort.ChangeHistory.ChangeCompleted();
          viewPort.Refresh();
          Reload();
       }
 
-      /// <summary>Open the door's 3 frames (stacked top to bottom) in the image editor, using the palette the door's tiles use.</summary>
+      /// <summary>The image editor for a door, showing the given frame: the one already open for this door if there is one, otherwise a new one.</summary>
+      public ImageEditorViewModel GetDoorEditor(DoorItem item, int frame) {
+         if (item == null || frame < 0 || frame >= DoorEntry.FrameCount) return null;
+         var entry = item.Entry;
+         if (entry.TilesAddress < 0 || entry.TilesAddress + entry.TilesLength > model.Count) return null;
+         var key = DoorKey(entry.Index);
+         if (TryReuseFrameEditor(key, frame, out var existing)) return existing;
+
+         var source = new DoorFrameSource(doors, entry, $"Door: block {entry.Metatile}");
+         if (!source.Prepare()) return null;
+         var page = MostCommonPalette(doors.ReadPaletteIndices(entry), item.Pane.IsSecondary ? (model.IsFRLG() ? 7 : 6) : 0);
+         return CreateFrameEditor(key, source, entry.TilesAddress, page, frame);
+      }
+
+      /// <summary>Open the door's frames in the image editor tab, using the palette the door's tiles use.</summary>
       public void EditDoorFrame(DoorItem item, int frame) {
          if (item == null) return;
          var entry = item.Entry;
          if (entry.TilesAddress < 0 || entry.TilesAddress + entry.TilesLength > model.Count) return;
-         doors.EnsureTilesFormat(entry);
-         viewPort.ChangeHistory.ChangeCompleted();
-         var indices = doors.ReadPaletteIndices(entry);
-         var page = indices.Length > 0 ? indices[0] : 0;
-         if (model.GetNextRun(entry.TilesAddress) is ISpriteRun && TryOpenImageEditor(entry.TilesAddress, page, -1)) return;
+         var editor = GetDoorEditor(item, frame);
+         if (editor != null && ShowEditor(editor)) return;
          viewPort.Goto.Execute(entry.TilesAddress);
          RequestTabChange?.Invoke(this, new TabChangeRequestedEventArgs(viewPort));
       }
@@ -939,6 +1043,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          removeEntry?.RaiseCanExecuteChanged();
          importFrames?.RaiseCanExecuteChanged();
          exportFrames?.RaiseCanExecuteChanged();
+         editFrames?.RaiseCanExecuteChanged();
+         editDoorFrames?.RaiseCanExecuteChanged();
+         PrepareFrameEditors();
       }
    }
 

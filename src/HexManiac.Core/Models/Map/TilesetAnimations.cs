@@ -190,6 +190,43 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          return data;
       }
 
+      /// <summary>Where the pixels of a frame are, or -1 if the frame table or the pointer is bad.</summary>
+      public int FrameAddress(TilesetAnimationEntry entry, int frame) {
+         if (entry == null || entry.FramesAddress < 0 || frame < 0 || frame >= entry.FrameCount || entry.FramesAddress + 4 * entry.FrameCount > model.Count) return -1;
+         var frameAddress = model.ReadPointer(entry.FramesAddress + 4 * frame);
+         return frameAddress < 0 || frameAddress + 32 * entry.TileCount > model.Count ? -1 : frameAddress;
+      }
+
+      /// <summary>
+      /// The tiles of a frame are stored one after the other. To draw them as a picture, they are laid out in rows 'widthTiles' wide
+      /// (the last row may be short). The default is as close to a square as possible: 4 tiles are 2x2, which is how a 4-tile flower is built.
+      /// </summary>
+      public static (int width, int height) PictureShape(int tileCount, int widthTiles) {
+         if (widthTiles < 1) widthTiles = DefaultPictureWidth(tileCount);
+         widthTiles = Math.Min(widthTiles, Math.Max(1, tileCount));
+         return (widthTiles, (Math.Max(1, tileCount) + widthTiles - 1) / widthTiles);
+      }
+
+      public static int DefaultPictureWidth(int tileCount) => (int)Math.Ceiling(Math.Sqrt(Math.Max(1, tileCount)));
+
+      /// <summary>The frame as a picture of palette indices (see <see cref="PictureShape"/>); tiles past the end of the frame are blank.</summary>
+      public int[,] ReadFramePixels(TilesetAnimationEntry entry, int frame, int widthTiles) {
+         var (width, height) = PictureShape(entry.TileCount, widthTiles);
+         var data = ReadFrame(entry, frame) ?? new byte[32 * entry.TileCount];
+         return SpriteRun.GetPixels(data, 0, width, height, 4);
+      }
+
+      /// <summary>Write an edited picture (the same shape ReadFramePixels returned) back over the frame's tiles.</summary>
+      public void WriteFramePixels(ModelDelta token, TilesetAnimationEntry entry, int frame, int widthTiles, int[,] pixels) {
+         var address = FrameAddress(entry, frame);
+         if (address < 0) return;
+         var data = new byte[32 * entry.TileCount];
+         SpriteRun.SetPixels(data, 0, pixels, 4); // tiles of the picture past the end of the frame are dropped
+         for (int i = 0; i < data.Length; i++) {
+            if (model[address + i] != data[i]) token.ChangeData(model, address + i, data[i]);
+         }
+      }
+
       public void WriteFrame(TilesetAnimationEntry entry, int frame, byte[] data) {
          if (entry.FramesAddress < 0 || frame >= entry.FrameCount) return;
          var frameAddress = model.ReadPointer(entry.FramesAddress + 4 * frame);

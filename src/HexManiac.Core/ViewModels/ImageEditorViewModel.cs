@@ -37,7 +37,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private StubCommand close, undoWrapper, redoWrapper, pasteCommand, copyCommand, selectAllCommand;
 
-      public string Name => "Image Editor";
+      public string Name => frameSource?.Title ?? "Image Editor";
       public string FullFileName { get; }
       public bool SpartanMode { get; set; }
       public bool IsMetadataOnlyChange => false;
@@ -87,9 +87,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var selectionStart = Palette.SelectionStart;
          var selectionEnd = Palette.SelectionEnd;
 
+         var framesBefore = SnapshotFrames();
          history.Undo.Execute();
          undoWrapper.RaiseCanExecuteChanged();
          redoWrapper.RaiseCanExecuteChanged();
+         ShowChangedFrame(framesBefore);
          Refresh();
          if (HasMultipleEditOptions) EditOptions[SelectedEditOption].Refresh();
 
@@ -98,9 +100,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       private void ExecuteRedo() {
+         var framesBefore = SnapshotFrames();
          history.Redo.Execute();
          undoWrapper.RaiseCanExecuteChanged();
          redoWrapper.RaiseCanExecuteChanged();
+         ShowChangedFrame(framesBefore);
          Refresh();
          if (HasMultipleEditOptions) EditOptions[SelectedEditOption].Refresh();
       }
@@ -182,7 +186,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       #region Pages
       private int spritePage, palettePage;
       public int SpritePage { get => spritePage; set => Set(ref spritePage, value, _ => Refresh()); }
-      public int PalettePage { get => palettePage; set => Set(ref palettePage, value, _ => Refresh()); }
+      public int PalettePage { get => palettePage; set => Set(ref palettePage, value, _ => { NotifyPropertyChanged(nameof(PaletteCaption)); Refresh(); }); }
       public int SpritePages => SpritePageOptions.Count;
       public int PalettePages => PalettePageOptions.Count;
       public bool HasMultipleSpritePages => SpritePages > 1;
@@ -214,6 +218,136 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          NotifyPropertyChanged(nameof(PalettePages));
          NotifyPropertyChanged(nameof(HasMultiplePalettePages));
+         NotifyPropertyChanged(nameof(ShowPaletteCaption));
+      }
+      #endregion
+
+      #region Frames
+      // An optional mode: the editor shows one group of pictures (the frames of an animation) in a single tab. The dots on the left select the frame,
+      // and the palette gets a row of dots of its own. Normal sprites never set a frame source and are not affected.
+
+      private IImageFrameSource frameSource;
+      private int frame;
+
+      public bool HasFrames => frameSource != null;
+      public int FrameCount => frameSource?.FrameCount ?? 0;
+      public ObservableCollection<FrameOptionViewModel> FrameOptions { get; } = new ObservableCollection<FrameOptionViewModel>();
+
+      /// <summary>The frame being edited (0 based).</summary>
+      public int Frame {
+         get => frame;
+         set {
+            if (frameSource == null) return;
+            Set(ref frame, value.LimitToRange(0, Math.Max(0, frameSource.FrameCount - 1)), FrameChanged);
+         }
+      }
+
+      /// <summary>"Frame 2 of 4", for the label above the frame dots.</summary>
+      public string FrameCaption {
+         get {
+            if (frameSource == null) return string.Empty;
+            var note = frameSource.FrameNote(frame);
+            return $"Frame {frame + 1} of {frameSource.FrameCount}" + (string.IsNullOrEmpty(note) ? string.Empty : $" ({note})");
+         }
+      }
+
+      /// <summary>"Palette 6", for the label above the palette dots (the dots only say which palette when the mouse is over them).</summary>
+      public string PaletteCaption => $"Palette {PalettePage}";
+      public bool ShowPaletteCaption => HasFrames && HasMultiplePalettePages;
+
+      /// <summary>
+      /// Turn this editor into a frame editor: it keeps working on the sprite it was created for (which tells it the palette), but what it draws on
+      /// and where the changes are stored now come from the source, and the dots on the left choose the frame.
+      /// Call this right after creating the editor, before showing it.
+      /// </summary>
+      public void SetFrameSource(IImageFrameSource source, int initialFrame = 0) {
+         frameSource = source;
+         frame = initialFrame.LimitToRange(0, Math.Max(0, source.FrameCount - 1));
+         currentTilesetWidth = 0; // the source's own default
+         // the frames take the place of the other ways to show the same sprite (palettes of a pokemon, front/back sprites)
+         EditOptions.Clear();
+         NotifyPropertyChanged(nameof(HasMultipleEditOptions));
+         NotifyPropertyChanged(nameof(Name));
+         NotifyPropertyChanged(nameof(HasFrames));
+         Refresh();
+         NotifyPropertyChanged(nameof(FrameCaption));
+      }
+
+      /// <summary>Move to the next (or, for a negative step, the previous) frame, wrapping around.</summary>
+      public void StepFrame(int step) {
+         if (frameSource == null || frameSource.FrameCount < 1) return;
+         var count = frameSource.FrameCount;
+         Frame = ((frame + step) % count + count) % count;
+      }
+
+      private void FrameChanged(int oldValue) {
+         history.ChangeCompleted(); // what is drawn on this frame is a separate undo step from what was drawn on the last one
+         if (toolStrategy is SelectionTool selection) selection.ClearSelection(); // a selection belongs to the frame it was made on
+         Refresh();
+         NotifyPropertyChanged(nameof(FrameCaption));
+      }
+
+      /// <summary>Keep the frame number and the sprite pointer in step with the source (frames can be added or removed while the editor is open).</summary>
+      private void SyncFrame() {
+         frame = frame.LimitToRange(0, Math.Max(0, frameSource.FrameCount - 1));
+         var pointer = frameSource.SpritePointer(frame);
+         if (pointer != SpritePointer) {
+            SpritePointer = pointer;
+            NotifyPropertyChanged(nameof(SpritePointer));
+         }
+      }
+
+      private void SetupFrameOptions() {
+         if (frameSource == null && FrameOptions.Count == 0) return; // a normal sprite: nothing to do
+         FrameOptions.Clear();
+         if (frameSource != null) {
+            for (int i = 0; i < frameSource.FrameCount; i++) {
+               var note = frameSource.FrameNote(i);
+               var option = new FrameOptionViewModel { Selected = i == frame, Name = (i + 1).ToString(), Index = i, Description = string.IsNullOrEmpty(note) ? $"Frame {i + 1}" : $"Frame {i + 1} ({note})" };
+               option.Bind(nameof(option.Selected), (sender, e) => { if (sender.Selected) Frame = sender.Index; });
+               FrameOptions.Add(option);
+            }
+         }
+         NotifyPropertyChanged(nameof(FrameCount));
+         NotifyPropertyChanged(nameof(FrameCaption));
+         NotifyPropertyChanged(nameof(ShowPaletteCaption));
+      }
+
+      private void SetupFrameWidthControl() {
+         CanEditTilesetWidth = frameSource.CanChooseWidth;
+         MinimumTilesetWidth = 1;
+         MaximumTilesetWidth = Math.Max(1, frameSource.MaxWidthTiles);
+         if (currentTilesetWidth < MinimumTilesetWidth || currentTilesetWidth > MaximumTilesetWidth) Set(ref currentTilesetWidth, frameSource.DefaultWidthTiles, nameof(CurrentTilesetWidth));
+      }
+
+      private int[,] ReadFramePixels(int index) => frameSource.ReadFrame(index, currentTilesetWidth);
+
+      private int[][,] SnapshotFrames() {
+         if (frameSource == null || !frameSource.IsValid) return null;
+         var result = new int[frameSource.FrameCount][,];
+         for (int i = 0; i < result.Length; i++) result[i] = ReadFramePixels(i);
+         return result;
+      }
+
+      private static bool SamePixels(int[,] a, int[,] b) {
+         if (a == null || b == null || a.GetLength(0) != b.GetLength(0) || a.GetLength(1) != b.GetLength(1)) return false;
+         for (int x = 0; x < a.GetLength(0); x++) for (int y = 0; y < a.GetLength(1); y++) if (a[x, y] != b[x, y]) return false;
+         return true;
+      }
+
+      /// <summary>
+      /// Undo and redo work on everything that was changed, in any frame. If the change was to another frame than the one being shown,
+      /// show that frame, so that undoing is not invisible.
+      /// </summary>
+      private void ShowChangedFrame(int[][,] before) {
+         if (before == null || frameSource == null || !frameSource.IsValid) return;
+         int count = Math.Min(before.Length, frameSource.FrameCount);
+         if (frame < count && !SamePixels(before[frame], ReadFramePixels(frame))) return; // the frame being shown changed: nothing to do
+         for (int i = 0; i < count; i++) {
+            if (SamePixels(before[i], ReadFramePixels(i))) continue;
+            Frame = i;
+            return;
+         }
       }
       #endregion
 
@@ -649,6 +783,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       public void Refresh() {
+         if (frameSource != null) {
+            if (!frameSource.IsValid || frameSource.FrameCount < 1) {
+               // the animation (or door) was removed or changed shape in the other tab: there is nothing left to edit
+               Close.Execute();
+               return;
+            }
+            SyncFrame();
+         }
          var spriteAddress = model.ReadPointer(SpritePointer);
          var spriteRun = model.GetNextRun(spriteAddress) as ISpriteRun;
          if (spriteRun == null) {
@@ -657,15 +799,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             return;
          }
          if (SpritePage >= spriteRun.Pages) SpritePage = spriteRun.Pages - 1;
-         SetupTilesetWidthControl();
+         if (frameSource == null) SetupTilesetWidthControl(); else SetupFrameWidthControl();
 
          // tilemap may have been repointed: recalculate
          if (spriteRun is ITilemapRun tilemapRun) tilemapRun.FindMatchingTileset(model);
 
-         pixels = (spriteRun is LzTilesetRun tsRun) ? tsRun.GetPixels(model, SpritePage, CurrentTilesetWidth) : spriteRun.GetPixels(model, SpritePage, -1);
+         if (frameSource != null) pixels = ReadFramePixels(frame);
+         else pixels = (spriteRun is LzTilesetRun tsRun) ? tsRun.GetPixels(model, SpritePage, CurrentTilesetWidth) : spriteRun.GetPixels(model, SpritePage, -1);
          Render();
          RefreshPaletteColors(spriteRun.SpriteFormat);
          SetupPageOptions();
+         SetupFrameOptions();
          RefreshTilePalettes();
       }
 
@@ -730,7 +874,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private void Render() {
          var spriteAddress = model.ReadPointer(SpritePointer);
          var spriteRun = (ISpriteRun)model.GetNextRun(spriteAddress);
-         var readPixels = (spriteRun is LzTilesetRun tsRun) ? tsRun.GetPixels(model, SpritePage, CurrentTilesetWidth) : spriteRun.GetPixels(model, SpritePage, -1);
+         var readPixels = frameSource != null ? pixels
+            : (spriteRun is LzTilesetRun tsRun) ? tsRun.GetPixels(model, SpritePage, CurrentTilesetWidth) : spriteRun.GetPixels(model, SpritePage, -1);
 
          var palRun = ReadPalette();
 
@@ -746,6 +891,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       private void UpdateSpriteModel() {
+         if (frameSource != null) {
+            // the source stores the picture wherever the frame lives
+            frameSource.WriteFrame(history.CurrentChange, frame, currentTilesetWidth, pixels);
+            return;
+         }
          var spriteAddress = model.ReadPointer(SpritePointer);
          var spriteRun = (ISpriteRun)model.GetNextRun(spriteAddress);
 
@@ -1640,5 +1790,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          PixelData = SpriteTool.Render(pixels, colors, initialBlankPages, 0);
          NotifyPropertyChanged(nameof(PixelData));
       }
+   }
+
+   /// <summary>One dot of the frame row of an image editor that shows the frames of an animation.</summary>
+   public class FrameOptionViewModel : SelectionViewModel {
+      private string description;
+      /// <summary>What the tooltip of the dot says, for example "Frame 2 (the same picture as frame 1)". The name is just the frame number.</summary>
+      public string Description { get => description; set => Set(ref description, value); }
    }
 }

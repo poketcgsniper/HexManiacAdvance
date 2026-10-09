@@ -2,6 +2,7 @@ using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.Models.Runs.Sprites;
+using HavenSoft.HexManiac.Core.ViewModels;
 using HavenSoft.HexManiac.Core.ViewModels.DataFormats;
 using HexManiac.Core.Models.Runs.Sprites;
 using System.Linq;
@@ -333,6 +334,215 @@ namespace HavenSoft.HexManiac.Tests {
 
          var callback = Model.GetAddressFromAnchor(Token, -1, baseName + ".callback");
          Assert.Equal(0x08000320, ReadChainedCallback(callback & ~1));
+      }
+
+      #endregion
+
+      #region Frame pictures (what the image editor draws on)
+
+      private TilesetAnimationEntry AddPatternedAnimation(TilesetAnimations animations, int tileCount, int frameCount) {
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+         var table = animations.EnsureTable(TilesetStart, false, constants, out _);
+         var tiles = Enumerable.Range(0, 32 * 16).Select(i => (byte)(i * 7 + 3)).ToArray();
+         return animations.AddEntry(table, 0, tileCount, frameCount, 4, false, constants, tiles);
+      }
+
+      private TilesetAnimationEntry CurrentFirstEntry(TilesetAnimations animations) {
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+         return animations.TryGetTable(TilesetStart, out var table, out _) ? animations.ReadEntries(table, false, constants).FirstOrDefault() : null;
+      }
+
+      [Fact]
+      public void FramePictures_ShowTheTilesInRowsOfTheWidthYouChoose() {
+         var animations = CreateAnimations();
+         var entry = AddPatternedAnimation(animations, 4, 3);
+         var data = animations.ReadFrame(entry, 1);
+
+         var square = animations.ReadFramePixels(entry, 1, 0); // the default is as square as possible
+         var row = animations.ReadFramePixels(entry, 1, 4);
+
+         Assert.Equal(16, square.GetLength(0));
+         Assert.Equal(16, square.GetLength(1));
+         Assert.Equal(32, row.GetLength(0));
+         Assert.Equal(8, row.GetLength(1));
+         Assert.Equal(data[32] & 0xF, square[8, 0]);  // tile 1 is next to tile 0...
+         Assert.Equal(data[32] >> 4, square[9, 0]);
+         Assert.Equal(data[64] & 0xF, square[0, 8]);  // ...and tile 2 is under it
+         Assert.Equal(data[32] & 0xF, row[8, 0]);     // in a row, tile 1 is still next to tile 0
+         Assert.Equal(data[96] & 0xF, row[24, 0]);    // and tile 3 comes after tile 2
+         Assert.Equal((2, 2), TilesetAnimations.PictureShape(4, 0));
+         Assert.Equal((6, 5), TilesetAnimations.PictureShape(30, 0));
+         Assert.Equal((4, 3), TilesetAnimations.PictureShape(10, 4));
+      }
+
+      [Fact]
+      public void FramePictures_WritingAPictureChangesOnlyThatFrameAndOnlyThePixelThatChanged() {
+         var animations = CreateAnimations();
+         var entry = AddPatternedAnimation(animations, 4, 3);
+         var before = Enumerable.Range(0, 3).Select(f => animations.ReadFrame(entry, f)).ToArray();
+         var picture = animations.ReadFramePixels(entry, 1, 0);
+         picture[9, 10] = (picture[9, 10] + 5) & 0xF; // tile 3 (right, bottom), pixel (1, 2)
+
+         animations.WriteFramePixels(Token, entry, 1, 0, picture);
+
+         var after = Enumerable.Range(0, 3).Select(f => animations.ReadFrame(entry, f)).ToArray();
+         Assert.Equal(before[0], after[0]);
+         Assert.Equal(before[2], after[2]);
+         var changed = Enumerable.Range(0, before[1].Length).Where(i => before[1][i] != after[1][i]).ToList();
+         Assert.Single(changed);
+         Assert.Equal(3 * 32 + 2 * 4 + 0, changed[0]);
+         Assert.Equal(picture[9, 10], after[1][changed[0]] >> 4);
+         Assert.Equal(picture[9, 10], animations.ReadFramePixels(entry, 1, 0)[9, 10]);
+      }
+
+      [Fact]
+      public void FramePictures_AnyWidthStoresTheSameTiles() {
+         var animations = CreateAnimations();
+         var entry = AddPatternedAnimation(animations, 4, 3);
+         var before = animations.ReadFrame(entry, 2);
+         var row = animations.ReadFramePixels(entry, 2, 4);
+         row[25, 3] = (row[25, 3] + 1) & 0xF; // tile 3, pixel (1, 3)
+
+         animations.WriteFramePixels(Token, entry, 2, 4, row);
+
+         var after = animations.ReadFrame(entry, 2);
+         var changed = Enumerable.Range(0, before.Length).Where(i => before[i] != after[i]).ToList();
+         Assert.Single(changed);
+         Assert.Equal(3 * 32 + 3 * 4 + 0, changed[0]);
+      }
+
+      [Fact]
+      public void FramePictures_ABlankTileAtTheEndOfAShortRowIsNotStored() {
+         var animations = CreateAnimations();
+         var entry = AddPatternedAnimation(animations, 10, 2); // 10 tiles in rows of 4: the last row has two tiles
+         var before = animations.ReadFrame(entry, 0);
+         var picture = animations.ReadFramePixels(entry, 0, 4);
+         Assert.Equal(32, picture.GetLength(0));
+         Assert.Equal(24, picture.GetLength(1));
+         picture[20, 20] = 9; // inside the part of the last row that is no tile
+         picture[3, 3] = (picture[3, 3] + 1) & 0xF;
+
+         animations.WriteFramePixels(Token, entry, 0, 4, picture);
+
+         var after = animations.ReadFrame(entry, 0);
+         Assert.Equal(before.Length, after.Length);
+         var changed = Enumerable.Range(0, before.Length).Where(i => before[i] != after[i]).ToList();
+         Assert.Single(changed); // only the real pixel changed
+      }
+
+      [Fact]
+      public void AnimationFrameSource_FollowsItsAnimation() {
+         var animations = CreateAnimations();
+         AddPatternedAnimation(animations, 4, 3);
+         var entry = CurrentFirstEntry(animations);
+         var source = new AnimationFrameSource(Model, animations, TilesetStart, entry, "Anim", () => CurrentFirstEntry(animations));
+
+         Assert.True(source.IsValid);
+         Assert.Equal(3, source.FrameCount);
+         Assert.Equal("Anim", source.Title);
+         Assert.True(source.CanChooseWidth);
+         Assert.Equal(2, source.DefaultWidthTiles);
+         Assert.Equal(4, source.MaxWidthTiles);
+         Assert.Equal(entry.FramesAddress + 8, source.SpritePointer(2));
+
+         // every frame is registered as tiles that know their palette: that is how the editor finds the colors
+         Assert.True(source.Prepare());
+         for (int f = 0; f < 3; f++) Assert.IsAssignableFrom<ISpriteRun>(Model.GetNextRun(animations.FrameAddress(entry, f)));
+
+         // drawing through the source changes that frame
+         var picture = source.ReadFrame(1, 0);
+         picture[0, 0] = (picture[0, 0] + 1) & 0xF;
+         source.WriteFrame(Token, 1, 0, picture);
+         Assert.Equal(picture[0, 0], source.ReadFrame(1, 0)[0, 0]);
+
+         // a frame table that points at one picture twice: editing one of them edits the other
+         Model.WritePointer(Token, entry.FramesAddress + 8, Model.ReadPointer(entry.FramesAddress));
+         Assert.Equal("the same picture as frame 1", source.FrameNote(2));
+         Assert.Equal(string.Empty, source.FrameNote(0));
+         Assert.Equal(string.Empty, source.FrameNote(1));
+      }
+
+      [Fact]
+      public void AnimationFrameSource_IsNotValidOnceItsAnimationIsGoneOrIsAnother() {
+         var animations = CreateAnimations();
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+         AddPatternedAnimation(animations, 4, 3);
+         var source = new AnimationFrameSource(Model, animations, TilesetStart, CurrentFirstEntry(animations), "Anim", () => CurrentFirstEntry(animations));
+         Assert.True(source.IsValid);
+
+         animations.TryGetTable(TilesetStart, out var table, out _);
+         animations.RemoveEntry(table, 0);
+         Assert.False(source.IsValid);
+         Assert.Equal(0, source.FrameCount);
+
+         // a different animation took its place in the table
+         animations.TryGetTable(TilesetStart, out table, out _);
+         animations.AddEntry(table, 0, 2, 3, 4, false, constants, new byte[32 * 16]);
+         Assert.False(source.IsValid);
+      }
+
+      private DoorAnimations CreateDoorTable(int size, out DoorEntry entry) {
+         // like EnsureTilesFormat_ReshapesDoorTilesRegisteredWithTheWrongSize: a door at block 600 with its frames at 0x800
+         var tableStart = 0x600;
+         Model.WriteMultiByteValue(tableStart, 2, Token, 600);
+         Model.WritePointer(Token, tableStart + 4, TilesetStart);
+         Model[tableStart + 8] = 0; Model[tableStart + 9] = (byte)size;
+         Model.WritePointer(Token, tableStart + 12, 0x800);
+         Model.WritePointer(Token, tableStart + 16, 0xF00);
+         for (int i = 20; i < 40; i++) Model[tableStart + i] = 0;
+         ViewPort.Edit($"@{tableStart:X6} ^{DoorAnimations.TableName}[metatile: unused: tileset<> sound. size. unused: tiles<`ucs4x4x12`> palettes<>]2 ");
+         var doors = new DoorAnimations(Model, () => Token);
+         entry = doors.ReadEntries()[0];
+         doors.EnsureTilesFormat(entry);
+         return doors;
+      }
+
+      [Fact]
+      public void DoorFramePictures_AreLaidOutTheWayTheGameDrawsThem() {
+         var doors = CreateDoorTable(2, out var entry); // 2x2: four blocks of 4 tiles per frame
+         Model[entry.TilesAddress + (1 * 16 + 4) * 32] = 0x5A; // frame 1, tile 4: the first tile of the second block, bottom left
+
+         var picture = doors.ReadFramePixels(entry, 1);
+
+         Assert.Equal(32, picture.GetLength(0));
+         Assert.Equal(32, picture.GetLength(1));
+         Assert.Equal(0xA, picture[0, 16]);
+         Assert.Equal(0x5, picture[1, 16]);
+         Assert.Equal(0xF, picture[0, 0]); // the rest of the model is 0xFF
+      }
+
+      [Fact]
+      public void DoorFramePictures_WritingChangesOnlyThatPixelOfThatFrame() {
+         var doors = CreateDoorTable(2, out var entry);
+         var before = Model.RawData.Skip(entry.TilesAddress).Take(entry.TilesLength).ToArray();
+         var picture = doors.ReadFramePixels(entry, 1);
+         picture[2, 17] = 3; // left column, third row of tiles: tile 4 of the frame; pixel (2, 1)
+
+         doors.WriteFramePixels(Token, entry, 1, picture);
+
+         var after = Model.RawData.Skip(entry.TilesAddress).Take(entry.TilesLength).ToArray();
+         var changed = Enumerable.Range(0, before.Length).Where(i => before[i] != after[i]).ToList();
+         Assert.Single(changed);
+         Assert.Equal((1 * 16 + 4) * 32 + 1 * 4 + 1, changed[0]);
+         Assert.Equal(0xF3, after[changed[0]]);
+      }
+
+      [Fact]
+      public void DoorFrameSource_DescribesTheDoorAndNoticesWhenItChanged() {
+         var doors = CreateDoorTable(2, out var entry);
+         var source = new DoorFrameSource(doors, entry, "Door");
+
+         Assert.True(source.IsValid);
+         Assert.Equal(3, source.FrameCount);
+         Assert.False(source.CanChooseWidth);
+         Assert.Equal(4, source.DefaultWidthTiles);
+         Assert.True(source.Prepare());
+         Assert.Equal(entry.EntryAddress + 12, source.SpritePointer(2));
+         Assert.Equal(32, source.ReadFrame(1, 0).GetLength(0));
+         Assert.Equal(32, source.ReadFrame(1, 0).GetLength(1));
+
+         Model.WritePointer(Token, entry.EntryAddress + 4, 0x40); // the door now belongs to another tileset
+         Assert.False(source.IsValid);
       }
 
       #endregion

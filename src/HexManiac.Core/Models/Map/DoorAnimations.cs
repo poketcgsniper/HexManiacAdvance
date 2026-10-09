@@ -104,6 +104,42 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          }
       }
 
+      /// <summary>
+      /// One frame of the door as a picture of palette indices, WidthTiles x HeightTiles tiles, with the tiles in the places the game draws them
+      /// (see <see cref="DoorEntry.TilePosition"/>). Returns a blank picture if the door's tiles are out of range.
+      /// </summary>
+      public int[,] ReadFramePixels(DoorEntry entry, int frame) {
+         var pixels = new int[entry.WidthTiles * 8, entry.HeightTiles * 8];
+         if (entry.TilesAddress < 0 || entry.TilesAddress + entry.TilesLength > model.Count || frame < 0 || frame >= DoorEntry.FrameCount) return pixels;
+         for (int t = 0; t < entry.TilesPerFrame; t++) {
+            var (tileX, tileY) = entry.TilePosition(t);
+            var start = entry.TilesAddress + (frame * entry.TilesPerFrame + t) * 32;
+            for (int y = 0; y < 8; y++) {
+               for (int x = 0; x < 8; x++) {
+                  var b = model[start + y * 4 + x / 2];
+                  pixels[tileX * 8 + x, tileY * 8 + y] = x % 2 == 0 ? b & 0xF : b >> 4;
+               }
+            }
+         }
+         return pixels;
+      }
+
+      /// <summary>Write an edited picture (the shape ReadFramePixels returned) back into the frame's tiles. Only the bytes that changed are written.</summary>
+      public void WriteFramePixels(ModelDelta token, DoorEntry entry, int frame, int[,] pixels) {
+         if (entry.TilesAddress < 0 || entry.TilesAddress + entry.TilesLength > model.Count || frame < 0 || frame >= DoorEntry.FrameCount) return;
+         if (pixels.GetLength(0) != entry.WidthTiles * 8 || pixels.GetLength(1) != entry.HeightTiles * 8) return;
+         for (int t = 0; t < entry.TilesPerFrame; t++) {
+            var (tileX, tileY) = entry.TilePosition(t);
+            var start = entry.TilesAddress + (frame * entry.TilesPerFrame + t) * 32;
+            for (int y = 0; y < 8; y++) {
+               for (int x = 0; x < 8; x += 2) {
+                  var value = (byte)((pixels[tileX * 8 + x, tileY * 8 + y] & 0xF) | ((pixels[tileX * 8 + x + 1, tileY * 8 + y] & 0xF) << 4));
+                  if (model[start + y * 4 + x / 2] != value) token.ChangeData(model, start + y * 4 + x / 2, value);
+               }
+            }
+         }
+      }
+
       /// <summary>Which of the tileset's 16 palettes each tile of a frame uses.</summary>
       public int[] ReadPaletteIndices(DoorEntry entry) {
          var result = new int[entry.TilesPerFrame];
