@@ -2575,9 +2575,22 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             OpenSoundTab();
          } else if (editor.Equals("sprites", StringComparison.OrdinalIgnoreCase) || editor.Equals("gallery", StringComparison.OrdinalIgnoreCase)) {
             OpenSpriteGalleryTab();
+         } else if (editor.Equals("animations", StringComparison.OrdinalIgnoreCase) || editor.Equals("tiles", StringComparison.OrdinalIgnoreCase)) {
+            var map = MapEditor?.PrimaryMap;
+            OpenTilesetAnimationTab(map?.MapID / 1000 ?? 0, map?.MapID % 1000 ?? 0, false);
          } else {
-            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound' or 'editor:sprites'.");
+            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites' or 'editor:animations'.");
          }
+      }
+
+      public void OpenTilesetAnimationTab(int group, int map, bool secondary) {
+         if (!TilesetAnimationTab.IsSupported(Model)) { RaiseError("This ROM's metadata has no tileset animation constants (tilesetanim.*), so the animated tiles editor can't be used here."); return; }
+         var newTab = new TilesetAnimationTab(fs, this, group, map, secondary);
+         newTab.OnError += (sender, e) => RaiseError(e);
+         newTab.OnMessage += (sender, e) => RaiseMessage(e);
+         var args = new TabChangeRequestedEventArgs(newTab);
+         RequestTabChange(this, args);
+         if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);
       }
 
       public void OpenSoundTab() {

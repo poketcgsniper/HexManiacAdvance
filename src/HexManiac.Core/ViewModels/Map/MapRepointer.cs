@@ -762,28 +762,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       #region Animations
 
-      public string CreatePrimaryTilesetAnimationsText => string.Empty;
+      public string CreatePrimaryTilesetAnimationsText => CanCreatePrimaryTilesetAnimations() ? "Open the Animated Tiles editor for this map's primary tileset." : "Animated tiles need the tilesetanim.* constants in the ROM's metadata.";
 
-      private bool CanCreatePrimaryTilesetAnimations() {
-         // we should be able to run the utility to create a tileset animation unless we already have
-         return false;
-      }
+      private bool CanCreatePrimaryTilesetAnimations() => viewPort is ViewPort && TilesetAnimationTab.IsSupported(model);
 
-      private void ExecuteCreatePrimaryTilesetAnimations() {
-         // TODO grab the code from the utility and use that here
-         throw new NotImplementedException();
-      }
+      private void ExecuteCreatePrimaryTilesetAnimations() => (viewPort as ViewPort)?.OpenTilesetAnimationTab(mapID / 1000, mapID % 1000, false);
 
-      public string CreateSecondaryTilesetAnimationsText => string.Empty;
+      public string CreateSecondaryTilesetAnimationsText => CanCreateSecondaryTilesetAnimations() ? "Open the Animated Tiles editor for this map's secondary tileset." : "Animated tiles need the tilesetanim.* constants in the ROM's metadata.";
 
-      private bool CanCreateSecondaryTilesetAnimations() {
-         // we should be able to run the utility to create a tileset animation unless we already have
-         return false;
-      }
+      private bool CanCreateSecondaryTilesetAnimations() => viewPort is ViewPort && TilesetAnimationTab.IsSupported(model);
 
-      private void ExecuteCreateSecondaryTilesetAnimations() {
-         // grab the code from the utility and use that here
-      }
+      private void ExecuteCreateSecondaryTilesetAnimations() => (viewPort as ViewPort)?.OpenTilesetAnimationTab(mapID / 1000, mapID % 1000, true);
 
       #endregion
 

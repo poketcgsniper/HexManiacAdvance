@@ -528,6 +528,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             new ApplyCFRUPatch { Editor = this },
             new OpenSpriteGallery(),
             new OpenSoundEditor(),
+            new OpenAnimatedTiles(),
          };
 
          tabs = new List<ITabContent>();
@@ -1359,6 +1360,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
             results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Running", "Mach Bike", "Bike") ?? DrawIcon(GridIcon), ViewPort.EditorGotoPrefix + "sprites", "OW Sprites"));
          }
+         if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
+            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Wailmer Pail", "Pail", "Watering") ?? DrawIcon(FilmIcon), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles"));
+         }
       }
 
       private static readonly string[] NoteIcon = {
@@ -1396,6 +1400,25 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          ".#..#.#..#.#..#.",
          ".#..#.#..#.#..#.",
          ".####.####.####.",
+         "................",
+      };
+
+      private static readonly string[] FilmIcon = {
+         "################",
+         "#.#..........#.#",
+         "################",
+         "#..####..####..#",
+         "#..####..####..#",
+         "#..####..####..#",
+         "################",
+         "#.#..........#.#",
+         "################",
+         "#..####..####..#",
+         "#..####..####..#",
+         "#..####..####..#",
+         "################",
+         "#.#..........#.#",
+         "################",
          "................",
       };
 
