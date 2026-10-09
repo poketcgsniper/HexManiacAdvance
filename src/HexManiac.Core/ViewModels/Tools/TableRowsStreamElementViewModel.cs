@@ -15,7 +15,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
    /// Edits are written straight into the data, like every other field of the table tool.
    /// </summary>
    public class TableRowsStreamElementViewModel : TextStreamElementViewModel {
-      public const double NumberColumnWidth = 56, LabelColumnWidth = 96;
+      public const double NumberColumnWidth = 56, LabelColumnWidth = 96, ChanceColumnWidth = 44;
       public const double EnumColumnWidth = double.NaN; // the last column (the species) takes whatever width is left over
 
       private static readonly string[] LowLevelNames = { "lowLevel", "minLevel" };
@@ -61,12 +61,24 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       private bool hasRowLabels;
       public bool HasRowLabels { get => hasRowLabels; private set => Set(ref hasRowLabels, value); }
 
+      private bool hasChances;
+      /// <summary>
+      /// True if the odds of every row are known (the game picks a wild encounter slot by its number alone, see <see cref="WildEncounterChances"/>):
+      /// each row then shows its chance in percent in front of its boxes.
+      /// </summary>
+      public bool HasChances { get => hasChances; private set => Set(ref hasChances, value); }
+
+      // the name of the field that points to the list ("morningGrass", "daySurf", ...): what kind of encounters it holds, which decides the odds of its rows.
+      private string areaName;
+
       /// <summary>
       /// While one of the species boxes is open for typing, the table tool must not refresh it underneath the user.
       /// </summary>
       public bool IsDropDownOpen => Rows.Any(row => row.Cells.OfType<EnumTableCellViewModel>().Any(cell => cell.FilteringComboOptions.DropDownIsOpen));
 
-      public TableRowsStreamElementViewModel(ViewPort viewPort, string parentName, int start, string format) : base(viewPort, parentName, start, format) {
+      /// <param name="areaName">The name of the field of the parent table that points to this list (optional): "grass", "morningFish", ... It tells land encounters from fishing ones. Without it, the size of the list decides.</param>
+      public TableRowsStreamElementViewModel(ViewPort viewPort, string parentName, int start, string format, string areaName = null) : base(viewPort, parentName, start, format) {
+         this.areaName = areaName ?? string.Empty;
          BuildRows();
       }
 
@@ -81,10 +93,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var newColumns = new List<TableColumnViewModel>();
          var newRows = new List<TableRowViewModel>();
          var anyLabels = false;
+         var anyChances = false;
          var destination = Model.ReadPointer(Start);
          if (Model.GetNextRun(destination) is ITableRun table && table.Start == destination && Supports(table)) {
-            var comments = table.ElementContent.OfType<ArrayRunCommentSegment>().ToList();
-            anyLabels = comments.Count > 0;
+            // the odds of each row are fixed by the game, per slot: when they are known, say them (and don't repeat a comment that only says "20%")
+            anyChances = WildEncounterChances.TryGetChances(areaName, table.ElementCount, out var chances, out var chanceGroups);
+            var comments = table.ElementContent.OfType<ArrayRunCommentSegment>().Where(comment => !anyChances || !WildEncounterChances.IsPercentComment(comment.Comment)).ToList();
+            anyLabels = comments.Count > 0 || (anyChances && chanceGroups.Count > 0);
             // every row has the same species list: only build it once (a combo box with the names of all pokemon is not cheap)
             var sharedOptions = new Dictionary<ArrayRunEnumSegment, IReadOnlyList<ComboOption>>();
             for (int i = 0; i < table.ElementCount; i++) {
@@ -106,7 +121,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                }
                // the tables of the original games say what the rows mean, like "20% common": show that on the row that starts a new comment.
                var label = string.Join(" ", comments.Where(comment => comment.Index == i).Select(comment => comment.Comment.Replace('_', ' ')));
-               newRows.Add(new TableRowViewModel(i, label, anyLabels, cells));
+               // a fishing list is three lists in one (old rod, good rod, super rod): name the one that starts here
+               if (label.Length == 0 && anyChances) label = chanceGroups.Where(group => group.Start == i).Select(group => group.Name).FirstOrDefault() ?? string.Empty;
+               var chance = anyChances ? WildEncounterChances.Format(chances[i]) : string.Empty;
+               newRows.Add(new TableRowViewModel(i, label, anyLabels, cells, chance, anyChances));
             }
          }
 
@@ -114,12 +132,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          Rows.Clear();
          foreach (var row in newRows) Rows.Add(row);
          HasRowLabels = anyLabels;
+         HasChances = anyChances;
          NotifyPropertyChanged(nameof(Columns));
       }
 
       protected override bool TryCopy(StreamElementViewModel other) {
          if (other is not TableRowsStreamElementViewModel that) return false;
          if (!base.TryCopy(other)) return false;
+         areaName = that.areaName;
 
          // keep the existing boxes (and with them, the keyboard focus) as long as the shape of the list is the same: just update their values.
          bool sameShape = Rows.Count == that.Rows.Count && columns.Count == that.columns.Count;
@@ -140,16 +160,26 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       public int Index { get; }
       public string Label { get; private set; }
       public bool ShowLabel { get; }
+
+      /// <summary>How often this row is the one that appears, in percent ("20%"): empty if the game's odds for this kind of list are not known.</summary>
+      public string Chance { get; private set; }
+      public bool ShowChance { get; }
       public IReadOnlyList<TableCellViewModel> Cells { get; }
 
-      public TableRowViewModel(int index, string label, bool showLabel, IReadOnlyList<TableCellViewModel> cells) => (Index, Label, ShowLabel, Cells) = (index, label, showLabel, cells);
+      public TableRowViewModel(int index, string label, bool showLabel, IReadOnlyList<TableCellViewModel> cells, string chance = "", bool showChance = false) {
+         (Index, Label, ShowLabel, Cells, Chance, ShowChance) = (index, label, showLabel, cells, chance ?? string.Empty, showChance);
+      }
 
       public bool TryCopy(TableRowViewModel other) {
-         if (other.Cells.Count != Cells.Count || other.ShowLabel != ShowLabel) return false;
+         if (other.Cells.Count != Cells.Count || other.ShowLabel != ShowLabel || other.ShowChance != ShowChance) return false;
          for (int i = 0; i < Cells.Count; i++) if (!Cells[i].TryCopy(other.Cells[i])) return false;
          if (Label != other.Label) {
             Label = other.Label;
             NotifyPropertyChanged(nameof(Label));
+         }
+         if (Chance != other.Chance) {
+            Chance = other.Chance;
+            NotifyPropertyChanged(nameof(Chance));
          }
          return true;
       }

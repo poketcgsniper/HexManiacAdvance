@@ -244,9 +244,18 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       /// <summary>
       /// Most streams are edited as text. A list of encounters (min level, max level, species) gets a row of boxes per element instead.
       /// </summary>
-      private static TextStreamElementViewModel CreateTextStream(ViewPort viewPort, IFormattedRun streamRun, string name, int address, string format) {
-         if (streamRun is ITableRun table && TableRowsStreamElementViewModel.Supports(table)) return new TableRowsStreamElementViewModel(viewPort, name, address, format);
+      private static TextStreamElementViewModel CreateTextStream(ViewPort viewPort, IFormattedRun streamRun, string name, int address, string format, string areaName = null) {
+         if (streamRun is ITableRun table && TableRowsStreamElementViewModel.Supports(table)) return new TableRowsStreamElementViewModel(viewPort, name, address, format, areaName);
          return new TextStreamElementViewModel(viewPort, name, address, format);
+      }
+
+      /// <summary>
+      /// A list of encounters is reached through a field of the map's table ("morningGrass", "dayFish", ...): that name says what kind of encounters the list holds.
+      /// </summary>
+      private static string GetAreaName(IArrayElementViewModel parent) {
+         if (parent is StreamElementViewModel stream) return stream.ParentName;
+         if (parent is IMultiEnabledArrayElementViewModel field) return field.Name;
+         return string.Empty;
       }
 
       private void AddChildrenFromPointerSegment(ViewPort viewPort, int itemAddress, ArrayRunElementSegment item, IArrayElementViewModel parent, SplitterArrayElementViewModel header, int recursionLevel) {
@@ -275,7 +284,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          if (streamRun is ITrainerTeamRun tptRun) streamElement = new TrainerPokemonTeamElementViewModel(viewPort, tptRun, item.Name, itemAddress);
          else if (streamRun is IPaletteRun paletteRun) streamElement = new PaletteElementViewModel(viewPort, viewPort.ChangeHistory, item.Name, paletteRun.FormatString, paletteRun.PaletteFormat, itemAddress);
          else if (streamRun is ISpriteRun spriteRun) streamElement = new SpriteElementViewModel(viewPort, item.Name, spriteRun.FormatString, spriteRun.SpriteFormat, itemAddress);
-         else if (streamRun == null || streamRun is IStreamRun || streamRun is ITableRun) streamElement = CreateTextStream(viewPort, streamRun, item.Name, itemAddress, pointerSegment.InnerFormat);
+         else if (streamRun == null || streamRun is IStreamRun || streamRun is ITableRun) streamElement = CreateTextStream(viewPort, streamRun, item.Name, itemAddress, pointerSegment.InnerFormat, GetAreaName(parent));
          if (streamElement == null) return;
          streamElement.Parent = header;
 
@@ -289,7 +298,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             var parentStart = parent is StreamElementViewModel streamParent ? streamParent.Start : -1;
             if (run is IPaletteRun paletteRun1) newStream = new PaletteElementViewModel(viewPort, viewPort.ChangeHistory, item.Name, paletteRun1.FormatString, paletteRun1.PaletteFormat, streamAddress);
             else if (run is ISpriteRun spriteRun1) newStream = new SpriteElementViewModel(viewPort, item.Name, spriteRun1.FormatString, spriteRun1.SpriteFormat, streamAddress);
-            else if (run == null || run is IStreamRun) newStream = CreateTextStream(viewPort, run, item.Name, streamAddress, pointerSegment.InnerFormat);
+            else if (run == null || run is IStreamRun) newStream = CreateTextStream(viewPort, run, item.Name, streamAddress, pointerSegment.InnerFormat, GetAreaName(parent));
 
             ForwardModelChanged(newStream);
             ForwardModelDataMoved(newStream);

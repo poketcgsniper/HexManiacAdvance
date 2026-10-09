@@ -720,6 +720,9 @@
                                                    Visibility="{Binding ShowContent, Converter={StaticResource BoolToVisibility}}">
                                                 <DockPanel LastChildFill="True" Margin="2,2,2,0">
                                                    <Border DockPanel.Dock="Left" Width="96" Margin="2,0" Visibility="{Binding HasRowLabels, Converter={StaticResource BoolToVisibility}}"/>
+                                                   <TextBlock DockPanel.Dock="Left" Width="44" Margin="2,0" Text="Chance" TextAlignment="Right" Foreground="{DynamicResource Secondary}"
+                                                      ToolTip="How often this row is the one that shows up when a wild Pokémon appears. The game decides it by the row's place in the list."
+                                                      Visibility="{Binding HasChances, Converter={StaticResource BoolToVisibility}}"/>
                                                    <ItemsControl ItemsSource="{Binding Columns}" IsTabStop="False">
                                                       <ItemsControl.ItemsPanel>
                                                          <ItemsPanelTemplate>
@@ -740,6 +743,8 @@
                                                             <TextBlock DockPanel.Dock="Left" Width="96" Margin="2,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                                                Text="{Binding Label}" Foreground="{DynamicResource Secondary}"
                                                                Visibility="{Binding ShowLabel, Converter={StaticResource BoolToVisibility}}"/>
+                                                            <TextBlock DockPanel.Dock="Left" Width="44" Margin="2,0" VerticalAlignment="Center" TextAlignment="Right" Text="{Binding Chance}"
+                                                               Visibility="{Binding ShowChance, Converter={StaticResource BoolToVisibility}}"/>
                                                             <ItemsControl ItemsSource="{Binding Cells}" IsTabStop="False">
                                                                <ItemsControl.ItemsPanel>
                                                                   <ItemsPanelTemplate>
