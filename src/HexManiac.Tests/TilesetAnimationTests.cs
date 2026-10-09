@@ -676,6 +676,34 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(Slice(tiles, 0, 14), Slice(after, 0, 14));
       }
 
+      [Theory]
+      [InlineData(512)]
+      [InlineData(640)]
+      public void FirstFrame_SecondaryTilesetsNumberTheirTilesAfterThePrimaryOnes(int primaryTiles) {
+         Model.SetUnmappedConstant(Token, TilesetAnimationConstants.Prefix + "primarytiles", primaryTiles);
+         Model[TilesetStart + 1] = 1; // the header says: secondary tileset
+         var animations = CreateAnimations();
+         var tiles = Tiles(16);
+         WriteTileset(tiles);
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+         var table = animations.EnsureTable(TilesetStart, true, constants, out _);
+         var entry = animations.AddEntry(table, 4, 2, 2, 4, true, constants, tiles);
+         Assert.Equal(primaryTiles + 4, Model.ReadMultiByteValue(entry.EntryAddress + 8, 4)); // what the game's table stores...
+         animations.WriteFrame(entry, 0, Enumerable.Repeat((byte)0x5C, 64).ToArray());
+
+         var result = animations.ShowFirstFrameInTileset(Token, TilesetStart, entry);
+
+         Assert.False(result.Failed);
+         Assert.Equal(2, result.ChangedTiles);
+         Assert.Equal(0, result.SkippedTiles);
+         var after = animations.ReadTilesetData(TilesetStart);
+         Assert.Equal(16 * 32, after.Length);                                                  // ...is tile 4 of the secondary tileset's own graphics, which did not grow
+         Assert.Equal(Enumerable.Repeat((byte)0x5C, 64), Slice(after, 4, 2));
+         Assert.Equal(Slice(tiles, 0, 4), Slice(after, 0, 4));
+         Assert.Equal(Slice(tiles, 6, 10), Slice(after, 6, 10));
+         Assert.Equal(FirstFrameState.InSync, animations.CompareFirstFrame(after, entry));
+      }
+
       [Fact]
       public void FirstFrame_StopsAtTheEndOfVideoMemory() {
          Model.SetUnmappedConstant(Token, TilesetAnimationConstants.Prefix + "primarytiles", 16);
