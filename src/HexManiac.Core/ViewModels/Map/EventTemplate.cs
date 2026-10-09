@@ -1060,15 +1060,29 @@ failed:
 
       #region Trade
 
+      // The messages of the trade template. [buffer1] (\\02) is the species the NPC wants, [buffer2] (\\03) the one it offers.
+      // Line breaks are written with the \n escape and never as a line-break character: the text converter only recognizes the line break
+      // of the platform it runs on (Environment.NewLine, which is "\r\n" on Windows), so a '\n' character vanished there and the offer
+      // came out as one long line ("Want to trade your Nidorinafor my Nidorino") that ran off the text box.
+      // A text box holds two lines of about 214 pixels: the longest line below is "Your old <species> is doing great!".
+      public const string TradeInfoText = "Want to trade your \\\\02\\nfor my \\\\03?";
+      public const string TradeThanksText = "Thank you!";
+      public const string TradeSuccessText = "How is my old \\\\03?\\pnYour old \\\\02 is doing great!";
+      public const string TradeFailText = "That's too bad.";
+      public const string TradeWrongSpeciesText = "\\.This is no \\\\02.\\pnIf you get one, please trade it\\nfor my \\\\03!";
+
+      /// <summary>All the messages of the trade template, in the order the trade script shows them: offer, thanks, after the trade, cancel, wrong Pokémon.</summary>
+      public static IReadOnlyList<string> TradeTexts { get; } = new[] { TradeInfoText, TradeThanksText, TradeSuccessText, TradeFailText, TradeWrongSpeciesText };
+
       public void CreateTrade(ObjectEventViewModel objectEventViewModel, ModelDelta token) {
          var tradeFlag = FindNextUnusedFlag();
 
          int tradeId = 0;
-         int initialText = WriteText(token, "Want to trade your \\\\02\nfor my \\\\03?");
-         int thanksText = WriteText(token, "Thank you!");
-         int successText = WriteText(token, "How is my old \\\\03?\\pnYour old \\\\02 is doing great!");
-         int failText = WriteText(token, "That's too bad.");
-         int wrongSpeciesText = WriteText(token, "\\.This is no \\\\02.\\pnIf you get one, please trade it\\nfor my \\\\03!");
+         int initialText = WriteText(token, TradeInfoText);
+         int thanksText = WriteText(token, TradeThanksText);
+         int successText = WriteText(token, TradeSuccessText);
+         int failText = WriteText(token, TradeFailText);
+         int wrongSpeciesText = WriteText(token, TradeWrongSpeciesText);
 
          var script = BuildTradeScript(Flags.IsExpansion(model), tradeId, tradeFlag, initialText, thanksText, successText, failText, wrongSpeciesText);
 

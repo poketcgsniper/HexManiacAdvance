@@ -1,6 +1,7 @@
 using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Code;
 using HavenSoft.HexManiac.Core.ViewModels.Map;
+using HavenSoft.HexManiac.Core.ViewModels.Tools;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -170,6 +171,102 @@ namespace HavenSoft.HexManiac.Tests {
          var order = new[] { "<000100>", "<000110>", "<000120>", "<000130>", "<000140>" }.Select(text => script.IndexOf(text, StringComparison.Ordinal)).ToArray();
          Assert.All(order, position => Assert.True(position >= 0));
          Assert.Equal(order.OrderBy(position => position), order);
+      }
+
+      #endregion
+
+      #region trade text
+
+      // The widest a species name can be: 13 characters (the name field of the expansion's species table), and no glyph of the font is wider than 6 pixels.
+      private const int WidestSpeciesName = 13 * 6;
+
+      // The pixel width of the normal font's glyphs (the font width table of the ROM): everything not listed is 6 pixels wide.
+      private static int GlyphWidth(byte pcs) => pcs switch {
+         0x00 or 0xAD or 0xB4 or 0xB8 => 3, // space . ' ,
+         0xAB or 0xDD or 0xE0 => 4,         // ! i l
+         0xDE or 0xE6 => 5,                 // j r
+         _ => 6,
+      };
+
+      /// <summary>
+      /// Lays out a message the way the text box does: returns the pixel width of every line and the row of the box (0 or 1) it is printed on.
+      /// A new line goes to the next row, \p (0xFB) clears the box, \l (0xFA) scrolls the box up so the new line is on the bottom row again.
+      /// A species buffer (0xFD and its id) counts as the widest species name.
+      /// </summary>
+      private static List<(int row, int width)> Lines(IReadOnlyList<byte> text) {
+         var lines = new List<(int row, int width)>();
+         int row = 0, width = 0;
+         for (int i = 0; i < text.Count && text[i] != 0xFF; i++) {
+            switch (text[i]) {
+               case 0xFD: width += WidestSpeciesName; i++; break;
+               case 0xFE: lines.Add((row, width)); row++; width = 0; break;
+               case 0xFB: lines.Add((row, width)); row = 0; width = 0; break;
+               case 0xFA: lines.Add((row, width)); row = 1; width = 0; break;
+               default: width += GlyphWidth(text[i]); break;
+            }
+         }
+         lines.Add((row, width));
+         return lines;
+      }
+
+      private static int IndexOf(IReadOnlyList<byte> text, byte first, byte second) {
+         for (int i = 0; i + 1 < text.Count; i++) if (text[i] == first && text[i + 1] == second) return i;
+         return -1;
+      }
+
+      [Fact]
+      public void TradeTexts_UseEscapesForLineBreaks_NotLineBreakCharacters() {
+         // The text converter only knows the line break of the platform it runs on (Environment.NewLine): on Windows a '\n' character
+         // is silently dropped, and "Want to trade your Nidorina\nfor my Nidorino?" came out as "...Nidorinafor my Nidorino" in the game.
+         foreach (var text in EventTemplate.TradeTexts) {
+            Assert.False(text.Contains('\n'), text);
+            Assert.False(text.Contains('\r'), text);
+         }
+      }
+
+      [Fact]
+      public void TradeInfo_BreaksTheLineRightAfterTheFirstSpecies() {
+         var text = Model.TextConverter.Convert(EventTemplate.TradeInfoText, out _);
+         var first = IndexOf(text, 0xFD, 0x02);  // [buffer1]: the species the NPC wants
+         var second = IndexOf(text, 0xFD, 0x03); // [buffer2]: the species the NPC offers
+
+         Assert.True(first > 0, "the offer starts by naming the first species");
+         Assert.Equal((byte)0xFE, text[first + 2]);       // the next line starts right behind the name
+         Assert.Equal(1, text.Count(b => b == 0xFE));
+         Assert.True(second > first + 2, "the second species is named on the second line");
+         Assert.Equal((byte)0x00, text[first - 1]);       // "your <name>": the space stays in front of the name
+         Assert.NotEqual((byte)0x00, text[first + 3]);    // and the second line does not start with one
+         Assert.Equal((byte)0xFF, text[text.Count - 1]);
+      }
+
+      [Fact]
+      public void TradeInfo_ReadsWantToTradeYourSpeciesForMySpecies() {
+         var expected = new List<byte>();
+         expected.AddRange(Model.TextConverter.Convert("Want to trade your ", out _).Where(b => b != 0xFF));
+         expected.AddRange(new byte[] { 0xFD, 0x02, 0xFE });
+         expected.AddRange(Model.TextConverter.Convert("for my ", out _).Where(b => b != 0xFF));
+         expected.AddRange(new byte[] { 0xFD, 0x03 });
+         expected.AddRange(Model.TextConverter.Convert("?", out _));
+
+         Assert.Equal(expected, Model.TextConverter.Convert(EventTemplate.TradeInfoText, out _));
+      }
+
+      [Fact]
+      public void TradeTexts_NeverShowMoreThanTwoLinesInTheBox() {
+         // a box shows two lines: a third needs \l (scroll) or \p (clear) in front of it
+         foreach (var text in EventTemplate.TradeTexts) {
+            var lines = Lines(Model.TextConverter.Convert(text, out _));
+            Assert.All(lines, line => Assert.True(line.row <= 1, text));
+         }
+      }
+
+      [Fact]
+      public void TradeTexts_EveryLineFitsTheBox_EvenWithTheLongestSpeciesName() {
+         foreach (var text in EventTemplate.TradeTexts) {
+            foreach (var line in Lines(Model.TextConverter.Convert(text, out _))) {
+               Assert.True(line.width <= CodeBody.MaxEventTextWidth, $"{text}: {line.width}px");
+            }
+         }
       }
 
       #endregion
