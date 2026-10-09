@@ -518,6 +518,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public ICommand GotoSong => StubCommand(ref gotoSong, ExecuteGotoSong, () => selectedSong != null);
 
       private void LoadSongs() {
+         var keepInsertVoicegroup = selectedVoicegroup?.Address;
          Songs.Clear();
          Voicegroups.Clear();
          var table = model.GetTable(SongTable);
@@ -536,7 +537,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          foreach (var info in VoicegroupCatalog.Scan(model, usages)) Voicegroups.Add(new VoicegroupItem(model, info));
          foreach (var item in Songs) item.MatchToFilter(songFilter);
-         if (Voicegroups.Count > 0) SelectedVoicegroup = Voicegroups[0];
+         // the voicegroup chosen for inserting songs stays chosen when the lists are read again
+         SelectedVoicegroup = (keepInsertVoicegroup == null ? null : FindVoicegroupItem(keepInsertVoicegroup.Value)) ?? Voicegroups.FirstOrDefault();
          // the selected song belongs to the old list: drop it (callers that want a selection pick one again)
          if (selectedSong != null && !Songs.Contains(selectedSong)) SelectedSong = null;
       }
@@ -858,6 +860,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private void RebuildInstrumentChoices() {
          var keepSlot = selectedInstrument?.Slot ?? -1;
+         var keepBytes = selectedInstrument?.BytesKey;
          var keepSource = choicesSourceAddress;
          InstrumentChoices.Clear();
          var source = instrumentSourceGroup;
@@ -876,7 +879,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             }
          }
          foreach (var choice in choices) InstrumentChoices.Add(choice);
-         SelectedInstrument = (keepSource == choicesSourceAddress && keepSlot >= 0 ? choices.FirstOrDefault(choice => choice.Slot == keepSlot) : null) ?? choices.FirstOrDefault();
+         // the same instrument stays selected when the list is rebuilt for the same voicegroup (after one of its slots was edited, the instrument may have moved to another slot)
+         var keep = keepSource != choicesSourceAddress || keepSlot < 0 ? null
+            : choices.FirstOrDefault(choice => choice.BytesKey == keepBytes) ?? choices.FirstOrDefault(choice => choice.Slot == keepSlot);
+         SelectedInstrument = keep ?? choices.FirstOrDefault();
       }
 
       /// <summary>After the ROM changed: read the selected song's header again (so the music engine sees the new pointer) and refresh what depends on it.</summary>
@@ -1022,7 +1028,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          viewPort.ChangeHistory.ChangeCompleted();
          viewPort.Refresh();
-         if (needsCopy) ReloadSongsKeepingSelection(); else { RefreshSelectedSongHeader(); }
+         if (needsCopy) {
+            ReloadSongsKeepingSelection();
+         } else {
+            // edited in place: the lists were read before the change
+            RefreshSelectedSongHeader();
+            RebuildSongInstruments();
+            RebuildInstrumentChoices();
+         }
          if (slot < SongInstruments.Count) SelectedSlot = SongInstruments[slot];
          Status = $"Slot {slot} now plays {instrument.Description} (from {instrumentSourceGroup?.Title} #{instrument.Slot}).{copyMessage} Press Play to hear it in the song.";
          OnMessage?.Invoke(this, Status);

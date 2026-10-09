@@ -127,6 +127,8 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
       public const int MaxEntries = 128;
       public const int EntrySize = ToneData.Size;
       public const int Length = MaxEntries * EntrySize;
+      /// <summary>How many instruments in a row can fail to look like an instrument before the data is taken to be over.</summary>
+      private const int MaxUnreadableGap = 4;
 
       /// <summary>The "unused instrument" the games put in the slots a voicegroup doesn't use: voice_square_1 60, 0, 0, 2, 0, 0, 15, 0</summary>
       public static byte[] FillerTone() => new byte[] { 0x01, 0x3C, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x00 };
@@ -221,8 +223,9 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
             entries = copy = Math.Min(MaxEntries, table.ElementCount);
          } else {
             entries = CountEntries(model, address, bound);
-            int lastValid = -1;
-            for (int j = 0; j < bound; j++) if (ToneData.TryRead(model, address + j * EntrySize, out _)) lastValid = j;
+            int lastValid = entries - 1;
+            // a voicegroup somebody edited may have a few instruments that don't look like instruments in the middle: a copy keeps what comes after them
+            for (int j = entries; j < bound && j - lastValid <= MaxUnreadableGap; j++) if (ToneData.TryRead(model, address + j * EntrySize, out _)) lastValid = j;
             copy = entries == 0 ? Math.Min(bound, Math.Max(0, (model.Count - address) / EntrySize)) : lastValid + 1;
          }
          return new VoicegroupInfo {
@@ -253,13 +256,14 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
       /// <summary>
       /// Finds room for new data: free space first, then the end of the ROM (as long as the ROM stays within the 32MB cartridge limit).
       /// </summary>
-      public static bool TryAllocate(IDataModel model, ModelDelta token, int length, out int address, out string error) {
+      /// <param name="maxRomLength">The size the ROM may grow to (the cartridge limit unless a caller wants a smaller one).</param>
+      public static bool TryAllocate(IDataModel model, ModelDelta token, int length, out int address, out string error, int maxRomLength = MaxRomLength) {
          error = null;
          address = model.FindFreeSpace(model.FreeSpaceStart, length);
          if (address >= 0) return true;
          var end = (model.Count + 3) / 4 * 4;
-         if (end + length > MaxRomLength) {
-            error = $"There is no free space left for {length} bytes, and the ROM can't grow past 32MB.";
+         if (end + length > maxRomLength) {
+            error = $"There is no free space left for {length} bytes, and the ROM can't grow past {(maxRomLength % 0x100000 == 0 ? (maxRomLength / 0x100000) + "MB" : maxRomLength + " bytes")}.";
             return false;
          }
          address = end;

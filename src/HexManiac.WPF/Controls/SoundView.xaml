@@ -25,6 +25,10 @@
          <Setter Property="Margin" Value="0,0,6,0"/>
          <Setter Property="MinWidth" Value="70"/>
       </Style>
+      <!-- One voicegroup in a drop-down: its name, size and users; the tooltip adds where it is and what its first instruments are. -->
+      <DataTemplate x:Key="VoicegroupItemTemplate">
+         <TextBlock Text="{Binding Label}" ToolTip="{Binding Description}"/>
+      </DataTemplate>
    </UserControl.Resources>
    <DockPanel Background="{DynamicResource Background}">
       <DockPanel DockPanel.Dock="Top" Margin="6,4">
@@ -56,11 +60,6 @@
                <DockPanel DockPanel.Dock="Top" Margin="0,4">
                   <TextBlock Text="Find:" VerticalAlignment="Center"/>
                   <TextBox Margin="5,0,0,0" Text="{Binding CryFilter, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
-               </DockPanel>
-               <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4" IsEnabled="{Binding CanRenameSong}">
-                  <TextBlock Text="Song name:" VerticalAlignment="Center"/>
-                  <TextBox Margin="5,0,0,0" VerticalAlignment="Center" Text="{Binding SelectedSongName, UpdateSourceTrigger=LostFocus}" KeyDown="SongNameKeyDown"
-                           ToolTip="Rename the selected song (for example after inserting a custom track). Press Enter or click away to save. This updates the song name list in the .toml, so the new name shows in the map header's music dropdown and everywhere else songs are listed. Spaces become underscores."/>
                </DockPanel>
                <Grid DockPanel.Dock="Bottom" Margin="0,6,0,0">
                   <Grid.RowDefinitions>
@@ -126,6 +125,7 @@
                      <RowDefinition Height="Auto"/>
                      <RowDefinition Height="Auto"/>
                      <RowDefinition Height="Auto"/>
+                     <RowDefinition Height="Auto"/>
                   </Grid.RowDefinitions>
                   <TextBlock Grid.Row="0" Text="{Binding SongDetails}" FontFamily="Consolas" TextWrapping="Wrap"/>
                   <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,4">
@@ -136,12 +136,81 @@
                      <Button Content="Insert .s…" Command="{Binding InsertSong}" Style="{StaticResource ToolButton}" ToolTip="Assemble a .s file into free space and put it in the song table"/>
                      <Button Content="Open in table" Command="{Binding GotoSong}" Style="{StaticResource ToolButton}" ToolTip="Jump to this song's entry in the song table"/>
                   </StackPanel>
-                  <Grid Grid.Row="2" Margin="0,2">
+                  <DockPanel Grid.Row="2" Margin="0,2" IsEnabled="{Binding CanRenameSong}">
+                     <TextBlock Text="Song name:" VerticalAlignment="Center"/>
+                     <TextBox Margin="5,0,0,0" VerticalAlignment="Center" Text="{Binding SelectedSongName, UpdateSourceTrigger=LostFocus}" KeyDown="SongNameKeyDown"
+                              ToolTip="Rename the selected song (for example after inserting a custom track). Press Enter or click away to save. This updates the song name list in the .toml, so the new name shows in the map header's music dropdown and everywhere else songs are listed. Spaces become underscores."/>
+                  </DockPanel>
+
+                  <!-- The voicegroup (instrument set) of the selected song -->
+                  <StackPanel Grid.Row="3" Margin="0,2" IsEnabled="{Binding CanChangeVoicegroup}">
+                     <Grid>
+                        <Grid.ColumnDefinitions>
+                           <ColumnDefinition Width="Auto"/>
+                           <ColumnDefinition Width="*"/>
+                           <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Voicegroup:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding Voicegroups}" SelectedItem="{Binding SongVoicegroup}" ItemTemplate="{StaticResource VoicegroupItemTemplate}" VerticalAlignment="Center"
+                                  ToolTip="The voicegroup (the set of instruments) the selected song plays with. Pick another one to switch the song to it; Play uses it right away, and Undo (Ctrl+Z) takes it back. Point at an entry to see where it is, its first instruments and the songs that use it."/>
+                        <Button Grid.Column="2" Content="Open in table" Command="{Binding GotoVoicegroup}" Style="{StaticResource ToolButton}" Margin="6,0,0,0" ToolTip="Jump to this voicegroup in the data view"/>
+                     </Grid>
+                     <DockPanel Margin="0,4,0,0">
+                        <Button DockPanel.Dock="Left" Content="New voicegroup for this song" Command="{Binding NewVoicegroup}" Style="{StaticResource ToolButton}"
+                                ToolTip="Give this song a voicegroup of its own: a copy of the voicegroup chosen on the right, in free space, with room for all 128 instruments. It sounds the same until you change its instruments (below). No other song is touched."/>
+                        <TextBlock DockPanel.Dock="Left" Text="copy of:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <ComboBox ItemsSource="{Binding Voicegroups}" SelectedItem="{Binding NewVoicegroupSource}" ItemTemplate="{StaticResource VoicegroupItemTemplate}" VerticalAlignment="Center"
+                                  ToolTip="Which voicegroup the new one starts as a copy of. It starts as the song's current voicegroup."/>
+                     </DockPanel>
+                     <TextBlock Style="{StaticResource Hint}" Text="{Binding VoicegroupNote}"/>
+                     <Expander Margin="0,2" IsExpanded="False">
+                        <Expander.Header>
+                           <TextBlock Text="Change the instruments of this song's voicegroup"/>
+                        </Expander.Header>
+                        <Grid Margin="22,4,0,2">
+                           <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="Auto"/>
+                              <ColumnDefinition Width="*"/>
+                              <ColumnDefinition Width="Auto"/>
+                           </Grid.ColumnDefinitions>
+                           <Grid.RowDefinitions>
+                              <RowDefinition Height="Auto"/>
+                              <RowDefinition Height="Auto"/>
+                              <RowDefinition Height="Auto"/>
+                              <RowDefinition Height="Auto"/>
+                              <RowDefinition Height="Auto"/>
+                           </Grid.RowDefinitions>
+                           <TextBlock Grid.Row="0" Grid.Column="0" Text="Slot:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                           <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding SongInstruments}" SelectedItem="{Binding SelectedSlot}" DisplayMemberPath="Label" VerticalAlignment="Center" Margin="0,2"
+                                     ToolTip="The slot of this song's voicegroup to change: the number the song's VOICE commands ask for. The entry shows what plays there now."/>
+                           <Button Grid.Row="0" Grid.Column="2" Content="▶ Hear" Command="{Binding PreviewSlot}" Style="{StaticResource ToolButton}" Margin="6,2,0,2" MinWidth="0" ToolTip="Play the instrument that is in this slot now"/>
+                           <TextBlock Grid.Row="1" Grid.Column="0" Text="Instrument from:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                           <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Voicegroups}" SelectedItem="{Binding InstrumentSourceGroup}" ItemTemplate="{StaticResource VoicegroupItemTemplate}" VerticalAlignment="Center" Margin="0,2"
+                                     ToolTip="The voicegroup to take an instrument from. Any voicegroup of the game can be used."/>
+                           <TextBlock Grid.Row="2" Grid.Column="0" Text="Instrument:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                           <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding InstrumentChoices}" SelectedItem="{Binding SelectedInstrument}" DisplayMemberPath="Label" VerticalAlignment="Center" Margin="0,2"
+                                     ToolTip="The instruments of that voicegroup. An instrument that appears in several slots is listed once."/>
+                           <Button Grid.Row="2" Grid.Column="2" Content="▶ Hear" Command="{Binding PreviewInstrument}" Style="{StaticResource ToolButton}" Margin="6,2,0,2" MinWidth="0" ToolTip="Play this instrument"/>
+                           <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="0,2">
+                              <Button Content="Use in the slot" Command="{Binding UseInstrument}" Style="{StaticResource ToolButton}"
+                                      ToolTip="Copy this instrument into the slot. Only the 12 byte instrument entry is copied (its sample is shared), so it costs almost no space. Undo (Ctrl+Z) takes it back."/>
+                              <TextBlock Text="Hear it at note:" VerticalAlignment="Center" Margin="6,0,4,0"/>
+                              <TextBox Width="40" Text="{Binding PreviewKey, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"
+                                       ToolTip="The note the Hear buttons play, 0 to 127 (60 is middle C). Drum kits and key splits answer with a different instrument for every note."/>
+                           </StackPanel>
+                           <TextBlock Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                                      Text="Pick a slot of this song's voicegroup, then any instrument of the game, and press 'Use in the slot'. If other songs use this voicegroup, the song gets its own copy first, so they stay as they are."/>
+                        </Grid>
+                     </Expander>
+                  </StackPanel>
+
+                  <Grid Grid.Row="4" Margin="0,2">
                      <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                      </Grid.ColumnDefinitions>
                      <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
@@ -153,12 +222,14 @@
                         <TextBlock Text="  player:" VerticalAlignment="Center"/>
                         <ComboBox ItemsSource="{Binding MusicPlayers}" SelectedIndex="{Binding InsertMusicPlayer}" IsEnabled="{Binding InsertAsNewSong}" VerticalAlignment="Center" Margin="4,0,0,0"/>
                      </WrapPanel>
-                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Voicegroup:" VerticalAlignment="Center" Margin="0,2,6,0"/>
+                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Insert with voicegroup:" VerticalAlignment="Center" Margin="0,2,6,0"/>
                      <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,2,0,0">
                         <CheckBox DockPanel.Dock="Right" Content="always use this one" IsChecked="{Binding OverrideVoicegroup}" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="Use the chosen voicegroup even when the .s file gives an address for its own."/>
-                        <ComboBox ItemsSource="{Binding Voicegroups}" SelectedItem="{Binding SelectedVoicegroup}" DisplayMemberPath="Label" VerticalAlignment="Center"/>
+                        <ComboBox ItemsSource="{Binding Voicegroups}" SelectedItem="{Binding SelectedVoicegroup}" ItemTemplate="{StaticResource VoicegroupItemTemplate}" VerticalAlignment="Center"/>
                      </DockPanel>
-                     <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Hint}" Text="A .s file from mid2agb names its voicegroup with a symbol (for example voicegroup000). That symbol is set to the voicegroup chosen here, so the instruments come from this ROM."/>
+                     <CheckBox Grid.Row="2" Grid.Column="1" Content="Give the song a new voicegroup of its own" IsChecked="{Binding InsertWithNewVoicegroup}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,4,0,2"
+                               ToolTip="After inserting, the song gets a new voicegroup: a copy of the one chosen above with room for all 128 instruments, in free space. Your custom track is then not tied to the instruments of one existing voicegroup: any instrument of the game can be put into it (Change the instruments, above). No other song is touched."/>
+                     <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Hint}" Text="A .s file from mid2agb names its voicegroup with a symbol (for example voicegroup000). That symbol is set to the voicegroup chosen here, so the instruments come from this ROM. With 'a new voicegroup of its own', the song gets a private copy of it, which can then hold any instrument of the game."/>
                   </Grid>
                </Grid>
                <Grid>
