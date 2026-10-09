@@ -388,6 +388,13 @@ namespace HexManiac.Core.Models.Runs.Sprites {
                model.ClearFormat(new NoTrackChange(), formatRun.Start, formatRun.Length);
                model.ObserveRunWritten(new NoTrackChange(), formatRun);
             }
+         } else if (existingRun is LzSpriteRun spriteRun && existingRun.Start == start) {
+            // The blockset says this data is a tileset, but it's formatted as a fixed-size sprite
+            // (the sprite tool's auto-detect used to do this, guessing a square size that drops the last tiles).
+            // A sprite run hides the tiles beyond its size and disables the tileset editing features (such as editing at 16 tiles wide),
+            // so quietly replace it with a tileset run. The anchor name, if any, is kept.
+            var formatRun = new LzTilesetRun(new TilesetFormat(4, spriteRun.SpriteFormat.PaletteHint), model, start, spriteRun.PointerSources);
+            if (formatRun.Length > 1) model.ObserveRunWritten(new NoTrackChange(), formatRun);
          }
 
          var run = new LzTilesetRun(new TilesetFormat(4, null), model, start);

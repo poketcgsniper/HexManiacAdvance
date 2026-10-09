@@ -189,6 +189,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             if (isTilemap) {
                newRunName = $"{HardcodeTablesModel.DefaultTilemapNamespace}.{spriteAddress:X6}";
                spriteRun = new LzTilemapRun(new TilemapFormat(4, width, height, string.Empty), model, spriteAddress, run.PointerSources);
+            } else if (IsMapTileset(run)) {
+               // A map tileset isn't a fixed-size picture. Guessing a square sprite size for it hides every tile past that size
+               // and turns off the tileset editing features, so format it as the tileset the blockset says it is.
+               newRunName = $"{HardcodeTablesModel.DefaultTilesetNamespace}.{spriteAddress:X6}";
+               spriteRun = new LzTilesetRun(new TilesetFormat(4, null), model, spriteAddress, run.PointerSources);
             } else {
                newRunName = $"{HardcodeTablesModel.DefaultSpriteNamespace}.{spriteAddress:X6}";
                spriteRun = new LzSpriteRun(new SpriteFormat(4, width, height, null), model, spriteAddress, run.PointerSources);
@@ -203,6 +208,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          LoadSprite();
          UpdateSpriteProperties();
       }
+      /// <summary>
+      /// True if the data is pointed to by the 'tileset' field of a map blockset.
+      /// </summary>
+      private bool IsMapTileset(IFormattedRun run) {
+         if (run?.PointerSources == null) return false;
+         foreach (var source in run.PointerSources) {
+            if (model.GetNextRun(source) is not ITableRun table || table.Start > source) continue;
+            var offsets = table.ConvertByteOffsetToArrayOffset(source);
+            if (offsets.SegmentIndex < 0 || offsets.SegmentIndex >= table.ElementContent.Count) continue;
+            if (table.ElementContent[offsets.SegmentIndex].Name != "tileset") continue;
+            if (table.ElementContent.Any(segment => segment.Name == "blockset")) return true;
+         }
+         return false;
+      }
+
       private void ExecuteIsSprite() {
          var initialStart = viewPort.ConvertViewPointToAddress(viewPort.SelectionStart);
          var checkAddress = initialStart;

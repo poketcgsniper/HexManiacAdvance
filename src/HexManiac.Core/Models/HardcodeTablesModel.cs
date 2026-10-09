@@ -66,6 +66,7 @@ namespace HavenSoft.HexManiac.Core.Models {
          TrainerClassNamesTable = "data.trainers.classes.names",
          ConversionDexTableName = "data.pokedex.hoennToNational",
          DefaultTilemapNamespace = "graphics.new.tilemap",
+         DefaultTilesetNamespace = "graphics.new.tileset",
          DefaultPaletteNamespace = "graphics.new.palette",
          AbilityDescriptionsTable = "data.abilities.descriptions",
          PokeIconPaletteIndexTable = "graphics.pokemon.icons.index",
