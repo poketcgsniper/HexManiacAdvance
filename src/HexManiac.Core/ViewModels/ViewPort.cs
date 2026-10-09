@@ -222,6 +222,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                TabChangeRequestedEventArgs args;
                if (arg is string str) {
                   Log("Attempting to Goto Token: " + str);
+                  if (str.StartsWith(EditorGotoPrefix, StringComparison.OrdinalIgnoreCase)) {
+                     OpenEditorTab(str.Substring(EditorGotoPrefix.Length).Trim());
+                     return;
+                  }
                   var possibleMatches = Model.GetExtendedAutocompleteOptions(str);
                   if (possibleMatches.Count == 1) str = possibleMatches[0];
                   else if (possibleMatches.Count > 1 && possibleMatches.All(match => Model.GetMatchedWords(match).Any())) str = possibleMatches[0];
@@ -2556,6 +2560,31 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       public void OpenSpriteGalleryTab() {
          var newTab = new SpriteGalleryTab(this);
+         var args = new TabChangeRequestedEventArgs(newTab);
+         RequestTabChange(this, args);
+         if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);
+      }
+
+      /// <summary>
+      /// Goto targets starting with this prefix open an editor tab instead of navigating to data: 'editor:sound', 'editor:sprites'.
+      /// </summary>
+      public const string EditorGotoPrefix = "editor:";
+
+      public void OpenEditorTab(string editor) {
+         if (editor.Equals("sound", StringComparison.OrdinalIgnoreCase) || editor.Equals("music", StringComparison.OrdinalIgnoreCase) || editor.Equals("cries", StringComparison.OrdinalIgnoreCase)) {
+            OpenSoundTab();
+         } else if (editor.Equals("sprites", StringComparison.OrdinalIgnoreCase) || editor.Equals("gallery", StringComparison.OrdinalIgnoreCase)) {
+            OpenSpriteGalleryTab();
+         } else {
+            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound' or 'editor:sprites'.");
+         }
+      }
+
+      public void OpenSoundTab() {
+         if (!SoundTab.IsSupported(Model)) { RaiseError("This ROM has no cry table or song table."); return; }
+         var newTab = new SoundTab(fs, this);
+         newTab.OnError += (sender, e) => RaiseError(e);
+         newTab.OnMessage += (sender, e) => RaiseMessage(e);
          var args = new TabChangeRequestedEventArgs(newTab);
          RequestTabChange(this, args);
          if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);

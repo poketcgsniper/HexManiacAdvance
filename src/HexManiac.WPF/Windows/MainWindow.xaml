@@ -678,6 +678,9 @@
                               <DataTemplate DataType="{x:Type hshmcvm:SpriteGalleryTab}">
                                  <hsg3hv:SpriteGalleryView />
                               </DataTemplate>
+                              <DataTemplate DataType="{x:Type hshmcvm:SoundTab}">
+                                 <hsg3hv:SoundView />
+                              </DataTemplate>
                               <DataTemplate DataType="{x:Type hshmcvm:ImageEditorViewModel}">
                                  <hsg3hv:ImageEditorView />
                               </DataTemplate>

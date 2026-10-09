@@ -527,6 +527,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             new DecapNames(),
             new ApplyCFRUPatch { Editor = this },
             new OpenSpriteGallery(),
+            new OpenSoundEditor(),
          };
 
          tabs = new List<ITabContent>();
@@ -1342,7 +1343,96 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             var text = model.GotoShortcuts[i].DisplayText;
             results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, sprite, anchor, text));
          }
+         AddEditorShortcuts(gotoViewModel, viewPort, results);
          return results;
+      }
+
+      /// <summary>
+      /// Top-level shortcuts for editor tabs that aren't tied to a single table: the Sound editor and the overworld sprite gallery.
+      /// They use the 'editor:' goto prefix, which ViewPort.Goto turns into opening the matching tab.
+      /// </summary>
+      private static void AddEditorShortcuts(GotoControlViewModel gotoViewModel, IEditableViewPort viewPort, List<GotoShortcutViewModel> results) {
+         var model = viewPort.Model;
+         if (SoundTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Sound")) {
+            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Flute", "Bell", "Harp") ?? DrawIcon(NoteIcon), ViewPort.EditorGotoPrefix + "sound", "Sound"));
+         }
+         if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
+            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Running", "Mach Bike", "Bike") ?? DrawIcon(GridIcon), ViewPort.EditorGotoPrefix + "sprites", "OW Sprites"));
+         }
+      }
+
+      private static readonly string[] NoteIcon = {
+         "................",
+         "..........####..",
+         "........######..",
+         "......####..##..",
+         "......##....##..",
+         "......##....##..",
+         "......##....##..",
+         "......##....##..",
+         "......##..####..",
+         "......##.#####..",
+         "..######.####...",
+         ".#####.#........",
+         ".######.........",
+         "..####..........",
+         "................",
+         "................",
+      };
+
+      private static readonly string[] GridIcon = {
+         "................",
+         ".####.####.####.",
+         ".#..#.#..#.#..#.",
+         ".#..#.#..#.#..#.",
+         ".####.####.####.",
+         "................",
+         ".####.####.####.",
+         ".#..#.#..#.#..#.",
+         ".#..#.#..#.#..#.",
+         ".####.####.####.",
+         "................",
+         ".####.####.####.",
+         ".#..#.#..#.#..#.",
+         ".#..#.#..#.#..#.",
+         ".####.####.####.",
+         "................",
+      };
+
+      /// <summary>
+      /// Turn a 16x16 text pattern ('#' = ink) into a tiny icon for a goto shortcut.
+      /// </summary>
+      private static IPixelViewModel DrawIcon(string[] pattern) {
+         int height = pattern.Length, width = pattern[0].Length;
+         var pixels = new short[width * height];
+         const short transparent = 0x7C1F, ink = 0x1084; // magenta is the transparent key, ink is a dark gray
+         for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) pixels[y * width + x] = pattern[y][x] == '#' ? ink : transparent;
+         }
+         return new ReadonlyPixelViewModel(width, height, pixels, transparent);
+      }
+
+      private static IPixelViewModel FindItemIcon(IDataModel model, params string[] nameHints) {
+         try {
+            var items = model.GetTable(HardcodeTablesModel.ItemsTableName);
+            if (items == null) return null;
+            var iconSegment = items.ElementContent.FirstOrDefault(segment => segment.Name == "icon" && segment is ArrayRunPointerSegment);
+            if (iconSegment == null) return null;
+            var names = model.GetOptions(HardcodeTablesModel.ItemsTableName);
+            var offset = items.ElementContent.Until(segment => segment == iconSegment).Sum(segment => segment.Length);
+            foreach (var hint in nameHints) {
+               for (int i = 0; i < names.Count && i < items.ElementCount; i++) {
+                  if (!names[i].Contains(hint, StringComparison.OrdinalIgnoreCase)) continue;
+                  var iconAddress = model.ReadPointer(items.Start + items.ElementLength * i + offset);
+                  if (model.GetNextRun(iconAddress) is ISpriteRun spriteRun && spriteRun.Start == iconAddress) {
+                     return SpriteDecorator.BuildSprite(model, spriteRun, useTransparency: true);
+                  }
+               }
+            }
+         } catch (Exception) {
+            // icons are decoration: never fail the shortcut list because of them
+         }
+         return null;
       }
 
       private void ForwardDelayedWork(object sender, Action e) => RequestDelayedWork?.Invoke(this, e);
