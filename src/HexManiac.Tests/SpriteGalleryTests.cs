@@ -1,4 +1,5 @@
 using HavenSoft.HexManiac.Core.Models;
+using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.ViewModels.Tools;
 using System.Collections.Generic;
 using System.Linq;
@@ -55,6 +56,26 @@ namespace HavenSoft.HexManiac.Tests {
 
          Assert.Equal(2, gallery.CurrentIndex);
          Assert.Equal("MOM", gallery.CurrentName);
+      }
+
+      [Fact]
+      public void EnumIntoTableOfSpriteStructs_ComboOptionsHavePictures() {
+         // like data.trainers.sprites: each element points at a struct whose first field is the sprite
+         for (int i = 0x200; i < 0x400; i++) Model[i] = 0;
+         ViewPort.Edit("@200 ^pics[front<[sprite<`ucs4x1x1`> palette<`ucp4`>]1>]2 ");
+         Model.WritePointer(Token, 0x200, 0x300);
+         Model.WritePointer(Token, 0x204, 0x300);
+         ViewPort.Edit("@300 ^pic0[sprite<`ucs4x1x1`> palette<`ucp4`>]1 ");
+         Model.WritePointer(Token, 0x300, 0x340);
+         Model.WritePointer(Token, 0x304, 0x360);
+         ViewPort.Edit("@340 ^pic0img`ucs4x1x1` @360 ^pic0pal`ucp4` ");
+         ViewPort.Edit("@380 ^users[pic.pics]1 ");
+
+         var segment = (ArrayRunEnumSegment)Model.GetTable("users").ElementContent[0];
+         var options = segment.GetComboOptions(Model).ToList();
+
+         Assert.Equal(2, options.Count);
+         Assert.All(options, option => Assert.IsType<VisualComboOption>(option));
       }
    }
 }

@@ -234,7 +234,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
             .ToList();
          if (!(model.GetNextRun(model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, EnumName)) is ITableRun tableRun)) return defaultOptions;
          if (!(tableRun.ElementContent[0] is ArrayRunPointerSegment pointerSegment)) return defaultOptions;
-         if (!LzSpriteRun.TryParseSpriteFormat(pointerSegment.InnerFormat, out var _) && !SpriteRun.TryParseSpriteFormat(pointerSegment.InnerFormat, out var _)) return defaultOptions;
+         if (!IsSpriteFormat(pointerSegment.InnerFormat) && !IsStructStartingWithSprite(pointerSegment.InnerFormat)) return defaultOptions;
 
          // Rendering an image for every option (every trainer sprite, every overworld sprite, ...) is expensive,
          // and a new combo box is built every time the table tool shows a different element.
@@ -242,11 +242,31 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          return model.CurrentCacheScope.GetOrAdd("combo-options:" + EnumName, () => RenderComboOptions(model, tableRun, defaultOptions));
       }
 
+      private static bool IsSpriteFormat(string format) => LzSpriteRun.TryParseSpriteFormat(format, out var _) || SpriteRun.TryParseSpriteFormat(format, out var _);
+
+      /// <summary>
+      /// Example: data.trainers.sprites is [front<[sprite<`lzs4x8x8`> palette<`ucp4`> ...]1> ...]: the element points at a struct whose first field is the sprite.
+      /// </summary>
+      private static bool IsStructStartingWithSprite(string format) {
+         if (string.IsNullOrEmpty(format) || !format.StartsWith("[")) return false;
+         var open = format.IndexOf('<');
+         var close = open < 0 ? -1 : format.IndexOf('>', open);
+         if (open < 0 || close < 0) return false;
+         return IsSpriteFormat(format.Substring(open + 1, close - open - 1));
+      }
+
       private static IReadOnlyList<ComboOption> RenderComboOptions(IDataModel model, ITableRun tableRun, List<ComboOption> defaultOptions) {
          var imageOptions = new List<ComboOption>();
          for (int i = 0; i < tableRun.ElementCount; i++) {
             var destination = model.ReadPointer(tableRun.Start + tableRun.ElementLength * i);
-            if (!(model.GetNextRun(destination) is ISpriteRun run)) return defaultOptions;
+            if (model.GetNextRun(destination) is ITableRun inner && inner.Start == destination && inner.ElementContent.Count > 0 && inner.ElementContent[0].Type == ElementContentType.Pointer) {
+               destination = model.ReadPointer(inner.Start); // the struct's first field is the sprite
+            }
+            if (!(model.GetNextRun(destination) is ISpriteRun run) || run.Start != destination) {
+               // an unused entry (null pointer, or no graphics yet): keep the text-only option so the rest can still show pictures
+               if (i < defaultOptions.Count) imageOptions.Add(defaultOptions[i]);
+               continue;
+            }
             var sprite = run.GetPixels(model, 0, i);
             var paletteAddress = SpriteTool.FindMatchingPalette(model, run, 0);
             var paletteRun = model.GetNextRun(paletteAddress) as IPaletteRun;

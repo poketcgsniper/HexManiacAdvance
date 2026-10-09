@@ -76,7 +76,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
       }
 
-      public double ToolPanelWidth { get; set; } = 500;
+      /// <summary>Wide enough for three columns of fields, so dropdowns in the table tool aren't squeezed.</summary>
+      public const double DefaultToolPanelWidth = 760;
+      public double ToolPanelWidth { get; set; } = DefaultToolPanelWidth;
 
       private string fileName;
       public string FileName {

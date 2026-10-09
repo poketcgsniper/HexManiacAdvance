@@ -292,6 +292,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          CurrentElementName = "The Table tool only works if your cursor is on table data.";
       }
 
+      public const string TrainerSlidesTable = "data.trainers.slides";
+
       public IList<IArrayElementViewModel> Children => Groups.SelectMany(group => group.Members).ToList();
 
       private void AddGroup() {
@@ -453,6 +455,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                         Groups[childIndexGroup].AddChildrenFromTable(viewPort, selection, currentArray, currentIndex, header, helperGroup, partition);
                         // a picture is worth a thousand clicks: offer the gallery of every overworld sprite
                         if (tableName == HardcodeTablesModel.OverworldSprites) AddChild(new SpriteGalleryElementViewModel(viewPort, currentIndex));
+                        // expansion trainers: the battle messages (trainer slides) live in their own table, one click away
+                        if (tableName == HardcodeTablesModel.TrainerTableName && partition == 2 && model.GetTable(TrainerSlidesTable) is ITableRun slides && currentIndex < slides.ElementCount) {
+                           var slideIndex = currentIndex;
+                           AddChild(new ButtonArrayElementViewModel("Battle messages…", "Edit what this trainer says during battle (first turn, last Pokémon, low HP, ...)", () => viewPort.Goto.Execute($"{TrainerSlidesTable}/{slideIndex}")));
+                        }
                      }
                   }
                   while (Groups.Count <= childIndexGroup) AddGroup();
