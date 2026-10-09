@@ -79,4 +79,4 @@ jobs:
 
             Unit tests: ${{ env.TEST_SUMMARY }}
             ${{ env.FAILED_TESTS }}
-          files: HexManiacAdvance_x64.*.zip
+          files: CUBHMA_x64.*.zip
