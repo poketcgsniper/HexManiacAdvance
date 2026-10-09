@@ -1087,7 +1087,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                ViewPort.RaiseError(reason);
                return;
             }
-            templates.ApplyTemplate(objectEvent, history.CurrentChange);
+            try {
+               templates.ApplyTemplate(objectEvent, history.CurrentChange);
+            } catch (Exception ex) when (ex is not OutOfMemoryException) {
+               // A template that can't be written (a hack changed a script command, a table is missing, ...) shouldn't crash the editor
+               // or leave a half-made event behind: take the new event back out and say what went wrong.
+               SelectedEvent = objectEvent;
+               Delete();
+               ViewPort.RaiseError($"Could not add the {templates.SelectedTemplate} template: {ex.Message}");
+               return;
+            }
             SelectedEvent = objectEvent;
             if (objectEvent.ScriptAddress != Pointer.NULL) primaryMap.InformCreate(new("Object-Event", objectEvent.ScriptAddress));
             Tutorials.Complete(Tutorial.ToolbarTemplate_CreateObject);

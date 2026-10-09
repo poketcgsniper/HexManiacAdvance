@@ -1015,14 +1015,42 @@ failed:
          int failText = WriteText(token, "That's too bad.");
          int wrongSpeciesText = WriteText(token, "\\.This is no \\\\02.\\pnIf you get one, please trade it\\nfor my \\\\03!");
 
-         // the expansion's trade specials read the trade number from 0x8005 and the chosen party slot from 0x8004,
-         // while the vanilla ones use 0x8004 for the trade and 0x8005 for the slot
-         var expansion = Flags.IsExpansion(model);
+         var script = BuildTradeScript(Flags.IsExpansion(model), tradeId, tradeFlag, initialText, thanksText, successText, failText, wrongSpeciesText);
+
+         // 160 bytes is the script as it was before it learned to re-read the species names; leave some room
+         var scriptStart = model.FindFreeSpace(model.FreeSpaceStart, 200);
+         var content = parser.CompileWithoutErrors(token, model, scriptStart, ref script);
+         token.ChangeData(model, scriptStart, content);
+
+         objectEventViewModel.Graphics = trainerGraphics;
+         objectEventViewModel.Elevation = 3;
+         objectEventViewModel.MoveType = 8;
+         objectEventViewModel.RangeX = objectEventViewModel.RangeY = 0;
+         objectEventViewModel.TrainerType = objectEventViewModel.TrainerRangeOrBerryID = 0;
+         objectEventViewModel.ScriptAddress = scriptStart;
+         objectEventViewModel.Flag = 0;
+
+         model.ObserveRunWritten(token, new XSERun(scriptStart, SortedSpan.One(objectEventViewModel.Start + 16)));
+         parser.FormatScript<XSERun>(token, model, scriptStart);
+      }
+
+      /// <summary>
+      /// The in-game trade script. The text pointers are the addresses of the five messages (all of them are written before the script).
+      /// Messages talk about the species through the string buffers: [buffer1] is the species the NPC wants and [buffer2] the one it offers,
+      /// both filled in by the special GetInGameTradeSpeciesInfo.
+      /// </summary>
+      /// <param name="expansion">
+      /// The expansion's trade specials read the trade number from script variable 0x8005 and the chosen party slot from 0x8004,
+      /// the vanilla ones use 0x8004 for the trade and 0x8005 for the slot.
+      /// </param>
+      public static string BuildTradeScript(bool expansion, int tradeId, int tradeFlag, int initialText, int thanksText, int successText, int failText, int wrongSpeciesText) {
          var selectTrade = expansion ? "copyvar 0x8005 0x8008" : "copyvar 0x8004 0x8008";
          var chosenSlotToSpecialArgs = expansion ? string.Empty : "copyvar 0x8005 0x800A";
          var tradeAndSlotForCreate = expansion ? "copyvar 0x8005 0x8008" : "copyvar 0x8004 0x8008\n  copyvar 0x8005 0x800A";
 
-         var script = @$"
+         // The party menu uses the same string buffers to print each Pokémon's HP ("/ 20"), so by the time the player has chosen
+         // the wrong Pokémon the buffers hold garbage: ask the game for the two species names again before talking about them.
+         return @$"
   lock
   faceplayer
   setvar 0x8008 {tradeId}
@@ -1069,26 +1097,13 @@ fail:
   release
   end
 wrongspecies:
+  {selectTrade}
+  special2 0x800D GetInGameTradeSpeciesInfo
   loadpointer 0 <{wrongSpeciesText:X6}>
   callstd 4
   release
   end
 ";
-
-         var scriptStart = model.FindFreeSpace(model.FreeSpaceStart, 160);
-         var content = parser.CompileWithoutErrors(token, model, scriptStart, ref script);
-         token.ChangeData(model, scriptStart, content);
-
-         objectEventViewModel.Graphics = trainerGraphics;
-         objectEventViewModel.Elevation = 3;
-         objectEventViewModel.MoveType = 8;
-         objectEventViewModel.RangeX = objectEventViewModel.RangeY = 0;
-         objectEventViewModel.TrainerType = objectEventViewModel.TrainerRangeOrBerryID = 0;
-         objectEventViewModel.ScriptAddress = scriptStart;
-         objectEventViewModel.Flag = 0;
-
-         model.ObserveRunWritten(token, new XSERun(scriptStart, SortedSpan.One(objectEventViewModel.Start + 16)));
-         parser.FormatScript<XSERun>(token, model, scriptStart);
       }
 
       public TradeEventContent GetTradeEventContent(ScriptParser parser, ObjectEventViewModel eventModel) => GetTradeContent(model, parser, eventModel.ScriptAddress);
@@ -1153,44 +1168,58 @@ wrongspecies:
 
          int cryText = model.IsFRLG() ? WriteText(token, "Roar!") : Pointer.NULL;
 
-         #region script
+         var scriptText = BuildLegendaryScript(model, parser, catchFlag, cryText);
+         var scriptStart = model.FindFreeSpace(model.FreeSpaceStart, 160);
+         var content = parser.CompileWithoutErrors(token, model, scriptStart, ref scriptText);
+         token.ChangeData(model, scriptStart, content);
+
+         objectEventModel.Graphics = trainerGraphics;
+         objectEventModel.Elevation = FindPreferredTrainerElevation(model, trainerGraphics);
+         objectEventModel.MoveType = 8;
+         objectEventModel.RangeX = objectEventModel.RangeY = 0;
+         objectEventModel.TrainerType = objectEventModel.TrainerRangeOrBerryID = 0;
+         objectEventModel.ScriptAddress = scriptStart;
+         objectEventModel.Flag = legendFlag;
+
+         model.ObserveRunWritten(token, new XSERun(scriptStart, SortedSpan.One(objectEventModel.Start + 16)));
+         parser.FormatScript<XSERun>(token, model, scriptStart);
+      }
+
+      // vanilla Emerald/FireRed call it StartLegendaryBattle, the expansion BattleSetup_StartLegendaryBattle
+      private static readonly string[] LegendaryBattleSpecialNames = { "BattleSetup_StartLegendaryBattle", "StartLegendaryBattle" };
+      private const string HideObjectsFlagName = "FLAG_SYS_CTRL_OBJ_DELETE";
+
+      /// <summary>
+      /// The script for a legendary encounter: cry, wild battle, and what to do about the outcome.
+      /// Everything that differs between games is looked up in the ROM instead of assumed:
+      /// the number of arguments of setwildbattle (3 in vanilla, 6 in the expansion), the number of the legendary-battle special
+      /// (the expansion renamed it and its place in the specials list moved) and of the flag that keeps the object on screen during the battle.
+      /// </summary>
+      public static string BuildLegendaryScript(IDataModel model, ScriptParser parser, int catchFlag, int cryText) {
          var script = new StringBuilder(@"
 lock
 faceplayer
 waitsound
 cry 1 2
-setwildbattle 1 50 0
 ");
+         script.AppendLine(parser.BuildCommand("setwildbattle", "1", "50", "0"));
          if (model.IsFRLG()) {
             script.AppendLine($"preparemsg <{cryText:X6}>");
             script.AppendLine("waitmsg");
          }
          script.AppendLine("waitcry");
          script.AppendLine("pause 10");
+         // FireRed/LeafGreen play the gym leader music and wait for a button; Ruby/Sapphire/Emerald go straight to the battle
+         var hideFlag = FindFlagNumber(model, HideObjectsFlagName, model.IsFRLG() ? 0x0807 : model.IsEmerald() ? 0x08C1 : 0x0861);
+         var special = FindSpecialName(model, model.IsFRLG() ? "0x138" : model.IsEmerald() ? "0x13B" : "0x137");
          if (model.IsFRLG()) {
-            script.AppendLine(@"
-   playsong mus_encounter_gym_leader playOnce
-   waitkeypress
-   setflag 0x0807
-   special 0x138
-   waitstate
-   clearflag 0x0807
-");
-         } else if (model.IsEmerald()) {
-            script.AppendLine(@"
-   setflag 0x08C1
-   special 0x13B
-   waitstate
-   clearflag 0x08C1
-");
-         } else {
-            script.AppendLine(@"
-   setflag 0x861
-   special 0x137
-   waitstate
-   clearflag 0x861
-");
+            script.AppendLine(@"playsong mus_encounter_gym_leader playOnce
+waitkeypress");
          }
+         script.AppendLine($@"setflag 0x{hideFlag:X4}
+special {special}
+waitstate
+clearflag 0x{hideFlag:X4}");
          script.AppendLine(@$"
 fadescreen 1
 hidesprite 0x800F
@@ -1211,23 +1240,24 @@ release
 end
 
 ");
-         #endregion
+         return script.ToString();
+      }
 
-         var scriptStart = model.FindFreeSpace(model.FreeSpaceStart, 160);
-         var scriptText = script.ToString();
-         var content = parser.CompileWithoutErrors(token, model, scriptStart, ref scriptText);
-         token.ChangeData(model, scriptStart, content);
+      /// <summary>The number of a flag, looked up by name in the ROM's flag list, or the vanilla number when the ROM doesn't name it.</summary>
+      private static int FindFlagNumber(IDataModel model, string name, int vanillaNumber) {
+         if (model.TryGetList(Flags.FlagListName, out var flags)) {
+            var index = flags.IndexOf(name);
+            if (index >= 0) return index;
+         }
+         return vanillaNumber;
+      }
 
-         objectEventModel.Graphics = trainerGraphics;
-         objectEventModel.Elevation = FindPreferredTrainerElevation(model, trainerGraphics);
-         objectEventModel.MoveType = 8;
-         objectEventModel.RangeX = objectEventModel.RangeY = 0;
-         objectEventModel.TrainerType = objectEventModel.TrainerRangeOrBerryID = 0;
-         objectEventModel.ScriptAddress = scriptStart;
-         objectEventModel.Flag = legendFlag;
-
-         model.ObserveRunWritten(token, new XSERun(scriptStart, SortedSpan.One(objectEventModel.Start + 16)));
-         parser.FormatScript<XSERun>(token, model, scriptStart);
+      /// <summary>The name of the special that starts a legendary battle in this ROM, or the vanilla number when none of the usual names is in the specials list.</summary>
+      private static string FindSpecialName(IDataModel model, string vanillaNumber) {
+         if (model.TryGetList("specials", out var specials)) {
+            foreach (var name in LegendaryBattleSpecialNames) if (specials.IndexOf(name) >= 0) return name;
+         }
+         return vanillaNumber;
       }
 
       public LegendaryEventContent GetLegendaryEventContent(ScriptParser parser, ObjectEventViewModel eventModel) => GetLegendaryEventContent(model, parser, eventModel);

@@ -18,6 +18,14 @@ using System.Text;
 namespace HavenSoft.HexManiac.Core.Models.Code {
    public record ScriptErrorInfo(string Message, TextSegment Segment);
 
+   /// <summary>Thrown when a script that was expected to compile (a template, for example) has errors.</summary>
+   public class ScriptCompileException : InvalidOperationException {
+      public IReadOnlyList<string> Errors { get; }
+      public ScriptCompileException(IReadOnlyList<string> errors) : base("The script could not be compiled: " + string.Join(" ", errors ?? new string[0])) {
+         Errors = errors ?? new string[0];
+      }
+   }
+
    public class ScriptParser {
       public const int MaxRepeates = 20;
       private readonly IReadOnlyList<IScriptLine> engine;
@@ -36,6 +44,30 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
       public void RefreshGameHash(IDataModel model) => gameHash = model.GetShortGameCode();
 
       public int GetScriptSegmentLength(IDataModel model, int address) => engine.GetScriptSegmentLength(gameHash, model, address, new Dictionary<int, int>());
+
+      /// <summary>
+      /// How many arguments you have to write for this command in the current game, or -1 if the script reference has no such command.
+      /// Templates use this to stay valid when a hack changes a command's signature (the expansion's setwildbattle takes 6 arguments, vanilla's takes 3).
+      /// </summary>
+      public int GetArgumentCount(string command) {
+         foreach (var line in engine) {
+            if (line is not ScriptLine) continue;
+            if (!string.Equals(line.LineCommand, command, StringComparison.Ordinal)) continue;
+            if (!line.MatchesGame(gameHash)) continue;
+            return line.Args.Count(arg => arg.Name != "filler"); // fillers are added by the compiler
+         }
+         return -1;
+      }
+
+      /// <summary>
+      /// Writes a line of script for a command, padding the arguments you give with zeros until there are as many as the script reference asks for.
+      /// </summary>
+      public string BuildCommand(string command, params string[] arguments) {
+         var count = GetArgumentCount(command);
+         var all = new List<string>(arguments);
+         while (all.Count < count) all.Add("0");
+         return all.Count == 0 ? command : command + " " + string.Join(" ", all);
+      }
 
       public string Parse(IDataModel data, int start, int length, ref int existingSectionCount, CodeBody updateBody = null) {
          var builder = new StringBuilder();
@@ -497,6 +529,8 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
          CompileError += Handler;
          var content = Compile(token, model, scriptStart, ref script, out var _, out var _);
          CompileError -= Handler;
+         // a script that doesn't compile has no content: say why, instead of letting the caller trip over a null
+         if (content == null) throw new ScriptCompileException(errors.Select(error => error.Message).ToList());
          Debug.Assert(errors.IsNullOrEmpty(), "Expected compilation to have no errors! " + Environment.NewLine + Environment.NewLine.Join(errors.Select(error => error.Message)));
          return content;
       }
