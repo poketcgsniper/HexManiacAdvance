@@ -176,6 +176,60 @@
             </Popup>
             <DockPanel Name="TableToolPanel" PreviewKeyDown="TableKeyDown">
                <DockPanel.Resources>
+                  <DataTemplate DataType="{x:Type hsg3hvmtr:SpriteGalleryElementViewModel}">
+                     <StackPanel Margin="2,8,2,0" Visibility="{Binding Visible, Converter={StaticResource BoolToVisibility}}">
+                        <DockPanel Margin="0,0,0,2">
+                           <TextBlock Text="Name:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                           <TextBox Text="{Binding CurrentName, UpdateSourceTrigger=LostFocus}" VerticalAlignment="Center"
+                                    ToolTip="Rename this sprite (press Tab or click away to apply). The name is saved in the .toml next to the ROM and shows up in every sprite dropdown and in the map editor."/>
+                        </DockPanel>
+                        <DockPanel Margin="0,2">
+                           <Button DockPanel.Dock="Right" Content="Big gallery" Command="{Binding OpenGallery}" Padding="6,1" Margin="4,0,0,0" ToolTip="Open the gallery in its own tab"/>
+                           <Button DockPanel.Dock="Right" Content="↻" Command="{Binding Refresh}" Padding="6,1" Margin="4,0,0,0" ToolTip="Redraw every sprite"/>
+                           <TextBlock Text="Find:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                           <TextBox Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" ToolTip="Filter by number or name"/>
+                        </DockPanel>
+                        <TextBlock Text="All sprites (click one to edit it):" Foreground="{DynamicResource Secondary}" FontSize="10" Margin="0,2,0,0"/>
+                        <ScrollViewer Height="320" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="{DynamicResource Backlight}">
+                           <ItemsControl ItemsSource="{Binding Elements}">
+                              <ItemsControl.ItemsPanel>
+                                 <ItemsPanelTemplate>
+                                    <WrapPanel/>
+                                 </ItemsPanelTemplate>
+                              </ItemsControl.ItemsPanel>
+                              <ItemsControl.ItemTemplate>
+                                 <DataTemplate>
+                                    <Button Command="{Binding DataContext.SelectCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                            ToolTip="{Binding Label}" Margin="1" Padding="2" BorderThickness="2" Background="Transparent">
+                                       <Button.Style>
+                                          <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                             <Setter Property="BorderBrush" Value="Transparent"/>
+                                             <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Selected}" Value="True">
+                                                   <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsFilteredOut}" Value="True">
+                                                   <Setter Property="Visibility" Value="Collapsed"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                                                   <Setter Property="Opacity" Value=".4"/>
+                                                </DataTrigger>
+                                             </Style.Triggers>
+                                          </Style>
+                                       </Button.Style>
+                                       <StackPanel Width="44">
+                                          <Grid Height="64">
+                                             <hsg3hv:PixelImage HorizontalAlignment="Center" VerticalAlignment="Bottom" TransparentBrush="{DynamicResource Backlight}"/>
+                                          </Grid>
+                                          <TextBlock Text="{Binding Index}" HorizontalAlignment="Center" FontSize="9"/>
+                                       </StackPanel>
+                                    </Button>
+                                 </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                           </ItemsControl>
+                        </ScrollViewer>
+                     </StackPanel>
+                  </DataTemplate>
                   <DataTemplate DataType="{x:Type hsg3hvmtr:ButtonArrayElementViewModel}">
                      <hsg3hv:AngleButton Margin="2,2" Direction="Out" HorizontalAlignment="Stretch"
                                  Content="{Binding Text}" ToolTip="{Binding ToolTipText}" Command="{Binding Command}"

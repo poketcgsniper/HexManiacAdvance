@@ -452,7 +452,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                         AddChild(header);
                         Groups[childIndexGroup].AddChildrenFromTable(viewPort, selection, currentArray, currentIndex, header, helperGroup, partition);
                         // a picture is worth a thousand clicks: offer the gallery of every overworld sprite
-                        if (tableName == HardcodeTablesModel.OverworldSprites) AddChild(new ButtonArrayElementViewModel("Show all sprites (gallery)", () => viewPort.OpenSpriteGalleryTab()));
+                        if (tableName == HardcodeTablesModel.OverworldSprites) AddChild(new SpriteGalleryElementViewModel(viewPort, currentIndex));
                      }
                   }
                   while (Groups.Count <= childIndexGroup) AddGroup();

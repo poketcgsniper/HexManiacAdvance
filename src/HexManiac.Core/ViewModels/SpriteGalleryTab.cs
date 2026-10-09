@@ -135,12 +135,25 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
    }
 
    public class SpriteGalleryItem : ViewModelCore, IPixelViewModel {
-      private readonly IPixelViewModel image;
+      private IPixelViewModel image;
       public int Index { get; }
       public int Address { get; }
-      public string Name { get; }
-      public bool IsPlaceholder { get; }
-      public string Label => string.IsNullOrEmpty(Name) || Name == Index.ToString() ? $"{Index}" : $"{Index} {Name}";
+      private string name;
+      /// <summary>The sprite's name from the objecteventgfx list (editable: see SpriteGalleryElementViewModel).</summary>
+      public string Name { get => name; set { if (TryUpdate(ref name, value ?? string.Empty)) NotifyPropertyChanged(nameof(Label)); } }
+      public bool IsPlaceholder { get; private set; }
+      /// <summary>The original sprite number first, then the name in parentheses: "12 (MAY_NORMAL)".</summary>
+      public string Label => string.IsNullOrEmpty(Name) || Name == Index.ToString() ? $"{Index}" : $"{Index} ({Name})";
+
+      /// <summary>Swap in a freshly rendered picture (after the sprite's graphics were edited).</summary>
+      public void Replace(IPixelViewModel newImage, bool isPlaceholder) {
+         image = newImage;
+         IsPlaceholder = isPlaceholder;
+         NotifyPropertyChanged(nameof(PixelData));
+         NotifyPropertyChanged(nameof(PixelWidth));
+         NotifyPropertyChanged(nameof(PixelHeight));
+         NotifyPropertyChanged(nameof(IsPlaceholder));
+      }
 
       public short Transparent => image.Transparent;
       public int PixelWidth => image.PixelWidth;
@@ -159,7 +172,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public SpriteGalleryItem(int index, int address, string name, IPixelViewModel image, bool isPlaceholder) {
          Index = index;
          Address = address;
-         Name = name ?? string.Empty;
+         this.name = name ?? string.Empty;
          this.image = image;
          IsPlaceholder = isPlaceholder;
       }
