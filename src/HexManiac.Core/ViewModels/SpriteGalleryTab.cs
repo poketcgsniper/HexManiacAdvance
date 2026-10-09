@@ -20,6 +20,41 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       public ObservableCollection<SpriteGalleryItem> Elements { get; } = new();
 
+      private ObservableCollection<SpriteGalleryRow> rows = new();
+      /// <summary>
+      /// The sprites that pass the filter, in rows of <see cref="ColumnCount"/>. The view shows rows rather than sprites
+      /// because a list of rows can be virtualized: only the rows on screen get any controls.
+      /// </summary>
+      public ObservableCollection<SpriteGalleryRow> Rows => rows;
+
+      private int columnCount = 8;
+      public int ColumnCount => columnCount;
+
+      /// <summary>The room one sprite takes up in a row: the picture, its label's room, and the margin, border and padding around it.</summary>
+      public double ItemOuterWidth => 48 * SpriteScale + 28;
+
+      /// <summary>The view tells us how wide the list is so we know how many sprites fit in a row.</summary>
+      public void SetAvailableWidth(double width) {
+         if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0) return;
+         availableWidth = width;
+         UpdateColumns();
+      }
+
+      private double availableWidth;
+      private void UpdateColumns() {
+         if (availableWidth <= 0) return;
+         var columns = SpriteGalleryRow.ColumnsFor(availableWidth, ItemOuterWidth);
+         if (columns == columnCount) return;
+         columnCount = columns;
+         UpdateRows();
+      }
+
+      private void UpdateRows() {
+         rows = new ObservableCollection<SpriteGalleryRow>(SpriteGalleryRow.Chunk(Elements, columnCount));
+         NotifyPropertyChanged(nameof(Rows));
+         NotifyPropertyChanged(nameof(ColumnCount));
+      }
+
       public string Name => "Overworld Sprites";
       public bool SpartanMode { get; set; }
       public IDataModel Model => model;
@@ -30,13 +65,18 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          set {
             if (!TryUpdate(ref filter, value)) return;
             foreach (var item in Elements) item.MatchToFilter(filter);
+            UpdateRows();
          }
       }
 
       private double spriteScale = 2;
       public double SpriteScale {
          get => spriteScale;
-         set => Set(ref spriteScale, value.LimitToRange(1, 4), old => { foreach (var item in Elements) item.SpriteScale = spriteScale; });
+         set => Set(ref spriteScale, value.LimitToRange(1, 4), old => {
+            foreach (var item in Elements) item.SpriteScale = spriteScale;
+            NotifyPropertyChanged(nameof(ItemOuterWidth));
+            UpdateColumns();
+         });
       }
 
       private string status = string.Empty;
@@ -93,31 +133,36 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Redo = viewPort.Redo;
          close.CanExecute = arg => true;
          close.Execute = arg => Closed?.Invoke(this, EventArgs.Empty);
-         Reload();
+         Build();
       }
 
+      /// <summary>Draw everything again (the Refresh button).</summary>
       public void Reload() {
+         model.ClearCacheScope();
+         Build();
+      }
+
+      private OverworldSpriteRenderer renderer;
+
+      /// <summary>
+      /// Lists every sprite. The pictures are drawn when the view first asks for them (see <see cref="OverworldSpriteRenderer"/>),
+      /// so this is quick no matter how many sprites there are.
+      /// </summary>
+      private void Build() {
          Elements.Clear();
+         renderer = null;
          var ows = model.GetTable(HardcodeTablesModel.OverworldSprites);
-         if (ows == null) { Status = $"This ROM has no {HardcodeTablesModel.OverworldSprites} table."; return; }
-         var owTable = new ModelTable(model, ows.Start);
-         var defaultOW = BlockMapViewModel.GetDefaultOW(model);
+         if (ows == null) { Status = $"This ROM has no {HardcodeTablesModel.OverworldSprites} table."; UpdateRows(); return; }
+         var sprites = renderer = OverworldSpriteRenderer.Get(model);
          var names = model.GetOptions(HardcodeTablesModel.OverworldSprites);
-         int rendered = 0;
          for (int i = 0; i < ows.ElementCount; i++) {
-            IPixelViewModel image;
-            try {
-               image = ObjectEventViewModel.Render(model, owTable, defaultOW, i, 0, () => -1);
-            } catch (Exception) {
-               image = defaultOW;
-            }
-            var isPlaceholder = ReferenceEquals(image, defaultOW);
-            if (!isPlaceholder) rendered++;
+            var index = i;
             var name = names != null && i < names.Count ? names[i] : string.Empty;
-            Elements.Add(new SpriteGalleryItem(i, ows.Start + ows.ElementLength * i, name, image, isPlaceholder) { SpriteScale = SpriteScale });
+            Elements.Add(new SpriteGalleryItem(i, ows.Start + ows.ElementLength * i, name, () => sprites.Get(index)) { SpriteScale = SpriteScale });
          }
          foreach (var item in Elements) item.MatchToFilter(filter);
-         Status = $"{ows.ElementCount} overworld sprites ({rendered} with graphics)";
+         Status = $"{ows.ElementCount} overworld sprites";
+         UpdateRows();
       }
 
       /// <summary>
@@ -130,35 +175,92 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          RequestTabChange?.Invoke(this, new TabChangeRequestedEventArgs(viewPort));
       }
 
-      void ITabContent.Refresh() => Reload();
+      /// <summary>
+      /// The editor calls this every time the tab is selected. Nothing needs redoing unless the data changed in the meantime
+      /// (the model hands out a new renderer then), so coming back to the gallery is instant.
+      /// </summary>
+      void ITabContent.Refresh() {
+         if (renderer != null && Elements.Count > 0 && ReferenceEquals(renderer, OverworldSpriteRenderer.Get(model))) return;
+         Build();
+      }
       public bool TryImport(LoadedFile file, IFileSystem fileSystem) => false;
+   }
+
+   /// <summary>A line of sprites in a gallery. The galleries are lists of rows so the view can virtualize them.</summary>
+   public class SpriteGalleryRow {
+      public IReadOnlyList<SpriteGalleryItem> Items { get; }
+
+      public SpriteGalleryRow(IReadOnlyList<SpriteGalleryItem> items) => Items = items;
+
+      /// <summary>How many sprites fit side by side in <paramref name="width"/> (at least one).</summary>
+      public static int ColumnsFor(double width, double itemWidth) {
+         const double scrollBarRoom = 20;
+         if (itemWidth <= 0) return 1;
+         return Math.Max(1, (int)Math.Floor((width - scrollBarRoom) / itemWidth));
+      }
+
+      /// <summary>Lays out the sprites that aren't filtered out in rows of <paramref name="columns"/> sprites.</summary>
+      public static List<SpriteGalleryRow> Chunk(IEnumerable<SpriteGalleryItem> items, int columns) {
+         columns = Math.Max(1, columns);
+         var rows = new List<SpriteGalleryRow>();
+         var current = new List<SpriteGalleryItem>(columns);
+         foreach (var item in items) {
+            if (item.IsFilteredOut) continue;
+            current.Add(item);
+            if (current.Count < columns) continue;
+            rows.Add(new SpriteGalleryRow(current));
+            current = new List<SpriteGalleryItem>(columns);
+         }
+         if (current.Count > 0) rows.Add(new SpriteGalleryRow(current));
+         return rows;
+      }
    }
 
    public class SpriteGalleryItem : ViewModelCore, IPixelViewModel {
       private IPixelViewModel image;
+      private bool isPlaceholder;
+      private Func<(IPixelViewModel image, bool isPlaceholder)> render;
+
       public int Index { get; }
       public int Address { get; }
       private string name;
       /// <summary>The sprite's name from the objecteventgfx list (editable: see SpriteGalleryElementViewModel).</summary>
       public string Name { get => name; set { if (TryUpdate(ref name, value ?? string.Empty)) NotifyPropertyChanged(nameof(Label)); } }
-      public bool IsPlaceholder { get; private set; }
+
+      /// <summary>True if the sprite has no usable graphics and the default sprite is shown instead.</summary>
+      public bool IsPlaceholder { get { EnsureImage(); return isPlaceholder; } }
+
       /// <summary>The original sprite number first, then the name in parentheses: "12 (MAY_NORMAL)".</summary>
       public string Label => string.IsNullOrEmpty(Name) || Name == Index.ToString() ? $"{Index}" : $"{Index} ({Name})";
 
+      /// <summary>Clicking the sprite runs this with the sprite as the parameter.</summary>
+      public ICommand SelectCommand { get; set; }
+
+      /// <summary>False until somebody has looked at the picture: a sprite nobody scrolled to is never drawn.</summary>
+      public bool IsRendered => render == null;
+
       /// <summary>Swap in a freshly rendered picture (after the sprite's graphics were edited).</summary>
       public void Replace(IPixelViewModel newImage, bool isPlaceholder) {
+         render = null;
          image = newImage;
-         IsPlaceholder = isPlaceholder;
+         this.isPlaceholder = isPlaceholder;
          NotifyPropertyChanged(nameof(PixelData));
          NotifyPropertyChanged(nameof(PixelWidth));
          NotifyPropertyChanged(nameof(PixelHeight));
          NotifyPropertyChanged(nameof(IsPlaceholder));
       }
 
-      public short Transparent => image.Transparent;
-      public int PixelWidth => image.PixelWidth;
-      public int PixelHeight => image.PixelHeight;
-      public short[] PixelData => image.PixelData;
+      private void EnsureImage() {
+         var factory = render;
+         if (factory == null) return;
+         render = null;
+         (image, isPlaceholder) = factory();
+      }
+
+      public short Transparent { get { EnsureImage(); return image.Transparent; } }
+      public int PixelWidth { get { EnsureImage(); return image.PixelWidth; } }
+      public int PixelHeight { get { EnsureImage(); return image.PixelHeight; } }
+      public short[] PixelData { get { EnsureImage(); return image.PixelData; } }
 
       private double spriteScale = 2;
       public double SpriteScale { get => spriteScale; set => Set(ref spriteScale, value); }
@@ -174,7 +276,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Address = address;
          this.name = name ?? string.Empty;
          this.image = image;
-         IsPlaceholder = isPlaceholder;
+         this.isPlaceholder = isPlaceholder;
+      }
+
+      /// <summary>The picture is drawn by <paramref name="render"/> the first time it's needed.</summary>
+      public SpriteGalleryItem(int index, int address, string name, Func<(IPixelViewModel image, bool isPlaceholder)> render) {
+         Index = index;
+         Address = address;
+         this.name = name ?? string.Empty;
+         this.render = render;
       }
 
       public void MatchToFilter(string filter) {

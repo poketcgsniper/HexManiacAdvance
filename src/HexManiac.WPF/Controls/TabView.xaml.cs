@@ -617,6 +617,13 @@ namespace HavenSoft.HexManiac.WPF.Controls {
          if (e.Key == Key.Down) vm.Decrement();
       }
 
+      /// <summary>The sprite gallery under an overworld sprite's fields lays its sprites out in rows: it needs to know how many fit.</summary>
+      private void GallerySizeChanged(object sender, SizeChangedEventArgs e) {
+         if (!e.WidthChanged) return;
+         var element = (FrameworkElement)sender;
+         if (element.DataContext is SpriteGalleryElementViewModel gallery) gallery.SetAvailableWidth(e.NewSize.Width);
+      }
+
       private void HandleFieldKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) {
          var element = (FrameworkElement)sender;
          if (element.DataContext is FieldArrayElementViewModel vm) vm.Focus();

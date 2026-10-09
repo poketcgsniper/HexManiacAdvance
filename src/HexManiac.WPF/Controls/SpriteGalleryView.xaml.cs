@@ -16,7 +16,13 @@ namespace HavenSoft.HexManiac.WPF.Controls {
             if (e.OldValue is INotifyPropertyChanged old) old.PropertyChanged -= ViewModelPropertyChanged;
             if (e.NewValue is INotifyPropertyChanged vm) vm.PropertyChanged += ViewModelPropertyChanged;
             Container.Items.Refresh();
+            if (Container.ActualWidth > 0) ViewModel?.SetAvailableWidth(Container.ActualWidth);
          };
+      }
+
+      /// <summary>The sprites are laid out in rows: tell the view model how many fit.</summary>
+      private void ContainerSizeChanged(object sender, SizeChangedEventArgs e) {
+         if (e.WidthChanged) ViewModel?.SetAvailableWidth(e.NewSize.Width);
       }
 
       private void ViewModelPropertyChanged(object sender, PropertyChangedEventArgs e) {

@@ -190,44 +190,59 @@
                            <TextBox Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" ToolTip="Filter by number or name"/>
                         </DockPanel>
                         <TextBlock Text="All sprites (click one to edit it):" Foreground="{DynamicResource Secondary}" FontSize="10" Margin="0,2,0,0"/>
-                        <ScrollViewer Height="320" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="{DynamicResource Backlight}">
-                           <ItemsControl ItemsSource="{Binding Elements}">
-                              <ItemsControl.ItemsPanel>
-                                 <ItemsPanelTemplate>
-                                    <WrapPanel/>
-                                 </ItemsPanelTemplate>
-                              </ItemsControl.ItemsPanel>
-                              <ItemsControl.ItemTemplate>
-                                 <DataTemplate>
-                                    <Button Command="{Binding DataContext.SelectCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
-                                            ToolTip="{Binding Label}" Margin="1" Padding="2" BorderThickness="2" Background="Transparent">
-                                       <Button.Style>
-                                          <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-                                             <Setter Property="BorderBrush" Value="Transparent"/>
-                                             <Style.Triggers>
-                                                <DataTrigger Binding="{Binding Selected}" Value="True">
-                                                   <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding IsFilteredOut}" Value="True">
-                                                   <Setter Property="Visibility" Value="Collapsed"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
-                                                   <Setter Property="Opacity" Value=".4"/>
-                                                </DataTrigger>
-                                             </Style.Triggers>
-                                          </Style>
-                                       </Button.Style>
-                                       <StackPanel Width="44">
-                                          <Grid Height="64">
-                                             <hsg3hv:PixelImage HorizontalAlignment="Center" VerticalAlignment="Bottom" TransparentBrush="{DynamicResource Backlight}"/>
-                                          </Grid>
-                                          <TextBlock Text="{Binding Index}" HorizontalAlignment="Center" FontSize="9"/>
-                                       </StackPanel>
-                                    </Button>
-                                 </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                           </ItemsControl>
-                        </ScrollViewer>
+                        <!-- Rows of sprites in a virtualizing list: there are over a thousand sprites, and only the rows on screen get any controls (building them all made every visit to this table slow). -->
+                        <ItemsControl ItemsSource="{Binding Rows}" Height="320" Background="{DynamicResource Backlight}" SizeChanged="GallerySizeChanged"
+                                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel">
+                           <ItemsControl.Template>
+                              <ControlTemplate TargetType="{x:Type ItemsControl}">
+                                 <ScrollViewer CanContentScroll="True" Focusable="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Background="{TemplateBinding Background}">
+                                    <ItemsPresenter/>
+                                 </ScrollViewer>
+                              </ControlTemplate>
+                           </ItemsControl.Template>
+                           <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate>
+                                 <VirtualizingStackPanel/>
+                              </ItemsPanelTemplate>
+                           </ItemsControl.ItemsPanel>
+                           <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                 <ItemsControl ItemsSource="{Binding Items}">
+                                    <ItemsControl.ItemsPanel>
+                                       <ItemsPanelTemplate>
+                                          <StackPanel Orientation="Horizontal"/>
+                                       </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                       <DataTemplate>
+                                          <Button Command="{Binding SelectCommand}" CommandParameter="{Binding}"
+                                                  ToolTip="{Binding Label}" Margin="1" Padding="2" BorderThickness="2" Background="Transparent">
+                                             <Button.Style>
+                                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                                   <Setter Property="BorderBrush" Value="Transparent"/>
+                                                   <Style.Triggers>
+                                                      <DataTrigger Binding="{Binding Selected}" Value="True">
+                                                         <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                                      </DataTrigger>
+                                                      <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                                                         <Setter Property="Opacity" Value=".4"/>
+                                                      </DataTrigger>
+                                                   </Style.Triggers>
+                                                </Style>
+                                             </Button.Style>
+                                             <StackPanel Width="44">
+                                                <Grid Height="64">
+                                                   <hsg3hv:PixelImage HorizontalAlignment="Center" VerticalAlignment="Bottom" TransparentBrush="{DynamicResource Backlight}"/>
+                                                </Grid>
+                                                <TextBlock Text="{Binding Index}" HorizontalAlignment="Center" FontSize="9"/>
+                                             </StackPanel>
+                                          </Button>
+                                       </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                 </ItemsControl>
+                              </DataTemplate>
+                           </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                      </StackPanel>
                   </DataTemplate>
                   <DataTemplate DataType="{x:Type hsg3hvmtr:ButtonArrayElementViewModel}">

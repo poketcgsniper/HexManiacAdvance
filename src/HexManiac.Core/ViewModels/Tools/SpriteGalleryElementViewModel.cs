@@ -16,7 +16,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
    /// </summary>
    public class SpriteGalleryElementViewModel : ViewModelCore, IArrayElementViewModel {
       public const string NameListName = "objecteventgfx";
-      private const string CacheKey = "overworld-sprite-gallery";
 
       private readonly ViewPort viewPort;
       private readonly IDataModel model;
@@ -34,9 +33,36 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       private readonly ObservableCollection<SpriteGalleryItem> elements = new();
       private bool loaded;
-      /// <summary>Rendered on first use: the table tool creates and discards these as the cursor moves.</summary>
+      /// <summary>Listed on first use: the table tool creates and discards these as the cursor moves.</summary>
       public ObservableCollection<SpriteGalleryItem> Elements { get { if (!loaded) Load(); return elements; } }
       public int CurrentIndex { get; private set; }
+
+      private ObservableCollection<SpriteGalleryRow> rows = new();
+      /// <summary>
+      /// The sprites that pass the filter, in rows of <see cref="ColumnCount"/>. The view shows rows rather than sprites
+      /// because a list of rows can be virtualized: only the rows on screen get any controls (there are over a thousand sprites).
+      /// </summary>
+      public ObservableCollection<SpriteGalleryRow> Rows { get { if (!loaded) Load(); return rows; } }
+
+      private int columnCount = 6;
+      public int ColumnCount => columnCount;
+
+      /// <summary>The room one sprite takes up in a row: its 44-wide picture plus the button's margin, border and padding.</summary>
+      public const double ItemOuterWidth = 54;
+
+      /// <summary>The view tells us how wide the list is so we know how many sprites fit in a row.</summary>
+      public void SetAvailableWidth(double width) {
+         if (double.IsNaN(width) || double.IsInfinity(width) || width <= 0) return;
+         var columns = SpriteGalleryRow.ColumnsFor(width, ItemOuterWidth);
+         if (columns == columnCount) return;
+         columnCount = columns;
+         if (loaded) UpdateRows();
+      }
+
+      private void UpdateRows() {
+         rows = new ObservableCollection<SpriteGalleryRow>(SpriteGalleryRow.Chunk(elements, columnCount));
+         NotifyPropertyChanged(nameof(Rows));
+      }
 
       private string currentName = string.Empty;
       /// <summary>The current sprite's name. Changing it updates the name list that every dropdown and the gallery use.</summary>
@@ -56,6 +82,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          set {
             if (!TryUpdate(ref filter, value ?? string.Empty)) return;
             foreach (var item in elements) item.MatchToFilter(filter);
+            if (loaded) UpdateRows();
          }
       }
 
@@ -78,46 +105,40 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          model = viewPort.Model;
          CurrentIndex = index;
          OpenGallery = new StubCommand { CanExecute = arg => true, Execute = arg => viewPort.OpenSpriteGalleryTab() };
-         Refresh = new StubCommand { CanExecute = arg => true, Execute = arg => { model.ClearCacheScope(); Load(); } };
+         Refresh = new StubCommand { CanExecute = arg => true, Execute = arg => { model.ClearCacheScope(); Load(); NotifyPropertyChanged(nameof(Rows)); } };
          SelectCommand = new StubCommand { CanExecute = arg => true, Execute = arg => Select(arg as SpriteGalleryItem) };
          var names = model.GetOptions(HardcodeTablesModel.OverworldSprites);
          currentName = names != null && index < names.Count ? names[index] : string.Empty;
       }
 
-      /// <summary>Render (or fetch from the cache) every sprite's first frame.</summary>
+      /// <summary>
+      /// List every sprite. Nothing is drawn here: each picture is drawn when the view first asks for it (see <see cref="OverworldSpriteRenderer"/>),
+      /// and with the rows virtualized that's only the ones on screen.
+      /// </summary>
       private void Load() {
          loaded = true;
          elements.Clear();
+         selectedItem = null;
          var ows = model.GetTable(HardcodeTablesModel.OverworldSprites);
-         if (ows == null) return;
+         if (ows == null) { rows = new(); return; }
          var names = model.GetOptions(HardcodeTablesModel.OverworldSprites);
-         var images = model.CurrentCacheScope.GetOrAdd(CacheKey, () => RenderAll(model, ows));
-         for (int i = 0; i < ows.ElementCount && i < images.Count; i++) {
+         var sprites = renderer = OverworldSpriteRenderer.Get(model);
+         for (int i = 0; i < ows.ElementCount; i++) {
+            var index = i;
             var name = names != null && i < names.Count ? names[i] : string.Empty;
-            var item = new SpriteGalleryItem(i, ows.Start + ows.ElementLength * i, name, images[i].image, images[i].isPlaceholder) { SpriteScale = spriteScale, Selected = i == CurrentIndex };
+            var item = new SpriteGalleryItem(i, ows.Start + ows.ElementLength * i, name, () => sprites.Get(index)) { SpriteScale = spriteScale, SelectCommand = SelectCommand };
             item.MatchToFilter(filter);
             elements.Add(item);
          }
+         if (CurrentIndex >= 0 && CurrentIndex < elements.Count) { selectedItem = elements[CurrentIndex]; selectedItem.Selected = true; }
          currentName = names != null && CurrentIndex < names.Count ? names[CurrentIndex] : string.Empty;
          NotifyPropertyChanged(nameof(CurrentName));
          Status = $"{ows.ElementCount} sprites";
+         rows = new ObservableCollection<SpriteGalleryRow>(SpriteGalleryRow.Chunk(elements, columnCount)); // no change notification: the view is reading the list right now
       }
 
-      private static IReadOnlyList<(IPixelViewModel image, bool isPlaceholder)> RenderAll(IDataModel model, ITableRun ows) {
-         var results = new List<(IPixelViewModel, bool)>();
-         var owTable = new ModelTable(model, ows.Start);
-         var defaultOW = BlockMapViewModel.GetDefaultOW(model);
-         for (int i = 0; i < ows.ElementCount; i++) {
-            IPixelViewModel image;
-            try {
-               image = ObjectEventViewModel.Render(model, owTable, defaultOW, i, 0, () => -1);
-            } catch (Exception) {
-               image = defaultOW;
-            }
-            results.Add((image, ReferenceEquals(image, defaultOW)));
-         }
-         return results;
-      }
+      private SpriteGalleryItem selectedItem;
+      private OverworldSpriteRenderer renderer;
 
       /// <summary>Jump the table tool to another sprite.</summary>
       public void Select(SpriteGalleryItem item) {
@@ -147,22 +168,23 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          if (other is not SpriteGalleryElementViewModel gallery) return false;
          if (gallery.model != model) return false;
          CurrentIndex = gallery.CurrentIndex;
-         foreach (var item in elements) item.Selected = item.Index == CurrentIndex;
+         // only the old and the new sprite change, there is no need to go over all of them
+         if (loaded) {
+            var current = CurrentIndex >= 0 && CurrentIndex < elements.Count ? elements[CurrentIndex] : null;
+            if (!ReferenceEquals(selectedItem, current)) {
+               if (selectedItem != null) selectedItem.Selected = false;
+               selectedItem = current;
+               if (current != null) current.Selected = true;
+            }
+         }
          var names = model.GetOptions(HardcodeTablesModel.OverworldSprites);
          currentName = names != null && CurrentIndex < names.Count ? names[CurrentIndex] : string.Empty;
          NotifyPropertyChanged(nameof(CurrentName));
          NotifyPropertyChanged(nameof(CurrentIndex));
-         // the sprite being edited may have changed: re-render just that one
-         var ows = model.GetTable(HardcodeTablesModel.OverworldSprites);
-         var current = elements.FirstOrDefault(element => element.Index == CurrentIndex);
-         if (ows != null && current != null) {
-            try {
-               var defaultOW = BlockMapViewModel.GetDefaultOW(model);
-               var image = ObjectEventViewModel.Render(model, new ModelTable(model, ows.Start), defaultOW, CurrentIndex, 0, () => -1);
-               current.Replace(image, ReferenceEquals(image, defaultOW));
-            } catch (Exception) {
-               // keep the old picture
-            }
+         // the sprite being edited may have changed: draw just that one again (if it's in the list at all)
+         if (selectedItem != null && selectedItem.IsRendered) {
+            var redrawn = renderer?.Redraw(CurrentIndex);
+            if (redrawn != null) selectedItem.Replace(redrawn.Value.image, redrawn.Value.isPlaceholder);
          }
          Visible = other.Visible;
          return true;

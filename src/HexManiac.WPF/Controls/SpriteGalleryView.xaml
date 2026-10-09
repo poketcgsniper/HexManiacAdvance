@@ -13,42 +13,57 @@
          <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Foreground="{DynamicResource Secondary}" Margin="12,0"/>
       </DockPanel>
       <TextBlock DockPanel.Dock="Top" Margin="6,0,6,4" Foreground="{DynamicResource Secondary}" Text="Click a sprite to open it in the table. Hover for its name."/>
-      <ScrollViewer VerticalScrollBarVisibility="Auto">
-         <ItemsControl Name="Container" ItemsSource="{Binding Elements}">
-            <ItemsControl.ItemsPanel>
-               <ItemsPanelTemplate>
-                  <WrapPanel/>
-               </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-               <DataTemplate>
-                  <Border BorderThickness="2" Margin="2" Padding="2" ToolTip="{Binding Label}" Cursor="Hand" MouseLeftButtonUp="ItemClicked" Background="{DynamicResource Backlight}">
-                     <Border.Style>
-                        <Style TargetType="Border">
-                           <Setter Property="BorderBrush" Value="Transparent"/>
-                           <Style.Triggers>
-                              <DataTrigger Binding="{Binding Selected}" Value="True">
-                                 <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
-                              </DataTrigger>
-                              <DataTrigger Binding="{Binding IsFilteredOut}" Value="True">
-                                 <Setter Property="Visibility" Value="Collapsed"/>
-                              </DataTrigger>
-                              <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
-                                 <Setter Property="Opacity" Value=".4"/>
-                              </DataTrigger>
-                           </Style.Triggers>
-                        </Style>
-                     </Border.Style>
-                     <StackPanel Width="{Binding ItemWidth, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                        <Grid Height="{Binding ItemHeight, RelativeSource={RelativeSource AncestorType=UserControl}}">
-                           <hshmwpfc:PixelImage HorizontalAlignment="Center" VerticalAlignment="Bottom" TransparentBrush="{DynamicResource Backlight}"/>
-                        </Grid>
-                        <TextBlock Text="{Binding Label}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="11"/>
-                     </StackPanel>
-                  </Border>
-               </DataTemplate>
-            </ItemsControl.ItemTemplate>
-         </ItemsControl>
-      </ScrollViewer>
+      <!-- Rows of sprites in a virtualizing list: only the rows on screen get any controls, however many sprites there are. -->
+      <ItemsControl Name="Container" ItemsSource="{Binding Rows}" SizeChanged="ContainerSizeChanged"
+                    VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" VirtualizingPanel.ScrollUnit="Pixel">
+         <ItemsControl.Template>
+            <ControlTemplate TargetType="{x:Type ItemsControl}">
+               <ScrollViewer CanContentScroll="True" Focusable="False" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                  <ItemsPresenter/>
+               </ScrollViewer>
+            </ControlTemplate>
+         </ItemsControl.Template>
+         <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+               <VirtualizingStackPanel/>
+            </ItemsPanelTemplate>
+         </ItemsControl.ItemsPanel>
+         <ItemsControl.ItemTemplate>
+            <DataTemplate>
+               <ItemsControl ItemsSource="{Binding Items}">
+                  <ItemsControl.ItemsPanel>
+                     <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                     </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                     <DataTemplate>
+                        <Border BorderThickness="2" Margin="2" Padding="2" ToolTip="{Binding Label}" Cursor="Hand" MouseLeftButtonUp="ItemClicked" Background="{DynamicResource Backlight}">
+                           <Border.Style>
+                              <Style TargetType="Border">
+                                 <Setter Property="BorderBrush" Value="Transparent"/>
+                                 <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Selected}" Value="True">
+                                       <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                                       <Setter Property="Opacity" Value=".4"/>
+                                    </DataTrigger>
+                                 </Style.Triggers>
+                              </Style>
+                           </Border.Style>
+                           <StackPanel Width="{Binding ItemWidth, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                              <Grid Height="{Binding ItemHeight, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                                 <hshmwpfc:PixelImage HorizontalAlignment="Center" VerticalAlignment="Bottom" TransparentBrush="{DynamicResource Backlight}"/>
+                              </Grid>
+                              <TextBlock Text="{Binding Label}" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="11"/>
+                           </StackPanel>
+                        </Border>
+                     </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+               </ItemsControl>
+            </DataTemplate>
+         </ItemsControl.ItemTemplate>
+      </ItemsControl>
    </DockPanel>
 </UserControl>

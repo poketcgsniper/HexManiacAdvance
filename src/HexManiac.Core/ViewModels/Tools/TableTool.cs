@@ -22,18 +22,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       public string Name => "Table";
 
-      public IReadOnlyList<string> TableSections {
-         get {
-            var sections = UnmatchedArrays.Select(array => {
-               var parts = model.GetAnchorFromAddress(-1, array.Start).Split('.');
-               if (parts.Length > 2) return string.Join(".", parts.Take(2));
-               return parts[0];
-            }).Distinct().ToList();
-            sections.Sort();
-            return sections;
-         }
-      }
-
+      public IReadOnlyList<string> TableSections => GetTableNames().Sections;
       private int selectedTableSection;
       public int SelectedTableSection {
          get => selectedTableSection;
@@ -45,15 +34,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       public IReadOnlyList<string> TableList {
          get {
-            if (selectedTableSection == -1 || selectedTableSection >= TableSections.Count) return new string[0];
-            var selectedSection = TableSections[selectedTableSection];
-            var tableList = UnmatchedArrays
-               .Select(array => model.GetAnchorFromAddress(-1, array.Start))
-               .Where(name => name.StartsWith(selectedSection + "."))
-               .Select(name => name.Substring(selectedSection.Length + 1))
-               .ToList();
-            tableList.Sort();
-            return tableList;
+            var names = GetTableNames();
+            if (selectedTableSection == -1 || selectedTableSection >= names.Sections.Count) return new string[0];
+            return names.TablesIn(names.Sections[selectedTableSection]);
          }
       }
 
@@ -92,6 +75,45 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             }
             return list;
          }
+      }
+
+      /// <summary>
+      /// The names behind the two dropdowns at the top of the tool (section, table).
+      /// Working them out means looking at every table in the ROM, and every refresh asks for them several times,
+      /// so they are remembered until the data changes. That also means the dropdowns get the same list back
+      /// and don't have to throw away and rebuild their items each time the cursor moves.
+      /// </summary>
+      private sealed class TableNames {
+         public IReadOnlyList<string> Sections { get; }
+         private readonly List<string> names;
+         private readonly Dictionary<string, IReadOnlyList<string>> tablesInSection = new();
+
+         public TableNames(List<string> names) {
+            this.names = names;
+            var sections = names.Select(name => {
+               var parts = name.Split('.');
+               if (parts.Length > 2) return string.Join(".", parts.Take(2));
+               return parts[0];
+            }).Distinct().ToList();
+            sections.Sort();
+            Sections = sections;
+         }
+
+         public IReadOnlyList<string> TablesIn(string section) {
+            lock (tablesInSection) {
+               if (tablesInSection.TryGetValue(section, out var existing)) return existing;
+               var tableList = names
+                  .Where(name => name.StartsWith(section + "."))
+                  .Select(name => name.Substring(section.Length + 1))
+                  .ToList();
+               tableList.Sort();
+               return tablesInSection[section] = tableList;
+            }
+         }
+      }
+
+      private TableNames GetTableNames() {
+         return model.CurrentCacheScope.GetOrAdd("table-tool-names", () => new TableNames(UnmatchedArrays.Select(array => model.GetAnchorFromAddress(-1, array.Start)).ToList()));
       }
 
       private string currentElementName;
@@ -472,7 +494,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                childIndexGroup++;
             } else if (streamGroup != null) {
                while (Groups.Count <= childIndexGroup) AddGroup();
-               Groups[childIndexGroup] = streamGroup;
+               // putting the very same group back would still tell the view that the group was replaced, and it would rebuild everything in it
+               if (!ReferenceEquals(Groups[childIndexGroup], streamGroup)) Groups[childIndexGroup] = streamGroup;
                streamGroup.Close();
                childIndexGroup++;
             }
@@ -571,13 +594,22 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          selection.SelectionEnd = selection.Scroll.DataIndexToViewPoint(address + array.ElementLength - 1);
       }
 
+      // There are tens of thousands of streams and thousands of tables in a ROM, and which of them refer to a table
+      // only changes when the data does: look once per table instead of on every refresh.
+      private IReadOnlyList<IStreamRun> StreamsUsing(string basename) {
+         return model.CurrentCacheScope.GetOrAdd<IReadOnlyList<IStreamRun>>("table-tool-streams-using:" + basename, () => model.Streams.Where(stream => stream.DependsOn(basename)).ToList());
+      }
+
+      private IReadOnlyList<ArrayRun> ArraysUsing(string basename) {
+         return model.CurrentCacheScope.GetOrAdd<IReadOnlyList<ArrayRun>>("table-tool-arrays-using:" + basename, () => model.Arrays.Where(table => table.DependsOn(basename)).ToList());
+      }
+
       private void AddChildrenFromStreams(ITableRun array, string basename, int index) {
          var plmResults = new List<(int, int)>();
          var eggResults = new List<(int, int)>();
          var trainerResults = new List<int>();
          var streamResults = new List<(int, int)>();
-         foreach (var child in model.Streams) {
-            if (!child.DependsOn(basename)) continue;
+         foreach (var child in StreamsUsing(basename)) {
             if (child is PLMRun plmRun) plmResults.AddRange(plmRun.Search(index));
             if (child is EggMoveRun eggRun) eggResults.AddRange(eggRun.Search(basename, index));
             if (child is ITrainerTeamRun trainerRun) trainerResults.AddRange(trainerRun.Search(basename, index));
@@ -616,8 +648,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             }));
          }
 
-         foreach (var table in model.Arrays) {
-            if (!table.DependsOn(basename)) continue;
+         foreach (var table in ArraysUsing(basename)) {
             var results = new List<(int, int)>(table.Search(model, basename, index));
             if (results.Count == 0) continue;
             var name = model.GetAnchorFromAddress(-1, table.Start);
