@@ -82,12 +82,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          HMObjectOptions.Add("Smash Rock");
          HMObjectOptions.Add("Strength Boulder");
          TrainerOptions.Bind(nameof(TrainerOptions.SelectedIndex), (options, args) => {
-            var targetSprite = model.GetTableModel(HardcodeTablesModel.TrainerTableName)[TrainerOptions.SelectedIndex].GetValue("sprite");
-            foreach (var key in TrainerPreferences.Keys) {
-               if (TrainerPreferences[key].Sprite != targetSprite) continue;
-               TrainerGraphics = key;
-               break;
-            }
+            if (useExistingTrainer) UseSelectedTrainerSprite(); // the list is hidden otherwise: its selection doesn't matter
          });
 
          initializationWorkload = dispatcher.RunBackgroundWork(() => {
@@ -195,7 +190,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public ObservableCollection<string> TypeOptions { get; } = new();
 
       private bool useExistingTrainer;
-      public bool UseExistingTrainer { get => useExistingTrainer; set => Set(ref useExistingTrainer, value); }
+      public bool UseExistingTrainer {
+         get => useExistingTrainer;
+         set => Set(ref useExistingTrainer, value, old => UseSelectedTrainerSprite());
+      }
 
       public FilteringComboOptions TrainerOptions { get; } = new();
 
@@ -204,14 +202,71 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          get => trainerGraphics;
          set {
             Set(ref trainerGraphics, value, old => {
-               if (!TrainerPreferences.TryGetValue(trainerGraphics, out var pref)) pref = new(0, 0, 0);
-               var spriteAddress = GetTrainerSpriteAddress(model, pref.Sprite);
-               var spriteRun = spriteAddress >= 0 && spriteAddress < model.Count ? model.GetNextRun(spriteAddress) as ISpriteRun : null;
-               TrainerSprite = spriteRun == null ? null : ReadonlyPixelViewModel.Create(model, spriteRun, true);
-               NotifyPropertyChanged(nameof(TrainerSprite));
+               UpdateTrainerSprite();
                UpdateObjectTemplateImage();
             });
          }
+      }
+
+      /// <summary>The index in the trainer table of the trainer that is selected in the "existing trainer" list, or -1.</summary>
+      private int SelectedExistingTrainer {
+         get {
+            var index = TrainerOptions.SelectedIndex;
+            var options = TrainerOptions.FilteredOptions; // while the list is filtered, SelectedIndex counts in the filtered list
+            return index >= 0 && index < options.Count ? options[index].Index : -1;
+         }
+      }
+
+      /// <summary>
+      /// A new trainer gets the picture that goes with the overworld sprite (see TrainerPreferences).
+      /// An existing trainer keeps its own picture, whatever overworld sprite is selected.
+      /// </summary>
+      private void UpdateTrainerSprite() {
+         var picture = -1;
+         if (useExistingTrainer && model.GetTableModel(HardcodeTablesModel.TrainerTableName) is ModelTable trainers) {
+            var trainer = SelectedExistingTrainer;
+            if (trainer >= 0 && trainer < trainers.Count) picture = trainers[trainer].GetValue("sprite");
+         }
+         if (picture < 0) {
+            if (!TrainerPreferences.TryGetValue(trainerGraphics, out var pref)) pref = new(0, 0, 0);
+            picture = pref.Sprite;
+         }
+         var spriteAddress = GetTrainerSpriteAddress(model, picture);
+         var spriteRun = spriteAddress >= 0 && spriteAddress < model.Count ? model.GetNextRun(spriteAddress) as ISpriteRun : null;
+         TrainerSprite = spriteRun == null ? null : ReadonlyPixelViewModel.Create(model, spriteRun, true);
+         NotifyPropertyChanged(nameof(TrainerSprite));
+      }
+
+      /// <summary>
+      /// When an existing trainer is selected, the event should look like that trainer:
+      /// select the overworld sprite that goes with the trainer's picture. If there is none, leave the selection alone.
+      /// </summary>
+      private void UseSelectedTrainerSprite() {
+         if (useExistingTrainer && model.GetTableModel(HardcodeTablesModel.TrainerTableName) is ModelTable trainers) {
+            var trainer = SelectedExistingTrainer;
+            if (trainer >= 0 && trainer < trainers.Count) {
+               var overworld = FindOverworldSprite(trainers[trainer].GetValue("sprite"));
+               if (overworld >= 0 && overworld < GraphicsOptions.Count) TrainerGraphics = overworld;
+            }
+         }
+         UpdateTrainerSprite();
+      }
+
+      /// <summary>The overworld sprite for a trainer picture, or -1 if there isn't one.</summary>
+      public int FindOverworldSprite(int trainerPicture) {
+         var pictureNames = model.GetOptions(HardcodeTablesModel.TrainerSpritesName);
+         if (!TrainerOverworldMatcher.HasNames(pictureNames)) pictureNames = model.GetOptions("data.trainers.sprites");
+         var overworldNames = model.GetOptions(HardcodeTablesModel.OverworldSprites);
+         if (TrainerOverworldMatcher.HasNames(pictureNames) && TrainerOverworldMatcher.HasNames(overworldNames)) {
+            if (trainerPicture < 0 || trainerPicture >= pictureNames.Count) return -1;
+            return TrainerOverworldMatcher.Find(pictureNames[trainerPicture], overworldNames);
+         }
+
+         // the lists have no names (not a decomp hack): the best we can do is the sprite that the map data pairs with this picture
+         foreach (var key in TrainerPreferences.Keys) {
+            if (TrainerPreferences[key].Sprite == trainerPicture) return key;
+         }
+         return -1;
       }
       public int MaxPokedex { get => maxPokedex; set => Set(ref maxPokedex, value); }
       public int MaxLevel { get => maxLevel; set => Set(ref maxLevel, value); }
