@@ -227,8 +227,8 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
       public int Arg => Element.GetValue("arg");
       public bool HasScript => Kind < 5;
       public bool IsHiddenItem => Kind.IsAny(5, 6, 7);
-      public int ItemValue => Element.Model.ReadMultiByteValue(Element.Start + 8, 2);
-      public int HiddenItemFlag => Element.Model[Element.Start + 10];
+      public int ItemValue => HiddenItemEncoding.GetItem(Element.Model, Element.Start + 8);
+      public int HiddenItemFlag => HiddenItemEncoding.GetFlagOffset(Element.Model, Element.Start + 8);
       public int HiddenItemCount => Element.Model[Element.Start + 11];
       public int ScriptAddress => Element.Model.ReadPointer(Element.Start + 8);
    }
@@ -355,5 +355,52 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
       }
 
       public int RecentBank { get; set; }
+   }
+}
+
+namespace HavenSoft.HexManiac.Core.Models.Map {
+   /// <summary>
+   /// A hidden item is packed into the 4 bytes where other signposts keep a script pointer:
+   ///   item (16 bits), flag offset from FLAG_HIDDEN_ITEMS_START (8 bits), quantity (7 bits), underfoot (1 bit).
+   /// pokeemerald-expansion has many more items and hidden-item flags, so it packs item into 11 bits and the flag offset into 13.
+   /// A ROM's metadata says so with the unmapped constants 'map.hiddenitem.itembits' and 'map.hiddenitem.flagbits'.
+   /// </summary>
+   public static class HiddenItemEncoding {
+      public const string ItemBitsName = "map.hiddenitem.itembits", FlagBitsName = "map.hiddenitem.flagbits";
+
+      public static (int itemBits, int flagBits) GetLayout(IDataModel model) {
+         var itemBits = model.TryGetUnmappedConstant(ItemBitsName, out var i) && i.InRange(1, 24) ? i : 16;
+         var flagBits = model.TryGetUnmappedConstant(FlagBitsName, out var f) && f.InRange(1, 24) ? f : 8;
+         return (itemBits, flagBits);
+      }
+
+      /// <param name="address">the start of the 4-byte union (offset 8 of the signpost)</param>
+      public static int GetItem(IDataModel model, int address) {
+         var (itemBits, _) = GetLayout(model);
+         return (int)((uint)model.ReadMultiByteValue(address, 4) & ((1u << itemBits) - 1));
+      }
+
+      public static int GetFlagOffset(IDataModel model, int address) {
+         var (itemBits, flagBits) = GetLayout(model);
+         return (int)(((uint)model.ReadMultiByteValue(address, 4) >> itemBits) & ((1u << flagBits) - 1));
+      }
+
+      public static void SetItem(IDataModel model, ModelDelta token, int address, int item) {
+         var (itemBits, _) = GetLayout(model);
+         var mask = (1u << itemBits) - 1;
+         var word = (uint)model.ReadMultiByteValue(address, 4);
+         word = (word & ~mask) | ((uint)item & mask);
+         model.WriteMultiByteValue(address, 4, token, (int)word);
+      }
+
+      public static void SetFlagOffset(IDataModel model, ModelDelta token, int address, int flagOffset) {
+         var (itemBits, flagBits) = GetLayout(model);
+         var mask = ((1u << flagBits) - 1) << itemBits;
+         var word = (uint)model.ReadMultiByteValue(address, 4);
+         word = (word & ~mask) | (((uint)flagOffset << itemBits) & mask);
+         model.WriteMultiByteValue(address, 4, token, (int)word);
+      }
+
+      public static int MaxFlagOffset(IDataModel model) => (1 << GetLayout(model).flagBits) - 1;
    }
 }

@@ -19,8 +19,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.QuickEditItems {
 
       public Task<ErrorInfo> Run(IViewPort viewPortInterface) {
          var viewPort = (ViewPort)viewPortInterface;
-         var map = viewPort.MapEditor?.PrimaryMap;
-         viewPort.OpenTilesetAnimationTab(map?.MapID / 1000 ?? 0, map?.MapID % 1000 ?? 0, false);
+         // starts on Petalburg City (map 0-0) whatever map the map editor is on; the map list at the top switches maps
+         viewPort.OpenTilesetAnimationTab(TilesetAnimationTab.DefaultGroup, TilesetAnimationTab.DefaultMap, false);
          return Task.FromResult(ErrorInfo.NoError);
       }
 

@@ -2,6 +2,7 @@
 using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.ViewModels.Images;
+using HavenSoft.HexManiac.Core.ViewModels.Tools;
 using HexManiac.Core.Models.Runs.Sprites;
 using System;
 using System.Collections.ObjectModel;
@@ -75,6 +76,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                var name = songnames[i] ?? $"song_{i}";
                MusicOptions.Add(name);
             }
+            // the music dropdown can be typed into to find a song quickly
+            musicComboOptions = ComboOption.Convert(MusicOptions).ToList();
+            MusicFilter.Update(musicComboOptions, Music);
+            MusicFilter.Bind(nameof(FilteringComboOptions.ModelValue), (filter, args) => {
+               if (!updatingMusicFilter) Music = filter.ModelValue;
+            });
          }
          if (element.Model.TryGetList("maptypes", out var mapTypes)) {
             foreach (var name in mapTypes) MapTypeOptions.Add(name);
@@ -82,7 +89,23 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          Refresh();
       }
 
+      /// <summary>The music dropdown: type part of a song's name to narrow the list, or pick from it.</summary>
+      public FilteringComboOptions MusicFilter { get; } = new();
+      private System.Collections.Generic.List<ComboOption> musicComboOptions;
+      private bool updatingMusicFilter;
+
+      private void SyncMusicFilter() {
+         if (musicComboOptions == null || map == null) return;
+         updatingMusicFilter = true;
+         try {
+            MusicFilter.Update(musicComboOptions, Music);
+         } finally {
+            updatingMusicFilter = false;
+         }
+      }
+
       public void UpdateFromModel() {
+         SyncMusicFilter();
          if (primaryIndex == -1 || secondaryIndex == -1) return; // only way this can ever be set is later in this same method (recursion guard)
          if (map == null) return;
          var layoutTable = map.GetSubTable(Format.Layout);

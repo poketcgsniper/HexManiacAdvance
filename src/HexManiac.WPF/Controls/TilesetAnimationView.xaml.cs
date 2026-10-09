@@ -12,19 +12,30 @@ namespace HavenSoft.HexManiac.WPF.Controls {
 
       public TilesetAnimationView() {
          InitializeComponent();
-         timer.Tick += (sender, e) => ViewModel?.Tick();
+         timer.Tick += (sender, e) => {
+            // a bad frame must never take the whole program down: stop the preview instead
+            try { ViewModel?.Tick(); } catch (Exception) { timer.Stop(); }
+         };
          Loaded += (sender, e) => timer.Start();
          Unloaded += (sender, e) => timer.Stop();
       }
 
-      private void TilesetClicked(object sender, MouseButtonEventArgs e) {
-         var position = e.GetPosition(TilesetImage); // the image's own (unscaled) pixel coordinates
-         ViewModel?.PickTile((int)position.X, (int)position.Y);
-      }
+      /// <summary>The pane (primary or secondary tileset) a tileset picture belongs to: the picture sits in a grid that carries the pane.</summary>
+      private static TilesetPane PaneOf(object sender) => (sender as FrameworkElement)?.Parent is FrameworkElement parent ? parent.DataContext as TilesetPane : null;
+
+      private void TilesetClicked(object sender, MouseButtonEventArgs e) => PickTile(sender);
 
       private void TilesetDragged(object sender, MouseEventArgs e) {
          if (e.LeftButton != MouseButtonState.Pressed) return;
-         TilesetClicked(sender, null);
+         PickTile(sender);
+      }
+
+      private void PickTile(object sender) {
+         if (sender is not IInputElement image) return;
+         var pane = PaneOf(sender);
+         if (pane == null || ViewModel == null) return;
+         var position = Mouse.GetPosition(image); // the image's own (unscaled) pixel coordinates
+         ViewModel.PickTile(pane, (int)position.X, (int)position.Y);
       }
 
       private void EntryClicked(object sender, MouseButtonEventArgs e) {

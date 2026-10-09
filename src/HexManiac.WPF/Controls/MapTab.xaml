@@ -484,8 +484,14 @@
                                  <Path Data="{res:Icon RightAngleArrow}" Fill="{DynamicResource Secondary}" Stretch="Fill" />
                               </local:AngleButton>
                               <local:AngleBorder Direction="Out" Content="Growth:" Grid.Row="1" />
-                              <local:AngleComboBox Direction="Right" Grid.Row="1" Grid.Column="1" Margin="0,2,21,2" ItemsSource="{Binding BerryStageOptions}" SelectedIndex="{Binding SelectedBerryStage}"
-                                    ToolTip="How grown the tree is when a new game starts"/>
+                              <local:AngleComboBox Direction="Right" Grid.Row="1" Grid.Column="1" Margin="0,2,21,2" ItemsSource="{Binding BerryStageVisuals}" SelectedIndex="{Binding SelectedBerryStage}"
+                                    ToolTip="How grown the tree is when a new game starts">
+                                  <local:AngleComboBox.ItemsPanel>
+                                     <ItemsPanelTemplate>
+                                        <WrapPanel Width="120" />
+                                     </ItemsPanelTemplate>
+                                  </local:AngleComboBox.ItemsPanel>
+                               </local:AngleComboBox>
                            </Grid>
                            <Grid Visibility="{Binding HasNoBerrySpot, Converter={StaticResource BoolToVisibility}}">
                               <Grid.ColumnDefinitions>
@@ -614,6 +620,16 @@
                                  <TextBlock Text="Item:" Margin="4,0"/>
                               </local:AngleBorder>
                               <local:AngleComboBox Grid.Column="1" Direction="Out" DataContext="{Binding ItemOptions}" />
+                           </Grid>
+                           <Grid Margin="0,4,0,0" Visibility="{Binding ShowItemQuantity, Converter={StaticResource BoolToVisibility}}">
+                              <Grid.ColumnDefinitions>
+                                 <ColumnDefinition />
+                                 <ColumnDefinition />
+                              </Grid.ColumnDefinitions>
+                              <local:AngleBorder Direction="Left">
+                                 <TextBlock Text="Count:" Margin="4,0"/>
+                              </local:AngleBorder>
+                              <local:AngleTextBox Grid.Column="1" Direction="Right" TextBinding="{Binding ItemQuantity, UpdateSourceTrigger=PropertyChanged}" />
                            </Grid>
                         </StackPanel>
 
@@ -1331,9 +1347,10 @@
                </local:AngleButton>
 
                <local:AngleBorder  Grid.Row="1" Content="Music:" Direction="Left" />
-               <local:AngleComboBox Grid.Row="1" Grid.Column="1" Direction="Out" Margin="0,2,4,2"
-                                    ItemsSource="{Binding MusicOptions}" SelectedIndex="{Binding Music}"
-                                    Visibility="{Binding HasMusicOptions, Converter={StaticResource BoolToVisibility}}" />
+               <Grid Grid.Row="1" Grid.Column="1" Visibility="{Binding HasMusicOptions, Converter={StaticResource BoolToVisibility}}">
+                  <!-- type in the box to search the song list -->
+                  <local:AngleComboBox DataContext="{Binding MusicFilter}" Direction="Out" Margin="0,2,4,2" />
+               </Grid>
 
                <local:AngleBorder  Grid.Row="2" Content="Cave:" Direction="Left" />
                <local:AngleComboBox Grid.Row="2" Grid.Column="1" SelectedIndex="{Binding Cave}" ItemsSource="{Binding CaveOptions}" Direction="Out" Margin="0,2,4,2" />

@@ -383,6 +383,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             if (selectedSong != null) selectedSong.Selected = true;
             NotifyPropertyChanged();
             NotifyPropertyChanged(nameof(HasSelectedSong));
+            NotifyPropertyChanged(nameof(SelectedSongName));
+            NotifyPropertyChanged(nameof(CanRenameSong));
             UpdateSongDetails();
             exportSong?.RaiseCanExecuteChanged();
             gotoSong?.RaiseCanExecuteChanged();
@@ -390,6 +392,44 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
       }
       public bool HasSelectedSong => selectedSong?.Header != null;
+
+      /// <summary>Songs can be given a name whether or not their header is readable (a custom track inserted by hand has none yet).</summary>
+      public bool CanRenameSong => selectedSong != null && model.TryGetList(SongNamesList, out _);
+
+      /// <summary>
+      /// The selected song's name, as the song name list (shown in the music dropdowns and the table) has it.
+      /// Editing it updates that list in the ROM's metadata (.toml); the ROM itself doesn't store song names.
+      /// </summary>
+      public string SelectedSongName {
+         get => selectedSong?.Name ?? string.Empty;
+         set => RenameSelectedSong(value);
+      }
+
+      private void RenameSelectedSong(string name) {
+         if (selectedSong == null) return;
+         if (!model.TryGetList(SongNamesList, out var list)) {
+            OnError?.Invoke(this, "This ROM's metadata has no song name list to update.");
+            return;
+         }
+         // list entries can't have spaces: they are used as identifiers in dropdowns and scripts
+         var cleaned = (name ?? string.Empty).Trim().Replace(' ', '_');
+         var index = selectedSong.Index;
+         if (string.IsNullOrEmpty(cleaned)) cleaned = index.ToString();
+         var names = list.ToList();
+         while (names.Count <= index) names.Add(names.Count.ToString());
+         if (names[index] == cleaned) {
+            NotifyPropertyChanged(nameof(SelectedSongName)); // show the cleaned-up text again
+            return;
+         }
+         names[index] = cleaned;
+         model.SetList(viewPort.CurrentChange, SongNamesList, names, list.Comments, StoredList.GenerateHash(names));
+         model.ClearCacheScope();
+         viewPort.ChangeHistory.ChangeCompleted();
+         selectedSong.Name = cleaned;
+         NotifyPropertyChanged(nameof(SelectedSongName));
+         UpdateSongDetails();
+         Status = $"Song {index} is now called {cleaned}.";
+      }
 
       private string songDetails = string.Empty;
       public string SongDetails { get => songDetails; private set => Set(ref songDetails, value); }
@@ -624,7 +664,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
    public class SongItem : ViewModelCore {
       public int Index { get; }
-      public string Name { get; }
+      private string name;
+      public string Name {
+         get => name;
+         set { if (!TryUpdate(ref name, value ?? string.Empty)) return; NotifyPropertyChanged(nameof(Label)); }
+      }
       public int EntryAddress { get; }
       public int HeaderAddress { get; }
       public SongHeader Header { get; }
@@ -638,7 +682,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public bool Selected { get => selected; set => TryUpdate(ref selected, value); }
 
       public SongItem(int index, string name, int entryAddress, int headerAddress, SongHeader header, int musicPlayer) {
-         (Index, Name, EntryAddress, HeaderAddress, Header, MusicPlayer) = (index, name ?? string.Empty, entryAddress, headerAddress, header, musicPlayer);
+         (Index, this.name, EntryAddress, HeaderAddress, Header, MusicPlayer) = (index, name ?? string.Empty, entryAddress, headerAddress, header, musicPlayer);
       }
 
       public void MatchToFilter(string filter) {

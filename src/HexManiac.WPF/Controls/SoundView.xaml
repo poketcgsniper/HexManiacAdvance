@@ -57,6 +57,11 @@
                   <TextBlock Text="Find:" VerticalAlignment="Center"/>
                   <TextBox Margin="5,0,0,0" Text="{Binding CryFilter, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
                </DockPanel>
+               <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4" IsEnabled="{Binding CanRenameSong}">
+                  <TextBlock Text="Song name:" VerticalAlignment="Center"/>
+                  <TextBox Margin="5,0,0,0" VerticalAlignment="Center" Text="{Binding SelectedSongName, UpdateSourceTrigger=LostFocus}" KeyDown="SongNameKeyDown"
+                           ToolTip="Rename the selected song (for example after inserting a custom track). Press Enter or click away to save. This updates the song name list in the .toml, so the new name shows in the map header's music dropdown and everywhere else songs are listed. Spaces become underscores."/>
+               </DockPanel>
                <Grid DockPanel.Dock="Bottom" Margin="0,6,0,0">
                   <Grid.RowDefinitions>
                      <RowDefinition Height="Auto"/>

@@ -18,8 +18,6 @@
          <TextBlock Text="Animated Tiles" FontSize="18" VerticalAlignment="Center" Margin="0,0,16,0"/>
          <TextBlock Text="Map:" VerticalAlignment="Center"/>
          <ComboBox Width="260" Margin="5,0" ItemsSource="{Binding Maps}" SelectedItem="{Binding SelectedMap}" DisplayMemberPath="Label" VerticalAlignment="Center"/>
-         <RadioButton Content="Primary tileset" IsChecked="{Binding IsPrimary}" VerticalAlignment="Center" Margin="8,0,0,0"/>
-         <RadioButton Content="Secondary tileset" IsChecked="{Binding IsSecondary}" VerticalAlignment="Center" Margin="8,0,0,0"/>
          <TextBlock Text="Zoom:" VerticalAlignment="Center" Margin="12,0,4,0"/>
          <Slider Width="80" Minimum="1" Maximum="4" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding SpriteScale}" VerticalAlignment="Center"/>
          <Button Content="Refresh" Command="{Binding Refresh}" Margin="12,0" Padding="8,1" VerticalAlignment="Center"/>
@@ -32,14 +30,14 @@
             <ColumnDefinition Width="*"/>
          </Grid.ColumnDefinitions>
 
-         <!-- ============ left: the tileset and the 'new animation' box ============ -->
+         <!-- ============ left: the primary and secondary tilesets and the 'new animation' box ============ -->
          <DockPanel Grid.Column="0">
-            <TextBlock DockPanel.Dock="Top" Text="{Binding TilesetDescription}" Style="{StaticResource Hint}"/>
-            <TextBlock DockPanel.Dock="Top" Text="{Binding AnimationDescription}" Style="{StaticResource Hint}"/>
+            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" MaxWidth="560" HorizontalAlignment="Left"
+                       Text="Both tilesets of the map are shown. Outlined tiles are animated (the animated ones move here too): click one to see its animation on the right. Click any tile to start a new animation there."/>
             <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Backlight}" BorderThickness="1" Padding="6" Margin="0,6,0,0">
                <StackPanel>
-                  <TextBlock Text="New animation" FontSize="14" Margin="0,0,0,4"/>
-                  <TextBlock Style="{StaticResource Hint}" Text="1. Click the first tile in the tileset above.  2. Say how many tiles (in a row) animate together and how many frames you want.  3. Add it, then draw or import the frames on the right."/>
+                  <TextBlock Text="{Binding NewAnimationTitle}" FontSize="14" Margin="0,0,0,4"/>
+                  <TextBlock Style="{StaticResource Hint}" Text="1. Click the first tile in a tileset above.  2. Say how many tiles (in a row) animate together and how many frames you want.  3. Add it, then draw or import the frames on the right."/>
                   <Grid Margin="0,4,0,0">
                      <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -75,13 +73,86 @@
                </StackPanel>
             </Border>
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Margin="0,4,0,0">
-               <Grid HorizontalAlignment="Left" VerticalAlignment="Top">
-                  <hshmwpfc:PixelImage x:Name="TilesetImage" DataContext="{Binding TilesetImage}" Cursor="Hand" MouseLeftButtonDown="TilesetClicked" MouseMove="TilesetDragged"/>
-                  <Canvas IsHitTestVisible="False">
-                     <Rectangle Canvas.Left="{Binding SelectionX}" Canvas.Top="{Binding SelectionY}" Width="{Binding SelectionWidth}" Height="{Binding SelectionHeight}"
-                                Stroke="{DynamicResource Accent}" StrokeThickness="2" Fill="#40FFFFFF"/>
-                  </Canvas>
-               </Grid>
+               <ItemsControl ItemsSource="{Binding Panes}">
+                  <ItemsControl.ItemsPanel>
+                     <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                     </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                     <DataTemplate>
+                        <StackPanel Margin="0,0,12,0">
+                           <TextBlock Text="{Binding Title}" FontWeight="Bold">
+                              <TextBlock.Style>
+                                 <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                    <Style.Triggers>
+                                       <DataTrigger Binding="{Binding IsActive}" Value="True">
+                                          <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
+                                       </DataTrigger>
+                                    </Style.Triggers>
+                                 </Style>
+                              </TextBlock.Style>
+                           </TextBlock>
+                           <TextBlock Text="{Binding Description}" Style="{StaticResource Hint}" MaxWidth="270" HorizontalAlignment="Left"/>
+                           <Grid HorizontalAlignment="Left" VerticalAlignment="Top">
+                              <hshmwpfc:PixelImage DataContext="{Binding Image}" Cursor="Hand" MouseLeftButtonDown="TilesetClicked" MouseMove="TilesetDragged"/>
+                              <!-- every animated range -->
+                              <ItemsControl ItemsSource="{Binding Highlights}" IsHitTestVisible="False">
+                                 <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                       <Canvas/>
+                                    </ItemsPanelTemplate>
+                                 </ItemsControl.ItemsPanel>
+                                 <ItemsControl.ItemContainerStyle>
+                                    <Style TargetType="ContentPresenter">
+                                       <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                                       <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                                    </Style>
+                                 </ItemsControl.ItemContainerStyle>
+                                 <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                       <Rectangle Width="{Binding Width}" Height="{Binding Height}">
+                                          <Rectangle.Style>
+                                             <Style TargetType="Rectangle">
+                                                <Setter Property="Stroke" Value="{DynamicResource Secondary}"/>
+                                                <Setter Property="StrokeThickness" Value="1"/>
+                                                <Style.Triggers>
+                                                   <DataTrigger Binding="{Binding Selected}" Value="True">
+                                                      <Setter Property="Stroke" Value="{DynamicResource Accent}"/>
+                                                      <Setter Property="StrokeThickness" Value="2"/>
+                                                      <Setter Property="Fill" Value="#30FFFFFF"/>
+                                                   </DataTrigger>
+                                                </Style.Triggers>
+                                             </Style>
+                                          </Rectangle.Style>
+                                       </Rectangle>
+                                    </DataTemplate>
+                                 </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                              <!-- the tiles the new animation would use -->
+                              <ItemsControl ItemsSource="{Binding SelectionRects}" IsHitTestVisible="False">
+                                 <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                       <Canvas/>
+                                    </ItemsPanelTemplate>
+                                 </ItemsControl.ItemsPanel>
+                                 <ItemsControl.ItemContainerStyle>
+                                    <Style TargetType="ContentPresenter">
+                                       <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                                       <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                                    </Style>
+                                 </ItemsControl.ItemContainerStyle>
+                                 <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                       <Rectangle Width="{Binding Width}" Height="{Binding Height}" Stroke="{DynamicResource Accent}" StrokeThickness="2" Fill="#40FFFFFF"/>
+                                    </DataTemplate>
+                                 </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                           </Grid>
+                        </StackPanel>
+                     </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+               </ItemsControl>
             </ScrollViewer>
          </DockPanel>
 
@@ -95,12 +166,12 @@
                <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
          <DockPanel Grid.Row="0">
-            <TextBlock DockPanel.Dock="Top" Text="Animations on this tileset" FontSize="14" Margin="0,0,0,4"/>
-            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="Each frame replaces the tiles while it plays. Click a frame to open it in the image editor and draw on it (or import a picture over it), or import all frames at once from one picture: each frame is (tiles x 8) pixels wide and 8 pixels tall, stacked top to bottom."/>
+            <TextBlock DockPanel.Dock="Top" Text="Animations on these tilesets" FontSize="14" Margin="0,0,0,4"/>
+            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="The game's own animations (water, flowers...) play at the speed its code sets; the ones you add can be changed freely. Each frame replaces the tiles while it plays. Click a frame to open it in the image editor and draw on it (or import a picture over it), or import all frames at once from one picture: each frame is (tiles x 8) pixels wide and 8 pixels tall, stacked top to bottom."/>
             <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
                <Button Content="Import frames…" Command="{Binding ImportFrames}" Style="{StaticResource ToolButton}" ToolTip="Replace every frame of the selected animation from one picture"/>
                <Button Content="Export frames…" Command="{Binding ExportFrames}" Style="{StaticResource ToolButton}" ToolTip="Save the selected animation's frames as one picture"/>
-               <Button Content="Remove" Command="{Binding RemoveEntry}" Style="{StaticResource ToolButton}" ToolTip="Delete the selected animation (the tiles go back to their normal look)"/>
+               <Button Content="Remove" Command="{Binding RemoveEntry}" Style="{StaticResource ToolButton}" ToolTip="Delete the selected animation you added (the game's own animations can't be removed here)"/>
                <Button Content="Open table" Command="{Binding GotoTable}" Style="{StaticResource ToolButton}" ToolTip="Show the animation table in the main tab"/>
             </StackPanel>
             <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -119,8 +190,9 @@
                               </Style>
                            </Border.Style>
                            <StackPanel>
+                              <TextBlock Text="{Binding Header}" FontSize="10" Foreground="{DynamicResource Accent}"/>
                               <TextBlock Text="{Binding Label}" FontWeight="Bold"/>
-                              <TextBlock Text="{Binding Details}" Foreground="{DynamicResource Secondary}"/>
+                              <TextBlock Text="{Binding Details}" Foreground="{DynamicResource Secondary}" TextWrapping="Wrap"/>
                               <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                  <StackPanel Margin="0,0,12,0" ToolTip="How the animation looks in game">
                                     <TextBlock Text="Live" FontSize="10" Foreground="{DynamicResource Accent}"/>
@@ -152,10 +224,10 @@
                               </StackPanel>
                               <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                  <TextBlock Text="Speed:" VerticalAlignment="Center"/>
-                                 <Slider Width="120" Minimum="0" Maximum="7" TickFrequency="1" IsSnapToTickEnabled="True" IsDirectionReversed="True" Value="{Binding Speed}" VerticalAlignment="Center" Margin="4,0"/>
+                                 <Slider Width="120" Minimum="0" Maximum="7" TickFrequency="1" IsSnapToTickEnabled="True" IsDirectionReversed="True" Value="{Binding Speed}" IsEnabled="{Binding IsEditable}" VerticalAlignment="Center" Margin="4,0"/>
                                  <TextBlock Text="{Binding SpeedText}" VerticalAlignment="Center" Foreground="{DynamicResource Secondary}"/>
                                  <TextBlock Text="   Frames:" VerticalAlignment="Center"/>
-                                 <TextBox Width="40" Text="{Binding FrameCount, UpdateSourceTrigger=LostFocus}" VerticalAlignment="Center" Margin="4,0" ToolTip="Type a new number of frames and press Tab. New frames copy the last one."/>
+                                 <TextBox Width="40" Text="{Binding FrameCount, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding IsEditable}" VerticalAlignment="Center" Margin="4,0" ToolTip="Type a new number of frames and press Tab. New frames copy the last one."/>
                               </StackPanel>
                            </StackPanel>
                         </Border>
@@ -191,6 +263,7 @@
                   <ComboBox Margin="4,0" ItemsSource="{Binding DoorSizes}" SelectedIndex="{Binding NewDoorSize}" VerticalAlignment="Center"/>
                   <TextBlock Text="  sound:" VerticalAlignment="Center"/>
                   <ComboBox Margin="4,0" ItemsSource="{Binding DoorSounds}" SelectedIndex="{Binding NewDoorSound}" VerticalAlignment="Center"/>
+                  <TextBlock Text="{Binding ActivePane.Title, StringFormat=' on the {0}'}" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource Secondary}" ToolTip="Click a tile in a tileset to choose which one gets the new door"/>
                   <Button Content="Add door" Command="{Binding AddDoor}" Padding="12,3" Margin="8,0,0,0" VerticalAlignment="Center"/>
                   <Button Content="Import frames…" Command="{Binding ImportDoorFrames}" Style="{StaticResource ToolButton}" Margin="16,0,6,0" VerticalAlignment="Center" ToolTip="Replace the selected door's 3 frames from one picture (frames stacked top to bottom)"/>
                   <Button Content="Export frames…" Command="{Binding ExportDoorFrames}" Style="{StaticResource ToolButton}" VerticalAlignment="Center"/>

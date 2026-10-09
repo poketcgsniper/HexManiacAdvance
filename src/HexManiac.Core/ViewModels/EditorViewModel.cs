@@ -1349,8 +1349,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       /// <summary>
-      /// Top-level shortcuts for editor tabs that aren't tied to a single table: the Sound editor and the overworld sprite gallery.
-      /// They use the 'editor:' goto prefix, which ViewPort.Goto turns into opening the matching tab.
+      /// Top-level shortcuts for the Sound editor and the Animated Tiles editor (they use the 'editor:' goto prefix, which ViewPort.Goto turns into opening the matching tab),
+      /// plus 'OW Sprites', which jumps straight to the overworld sprite table (its sprite gallery is shown inside the table).
       /// </summary>
       private static void AddEditorShortcuts(GotoControlViewModel gotoViewModel, IEditableViewPort viewPort, List<GotoShortcutViewModel> results) {
          var model = viewPort.Model;
@@ -1358,7 +1358,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Flute", "Bell", "Harp") ?? DrawIcon(NoteIcon), ViewPort.EditorGotoPrefix + "sound", "Sound"));
          }
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
-            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Running", "Mach Bike", "Bike") ?? DrawIcon(GridIcon), ViewPort.EditorGotoPrefix + "sprites", "OW Sprites"));
+            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Running", "Mach Bike", "Bike") ?? DrawIcon(GridIcon), HardcodeTablesModel.OverworldSprites, "OW Sprites"));
          }
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
             results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Wailmer Pail", "Pail", "Watering") ?? DrawIcon(FilmIcon), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles"));

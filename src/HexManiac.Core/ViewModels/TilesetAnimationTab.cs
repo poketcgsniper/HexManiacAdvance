@@ -13,8 +13,10 @@ using System.Windows.Input;
 
 namespace HavenSoft.HexManiac.Core.ViewModels {
    /// <summary>
-   /// The "Animated Tiles" editor: pick a map's tileset, click the tiles that should animate, choose how many frames and how fast,
-   /// then draw or import the frames. The tab writes the animation table and the code that plays it.
+   /// The "Animated Tiles" editor: shows a map's primary and secondary tilesets side by side, lists the animations on them
+   /// (the game's own water/flowers/... and the ones added here), previews them live, and lets you add new ones:
+   /// click the tiles that should animate, choose how many frames and how fast, then draw or import the frames.
+   /// The tab writes the animation table and the code that plays it.
    /// </summary>
    public class TilesetAnimationTab : ViewModelCore, ITabContent {
       private readonly IFileSystem fileSystem;
@@ -24,6 +26,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private readonly DoorAnimations doors;
       private readonly StubCommand close = new();
       private TilesetAnimationConstants constants;
+
+      /// <summary>Petalburg City in Emerald: where the tab starts unless it was opened for a particular map.</summary>
+      public const int DefaultGroup = 0, DefaultMap = 0;
 
       #region ITabContent
 
@@ -91,9 +96,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          animations = new TilesetAnimations(model, () => viewPort.CurrentChange, viewPort.Tools.CodeTool.Parser);
          doors = new DoorAnimations(model, () => viewPort.CurrentChange);
          TilesetAnimationConstants.TryRead(model, out constants);
+         Primary = new TilesetPane(this, false);
+         Secondary = new TilesetPane(this, true);
+         Panes = new[] { Primary, Secondary };
+         activePane = secondary ? Secondary : Primary;
+         activePane.IsActive = true;
          LoadMaps();
-         isSecondary = secondary;
-         selectedMap = Maps.FirstOrDefault(option => option.Group == group && option.Map == map) ?? Maps.FirstOrDefault();
+         selectedMap = Maps.FirstOrDefault(option => option.Group == group && option.Map == map)
+            ?? Maps.FirstOrDefault(option => option.Group == DefaultGroup && option.Map == DefaultMap)
+            ?? Maps.FirstOrDefault();
          Reload();
       }
 
@@ -107,9 +118,40 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          set { if (selectedMap == value || value == null) return; selectedMap = value; NotifyPropertyChanged(); Reload(); }
       }
 
-      private bool isSecondary;
-      public bool IsSecondary { get => isSecondary; set { if (isSecondary == value) return; isSecondary = value; NotifyPropertyChanged(); NotifyPropertyChanged(nameof(IsPrimary)); Reload(); } }
-      public bool IsPrimary { get => !isSecondary; set => IsSecondary = !value; }
+      /// <summary>The map's primary and secondary tilesets: both are shown at the same time.</summary>
+      public TilesetPane Primary { get; }
+      public TilesetPane Secondary { get; }
+      public IReadOnlyList<TilesetPane> Panes { get; }
+
+      private TilesetPane activePane;
+      /// <summary>The tileset the 'new animation' and 'new door' boxes work on: the one whose tile (or animation) was clicked last.</summary>
+      public TilesetPane ActivePane {
+         get => activePane;
+         set {
+            if (value == null || activePane == value) return;
+            activePane.IsActive = false;
+            activePane = value;
+            activePane.IsActive = true;
+            NotifyPropertyChanged();
+            NotifyPropertyChanged(nameof(NewAnimationTitle));
+            FirstTile = firstTile; // re-clamp to this tileset
+            addAnimation?.RaiseCanExecuteChanged();
+            addDoor?.RaiseCanExecuteChanged();
+            NotifySelectionChanged();
+         }
+      }
+
+      public string NewAnimationTitle => $"New animation on the {activePane.Title.ToLower()}";
+
+      private MiniBlocksetModel GetBlockset(bool secondary) {
+         if (selectedMap == null) return null;
+         var all = AllMapsModel.Create(model, () => viewPort.CurrentChange);
+         var bank = all[selectedMap.Group];
+         var mapModel = bank?[selectedMap.Map];
+         var layout = mapModel?.Layout;
+         if (layout == null) return null;
+         return secondary ? layout.SecondaryBlockset : layout.PrimaryBlockset;
+      }
 
       private void LoadMaps() {
          Maps.Clear();
@@ -127,68 +169,163 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
       }
 
-      private MiniBlocksetModel CurrentBlockset() {
-         if (selectedMap == null) return null;
-         var all = AllMapsModel.Create(model, () => viewPort.CurrentChange);
-         var bank = all[selectedMap.Group];
-         var mapModel = bank?[selectedMap.Map];
-         var layout = mapModel?.Layout;
-         if (layout == null) return null;
-         return isSecondary ? layout.SecondaryBlockset : layout.PrimaryBlockset;
-      }
-
       #endregion
 
-      #region Tileset image
+      #region Tilesets
 
-      private IPixelViewModel tilesetImage = new ReadonlyPixelViewModel(128, 256);
-      public IPixelViewModel TilesetImage { get => tilesetImage; private set { tilesetImage = value; NotifyPropertyChanged(); } }
+      private short[][] palettes;      // all 13 palettes (primary + secondary)
 
       private double spriteScale = 2;
       public double SpriteScale {
          get => spriteScale;
          set => Set(ref spriteScale, value.LimitToRange(1, 4), old => {
             foreach (var entry in Entries) entry.SpriteScale = spriteScale;
-            if (tilesetImage is CanvasPixelViewModel canvas) canvas.SpriteScale = spriteScale;
+            foreach (var door in Doors) door.SpriteScale = spriteScale;
+            foreach (var pane in Panes) pane.SpriteScale = spriteScale;
             NotifySelectionChanged();
+            RefreshHighlights();
          });
       }
 
       public int TilesPerRow => 16;
-      public int TileCountInTileset { get; private set; }
-      private int[][,] tiles;          // this tileset's tiles only
-      private short[][] palettes;      // all 13 palettes (primary + secondary)
-      private int[] tilePalette;       // best-guess palette for each tile
-      private byte[] rawTiles;         // 4bpp tile data of the tileset
+      public int TileCountInTileset => activePane.TileCount;
 
-      private string tilesetDescription = string.Empty;
-      public string TilesetDescription { get => tilesetDescription; private set => Set(ref tilesetDescription, value); }
+      private void LoadPane(TilesetPane pane) {
+         pane.Clear();
+         var blockset = GetBlockset(pane.IsSecondary);
+         pane.Blockset = blockset;
+         if (blockset == null || blockset.Start < 0 || blockset.Start >= model.Count) {
+            pane.Description = "This map has no " + pane.Title.ToLower() + ".";
+            return;
+         }
+         var full = blockset.FullBlocksetModel;
+         pane.Tiles = full.ReadTiles();
+         pane.TileCount = pane.Tiles?.Length ?? 0;
+         pane.RawTiles = ReadRawTiles(full, pane.TileCount);
+         GuessTilePalettes(pane, full);
+         pane.SetImage(RenderTileset(pane), spriteScale);
+         pane.Description = $"At {blockset.Start:X6}: {pane.TileCount} tiles. {animations.DescribeCallback(blockset.Start)}";
+      }
 
-      private string animationDescription = string.Empty;
-      public string AnimationDescription { get => animationDescription; private set => Set(ref animationDescription, value); }
+      private static byte[] ReadRawTiles(BlocksetModel blockset, int tileCount) {
+         var data = new byte[tileCount * 32];
+         var tiles = blockset.ReadTiles();
+         for (int t = 0; t < tileCount; t++) {
+            for (int y = 0; y < 8; y++) {
+               for (int x = 0; x < 8; x += 2) {
+                  data[t * 32 + y * 4 + x / 2] = (byte)((tiles[t][x, y] & 0xF) | ((tiles[t][x + 1, y] & 0xF) << 4));
+               }
+            }
+         }
+         return data;
+      }
+
+      private void LoadPalettes() {
+         palettes = null;
+         if (selectedMap == null) return;
+         var all = AllMapsModel.Create(model);
+         var layout = all[selectedMap.Group]?[selectedMap.Map]?.Layout;
+         if (layout?.PrimaryBlockset == null || layout.SecondaryBlockset == null) return;
+         palettes = BlockmapRun.ReadPalettes(layout.PrimaryBlockset.FullBlocksetModel, layout.SecondaryBlockset.FullBlocksetModel, model.IsFRLG() ? 7 : 6);
+      }
+
+      /// <summary>
+      /// Tiles don't store which palette they use: the blocks do. Count which palette each tile is drawn with, and use the most common one.
+      /// </summary>
+      private void GuessTilePalettes(TilesetPane pane, BlocksetModel blockset) {
+         var tilePalette = new int[Math.Max(1, pane.TileCount)];
+         var counts = new Dictionary<int, int[]>();
+         var tileBase = pane.IsSecondary ? constants.PrimaryTiles : 0;
+         try {
+            var blocks = blockset.ReadBlocks(blockset.PrimaryBlocks);
+            foreach (var block in blocks) {
+               for (int i = 0; i < 8; i++) {
+                  var value = block[i * 2] | (block[i * 2 + 1] << 8);
+                  var tile = (value & 0x3FF) - tileBase;
+                  var palette = value >> 12;
+                  if (tile < 0 || tile >= tilePalette.Length) continue;
+                  if (!counts.TryGetValue(tile, out var tally)) counts[tile] = tally = new int[16];
+                  tally[palette]++;
+               }
+            }
+         } catch (Exception) {
+            // no block information: every tile gets the default palette
+         }
+         var defaultPalette = pane.IsSecondary ? (model.IsFRLG() ? 7 : 6) : 0;
+         for (int t = 0; t < tilePalette.Length; t++) {
+            tilePalette[t] = defaultPalette;
+            if (!counts.TryGetValue(t, out var tally)) continue;
+            int best = 0;
+            for (int p = 1; p < 16; p++) if (tally[p] > tally[best]) best = p;
+            if (tally[best] > 0) tilePalette[t] = best;
+         }
+         pane.TilePalette = tilePalette;
+      }
+
+      public IReadOnlyList<short> PaletteFor(TilesetPane pane, int tile) {
+         var index = pane?.TilePalette != null && tile >= 0 && tile < pane.TilePalette.Length ? pane.TilePalette[tile] : 0;
+         if (palettes != null && index < palettes.Length && palettes[index] != null) return palettes[index];
+         return Enumerable.Range(0, 16).Select(i => (short)(i * 0x0421 * 2)).ToList(); // grayscale fallback
+      }
+
+      private IPixelViewModel RenderTileset(TilesetPane pane) {
+         int rows = (pane.TileCount + TilesPerRow - 1) / TilesPerRow;
+         var canvas = new CanvasPixelViewModel(TilesPerRow * 8, Math.Max(8, rows * 8)) { SpriteScale = spriteScale };
+         var pixels = new short[canvas.PixelWidth * canvas.PixelHeight];
+         for (int t = 0; t < pane.TileCount; t++) {
+            var palette = PaletteFor(pane, t);
+            int tx = (t % TilesPerRow) * 8, ty = (t / TilesPerRow) * 8;
+            for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) pixels[(ty + y) * canvas.PixelWidth + tx + x] = palette[pane.Tiles[t][x, y] & 0xF];
+         }
+         canvas.Fill(pixels);
+         return canvas;
+      }
+
+      /// <summary>
+      /// Render 'count' tiles from raw 4bpp data as one row (used for the selection preview and each animation frame).
+      /// </summary>
+      public IPixelViewModel RenderTileRow(TilesetPane pane, int firstTile, int count, byte[] data, int dataTileOffset = -1, double scale = 1) {
+         count = Math.Max(1, count);
+         var pixels = new short[count * 8 * 8];
+         if (data != null) {
+            var palette = PaletteFor(pane, firstTile);
+            for (int t = 0; t < count; t++) {
+               int sourceTile = dataTileOffset < 0 ? firstTile + t : dataTileOffset + t;
+               if (sourceTile < 0 || (sourceTile + 1) * 32 > data.Length) break;
+               for (int y = 0; y < 8; y++) {
+                  for (int x = 0; x < 8; x++) {
+                     var b = data[sourceTile * 32 + y * 4 + x / 2];
+                     var index = x % 2 == 0 ? b & 0xF : b >> 4;
+                     pixels[y * count * 8 + t * 8 + x] = palette[index];
+                  }
+               }
+            }
+         }
+         return new ReadonlyPixelViewModel(count * 8, 8, pixels) { SpriteScale = scale };
+      }
+
+      public IPixelViewModel RenderFrame(TilesetPane pane, TilesetAnimationEntry entry, int frame) {
+         var data = animations.ReadFrame(entry, frame);
+         return RenderTileRow(pane, entry.FirstTile, entry.TileCount, data, 0);
+      }
+
+      public byte[] ReadRawFrame(TilesetAnimationEntry entry, int frame) => animations.ReadFrame(entry, frame);
 
       #endregion
 
       #region New animation
 
       private int firstTile;
-      /// <summary>The first tile of the new animation (click the tileset image to pick it).</summary>
-      public int FirstTile { get => firstTile; set { Set(ref firstTile, value.LimitToRange(0, Math.Max(0, TileCountInTileset - 1))); NotifySelectionChanged(); } }
+      /// <summary>The first tile of the new animation (click a tileset image to pick it).</summary>
+      public int FirstTile { get => firstTile; set { Set(ref firstTile, value.LimitToRange(0, Math.Max(0, activePane.TileCount - 1))); NotifySelectionChanged(); } }
 
       private void NotifySelectionChanged() {
          NotifyPropertyChanged(nameof(SelectionPreview));
          NotifyPropertyChanged(nameof(SelectionText));
-         NotifyPropertyChanged(nameof(SelectionX));
-         NotifyPropertyChanged(nameof(SelectionY));
-         NotifyPropertyChanged(nameof(SelectionWidth));
-         NotifyPropertyChanged(nameof(SelectionHeight));
+         foreach (var pane in Panes) {
+            pane.SetSelection(pane == activePane ? firstTile : -1, tileCount, spriteScale);
+         }
       }
-
-      /// <summary>Position/size (in scaled pixels) of the highlight drawn over the tileset image for the chosen tiles (first row of them only).</summary>
-      public double SelectionX => (firstTile % TilesPerRow) * 8 * spriteScale;
-      public double SelectionY => (firstTile / TilesPerRow) * 8 * spriteScale;
-      public double SelectionWidth => Math.Min(tileCount, TilesPerRow - firstTile % TilesPerRow) * 8 * spriteScale;
-      public double SelectionHeight => 8 * spriteScale;
 
       private int tileCount = 4;
       public int TileCount { get => tileCount; set { Set(ref tileCount, value.LimitToRange(1, 64)); NotifySelectionChanged(); } }
@@ -206,30 +343,35 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          return $"every {frames} game frame{(frames == 1 ? "" : "s")} ({60.0 / frames:0.#} changes per second)";
       }
 
-      public string SelectionText => $"Tiles {firstTile} to {Math.Min(TileCountInTileset - 1, firstTile + tileCount - 1)}";
-      public IPixelViewModel SelectionPreview => RenderTileRow(firstTile, tileCount, rawTiles, scale: Math.Max(2, spriteScale));
+      public string SelectionText => $"{activePane.Title}: tiles {firstTile} to {Math.Max(firstTile, Math.Min(activePane.TileCount - 1, firstTile + tileCount - 1))}";
+      public IPixelViewModel SelectionPreview => RenderTileRow(activePane, firstTile, tileCount, activePane.RawTiles, scale: Math.Max(2, spriteScale));
 
-      /// <summary>Called by the view when the user clicks a tile in the tileset image (pixel coordinates, unscaled).</summary>
-      public void PickTile(int x, int y) {
-         if (tiles == null) return;
+      /// <summary>Called by the view when the user clicks a tile in a tileset image (pixel coordinates, unscaled).</summary>
+      public void PickTile(TilesetPane pane, int x, int y) {
+         if (pane?.Tiles == null || x < 0 || y < 0 || x / 8 >= TilesPerRow) return;
          var tile = (y / 8) * TilesPerRow + (x / 8);
-         if (tile < 0 || tile >= TileCountInTileset) return;
+         if (tile < 0 || tile >= pane.TileCount) return;
+         ActivePane = pane;
          FirstTile = tile;
+         // clicking an animated tile shows its animation
+         var covering = Entries.FirstOrDefault(item => item.Pane == pane && tile >= item.Entry.FirstTile && tile < item.Entry.FirstTile + item.Entry.TileCount);
+         if (covering != null && covering != selectedEntry) SelectedEntry = covering;
       }
 
       private StubCommand addAnimation;
-      public ICommand AddAnimation => StubCommand(ref addAnimation, ExecuteAddAnimation, () => tiles != null && constants != null);
+      public ICommand AddAnimation => StubCommand(ref addAnimation, ExecuteAddAnimation, () => activePane.Tiles != null && constants != null);
 
       private void ExecuteAddAnimation() {
-         var blockset = CurrentBlockset();
+         var pane = activePane;
+         var blockset = pane.Blockset;
          if (blockset == null || constants == null) return;
          try {
-            var table = animations.EnsureTable(blockset.Start, isSecondary, constants, out _);
-            animations.AddEntry(table, firstTile, tileCount, frameCount, speed, isSecondary, constants, rawTiles);
+            var table = animations.EnsureTable(blockset.Start, pane.IsSecondary, constants, out _);
+            animations.AddEntry(table, firstTile, tileCount, frameCount, speed, pane.IsSecondary, constants, pane.RawTiles);
             viewPort.ChangeHistory.ChangeCompleted();
             viewPort.Refresh();
             Reload();
-            SelectedEntry = Entries.LastOrDefault();
+            SelectedEntry = Entries.LastOrDefault(item => item.Pane == pane && !item.IsBuiltIn);
             OnMessage?.Invoke(this, $"Added an animation for tiles {firstTile}-{firstTile + tileCount - 1} with {frameCount} frames. Every frame starts as a copy of the tiles: edit or import the frames to make it move.");
          } catch (Exception e) {
             OnError?.Invoke(this, "Could not add the animation: " + e.Message);
@@ -240,13 +382,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       #region Existing animations
 
+      /// <summary>Every animation on both tilesets: the game's own first, then the ones added with this editor.</summary>
       public ObservableCollection<TilesetAnimationItem> Entries { get; } = new();
 
       private int tickCount;
       /// <summary>Called by the view about 60 times a second (once per game frame): advance every live preview the way the game would.</summary>
       public void Tick() {
          tickCount++;
-         foreach (var entry in Entries) entry.Tick(tickCount);
+         foreach (var entry in Entries) {
+            if (entry.Tick(tickCount)) entry.Pane.PaintLive(this, entry);
+         }
+         foreach (var pane in Panes) pane.FlushLive();
          foreach (var door in Doors) door.Tick();
       }
 
@@ -263,19 +409,22 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             removeEntry?.RaiseCanExecuteChanged();
             importFrames?.RaiseCanExecuteChanged();
             exportFrames?.RaiseCanExecuteChanged();
+            RefreshHighlights();
          }
       }
       public bool HasSelectedEntry => selectedEntry != null;
 
-      private StubCommand removeEntry, importFrames, exportFrames, gotoTable;
-      public ICommand RemoveEntry => StubCommand(ref removeEntry, ExecuteRemoveEntry, () => selectedEntry != null);
+      private StubCommand removeEntry, importFrames, exportFrames, gotoTable, refresh;
+      public ICommand RemoveEntry => StubCommand(ref removeEntry, ExecuteRemoveEntry, () => selectedEntry != null && !selectedEntry.IsBuiltIn);
       public ICommand ImportFrames => StubCommand(ref importFrames, ExecuteImportFrames, () => selectedEntry != null);
       public ICommand ExportFrames => StubCommand(ref exportFrames, ExecuteExportFrames, () => selectedEntry != null);
-      public ICommand GotoTable => StubCommand(ref gotoTable, ExecuteGotoTable, () => Entries.Count > 0);
+      public ICommand GotoTable => StubCommand(ref gotoTable, ExecuteGotoTable, () => true);
+      public ICommand Refresh => StubCommand(ref refresh, Reload, () => true);
 
       private void ExecuteRemoveEntry() {
-         var blockset = CurrentBlockset();
-         if (selectedEntry == null || blockset == null) return;
+         if (selectedEntry == null || selectedEntry.IsBuiltIn) return;
+         var blockset = selectedEntry.Pane.Blockset;
+         if (blockset == null) return;
          if (!animations.TryGetTable(blockset.Start, out var table, out _)) return;
          animations.RemoveEntry(table, selectedEntry.Entry.Index);
          viewPort.ChangeHistory.ChangeCompleted();
@@ -284,32 +433,36 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       public void SetEntrySpeed(TilesetAnimationItem item, int timer) {
-         var blockset = CurrentBlockset();
-         if (item == null || blockset == null || !animations.TryGetTable(blockset.Start, out var table, out _)) return;
+         if (item == null || item.IsBuiltIn) return;
+         var blockset = item.Pane.Blockset;
+         if (blockset == null || !animations.TryGetTable(blockset.Start, out var table, out _)) return;
          animations.SetTimer(table, item.Entry.Index, timer);
          viewPort.ChangeHistory.ChangeCompleted();
-         item.Refresh(animations.ReadEntries(table, isSecondary, constants)[item.Entry.Index], this);
+         item.Refresh(animations.ReadEntries(table, item.Pane.IsSecondary, constants)[item.Entry.Index], this);
       }
 
       public void SetEntryFrameCount(TilesetAnimationItem item, int count) {
-         var blockset = CurrentBlockset();
-         if (item == null || blockset == null || !animations.TryGetTable(blockset.Start, out var table, out _)) return;
+         if (item == null || item.IsBuiltIn) return;
+         var blockset = item.Pane.Blockset;
+         if (blockset == null || !animations.TryGetTable(blockset.Start, out var table, out _)) return;
          animations.SetFrameCount(table, item.Entry.Index, count);
          viewPort.ChangeHistory.ChangeCompleted();
          viewPort.Refresh();
+         var pane = item.Pane;
          var index = item.Entry.Index;
          Reload();
-         SelectedEntry = index < Entries.Count ? Entries[index] : null;
+         SelectedEntry = Entries.FirstOrDefault(entry => entry.Pane == pane && !entry.IsBuiltIn && entry.Entry.Index == index);
       }
 
       /// <summary>Open the frame in the image editor (with the palette these tiles use), where it can be drawn on or imported over.</summary>
       public void EditFrame(TilesetAnimationItem item, int frame) {
          if (item == null || frame < 0 || frame >= item.Entry.FrameCount) return;
-         var blockset = CurrentBlockset();
+         var blockset = item.Pane.Blockset;
          var frameAddress = blockset == null ? -1 : animations.EnsureFrameFormat(blockset.Start, item.Entry, frame);
          if (frameAddress < 0) frameAddress = model.ReadPointer(item.Entry.FramesAddress + 4 * frame);
          if (frameAddress < 0 || frameAddress >= model.Count) return;
          viewPort.ChangeHistory.ChangeCompleted();
+         var tilePalette = item.Pane.TilePalette;
          var page = tilePalette != null && item.Entry.FirstTile >= 0 && item.Entry.FirstTile < tilePalette.Length ? tilePalette[item.Entry.FirstTile] : 0;
          if (model.GetNextRun(frameAddress) is ISpriteRun && TryOpenImageEditor(frameAddress, page, item.Entry.TileCount)) return;
          viewPort.Goto.Execute(frameAddress);
@@ -334,9 +487,18 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       private void ExecuteGotoTable() {
-         var blockset = CurrentBlockset();
-         if (blockset == null || !animations.TryGetTable(blockset.Start, out var table, out _)) return;
-         viewPort.Goto.Execute(table.Start);
+         int address = -1;
+         var pane = selectedEntry?.Pane ?? activePane;
+         if (selectedEntry != null && selectedEntry.IsBuiltIn) {
+            address = selectedEntry.Entry.EntryAddress;
+         } else if (pane.Blockset != null && animations.TryGetTable(pane.Blockset.Start, out var table, out _)) {
+            address = table.Start;
+         }
+         if (address < 0) {
+            OnMessage?.Invoke(this, $"The {pane.Title.ToLower()} has no animation table of its own yet: add an animation first.");
+            return;
+         }
+         viewPort.Goto.Execute(address);
          RequestTabChange?.Invoke(this, new TabChangeRequestedEventArgs(viewPort));
       }
 
@@ -346,7 +508,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// </summary>
       private void ExecuteImportFrames() {
          if (selectedEntry == null) return;
-         var entry = selectedEntry.Entry;
+         var item = selectedEntry;
+         var pane = item.Pane;
+         var entry = item.Entry;
          (short[] image, int width) loaded;
          try {
             loaded = fileSystem.LoadImage();
@@ -364,11 +528,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             return;
          }
          if (frames < 1 || frames > 64) { OnError?.Invoke(this, "Frame count must be between 1 and 64."); return; }
-         var blockset = CurrentBlockset();
-         if (blockset == null || !animations.TryGetTable(blockset.Start, out var table, out _)) return;
-         if (frames != entry.FrameCount) animations.SetFrameCount(table, entry.Index, frames);
-         entry = animations.ReadEntries(table, isSecondary, constants)[entry.Index];
-         var palette = PaletteFor(entry.FirstTile);
+         var blockset = pane.Blockset;
+         if (blockset == null) return;
+         if (entry.IsBuiltIn) {
+            // the game's code decides how many frames it plays
+            if (frames != entry.FrameCount) { OnError?.Invoke(this, $"{entry.Name} always plays {entry.FrameCount} frames, but this image has {frames}."); return; }
+         } else {
+            if (!animations.TryGetTable(blockset.Start, out var table, out _)) return;
+            if (frames != entry.FrameCount) animations.SetFrameCount(table, entry.Index, frames);
+            entry = animations.ReadEntries(table, pane.IsSecondary, constants)[entry.Index];
+         }
+         var palette = PaletteFor(pane, entry.FirstTile);
          for (int f = 0; f < frames; f++) {
             var data = new byte[32 * entry.TileCount];
             for (int t = 0; t < entry.TileCount; t++) {
@@ -387,9 +557,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          viewPort.ChangeHistory.ChangeCompleted();
          viewPort.Refresh();
+         var builtIn = entry.IsBuiltIn;
          var selected = entry.Index;
          Reload();
-         SelectedEntry = selected < Entries.Count ? Entries[selected] : null;
+         SelectedEntry = Entries.FirstOrDefault(other => other.Pane == pane && other.IsBuiltIn == builtIn && other.Entry.Index == selected);
          OnMessage?.Invoke(this, $"Imported {frames} frame{(frames == 1 ? "" : "s")}.");
       }
 
@@ -398,7 +569,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var entry = selectedEntry.Entry;
          int frameWidth = entry.TileCount * 8;
          var image = new short[frameWidth * 8 * entry.FrameCount];
-         var palette = PaletteFor(entry.FirstTile);
+         var palette = PaletteFor(selectedEntry.Pane, entry.FirstTile);
          for (int f = 0; f < entry.FrameCount; f++) {
             var data = animations.ReadFrame(entry, f);
             if (data == null) continue;
@@ -428,6 +599,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             if (distance < bestDistance) { bestDistance = distance; best = i; }
          }
          return best;
+      }
+
+      /// <summary>Outline every animated range on the tileset images, and the selected animation more strongly.</summary>
+      private void RefreshHighlights() {
+         foreach (var pane in Panes) pane.SetHighlights(Entries.Where(item => item.Pane == pane).ToList(), selectedEntry, spriteScale);
       }
 
       #endregion
@@ -466,7 +642,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public IPixelViewModel NewDoorPreview => RenderBlock(newDoorMetatile);
 
       private StubCommand addDoor, removeDoor, importDoorFrames, exportDoorFrames, gotoDoorTable;
-      public ICommand AddDoor => StubCommand(ref addDoor, ExecuteAddDoor, () => HasDoors && tiles != null);
+      public ICommand AddDoor => StubCommand(ref addDoor, ExecuteAddDoor, () => HasDoors && activePane.Tiles != null);
       public ICommand RemoveDoor => StubCommand(ref removeDoor, ExecuteRemoveDoor, () => selectedDoor != null);
       public ICommand ImportDoorFrames => StubCommand(ref importDoorFrames, ExecuteImportDoorFrames, () => selectedDoor != null);
       public ICommand ExportDoorFrames => StubCommand(ref exportDoorFrames, ExecuteExportDoorFrames, () => selectedDoor != null);
@@ -475,18 +651,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private byte[][] allBlocks;          // every block of the map (primary + secondary), for metatile previews
       private int[][,] allTiles;           // every tile of the map (primary + secondary)
 
-      private void LoadDoors(MiniBlocksetModel blockset) {
-         Doors.Clear();
-         allBlocks = null;
-         allTiles = null;
-         if (!HasDoors || blockset == null) return;
+      private void LoadDoors(TilesetPane pane) {
+         if (!HasDoors || pane.Blockset == null) return;
          foreach (var entry in doors.ReadEntries()) {
-            if (entry.TilesetAddress != blockset.Start) continue;
-            Doors.Add(new DoorItem(entry, this) { SpriteScale = spriteScale });
+            if (entry.TilesetAddress != pane.Blockset.Start) continue;
+            Doors.Add(new DoorItem(entry, this, pane) { SpriteScale = spriteScale });
          }
-         NotifyPropertyChanged(nameof(NewDoorPreview));
-         addDoor?.RaiseCanExecuteChanged();
-         gotoDoorTable?.RaiseCanExecuteChanged();
       }
 
       private void EnsureBlocks() {
@@ -554,11 +724,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       private void ExecuteAddDoor() {
-         var blockset = CurrentBlockset();
+         var pane = activePane;
+         var blockset = pane.Blockset;
          if (blockset == null) return;
          try {
             // first frame: whatever the block looks like now (its bottom layer), so the door starts out looking right
-            var palette = tilePalette != null && tilePalette.Length > 0 ? tilePalette[Math.Min(tilePalette.Length - 1, firstTile)] : (isSecondary ? 6 : 0);
+            var tilePalette = pane.TilePalette;
+            var palette = tilePalette != null && tilePalette.Length > 0 ? tilePalette[Math.Min(tilePalette.Length - 1, firstTile)] : (pane.IsSecondary ? 6 : 0);
             var entry = doors.AddDoor(blockset.Start, newDoorMetatile, newDoorSize, newDoorSound, palette, null);
             viewPort.ChangeHistory.ChangeCompleted();
             viewPort.Refresh();
@@ -660,148 +832,195 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       #endregion
 
       public void Reload() {
+         // remember what was selected, so a refresh (or an edit that reloads) keeps it
+         var keepEntry = selectedEntry == null ? null : new { selectedEntry.Pane, selectedEntry.IsBuiltIn, selectedEntry.Entry.Index };
+         var keepDoor = selectedDoor == null ? null : new { selectedDoor.Pane, selectedDoor.Entry.Index };
+         selectedEntry = null;
+         selectedDoor = null;
          Entries.Clear();
-         tiles = null;
-         rawTiles = null;
-         var blockset = CurrentBlockset();
+         Doors.Clear();
+         allBlocks = null;
+         allTiles = null;
+         foreach (var pane in Panes) pane.Clear();
+         NotifyPropertyChanged(nameof(SelectedEntry));
+         NotifyPropertyChanged(nameof(HasSelectedEntry));
+         NotifyPropertyChanged(nameof(SelectedDoor));
+         NotifyPropertyChanged(nameof(HasSelectedDoor));
          if (constants == null) {
             Status = "This ROM's metadata doesn't say where the tileset animation engine keeps its data (tilesetanim.* constants), so animations can't be installed.";
-            TilesetImage = new ReadonlyPixelViewModel(128, 256);
             return;
          }
-         if (blockset == null || blockset.Start < 0 || blockset.Start >= model.Count) {
+         if (selectedMap == null) {
             Status = "Pick a map to edit its tileset animations.";
-            TilesetImage = new ReadonlyPixelViewModel(128, 256);
             return;
          }
+         var problems = new List<string>();
          try {
-            var full = blockset.FullBlocksetModel;
-            tiles = full.ReadTiles();
-            TileCountInTileset = tiles?.Length ?? 0;
-            rawTiles = ReadRawTiles(full, TileCountInTileset);
             LoadPalettes();
-            GuessTilePalettes(full);
-            TilesetImage = RenderTileset();
-            TilesetDescription = $"{(isSecondary ? "Secondary" : "Primary")} tileset at {blockset.Start:X6}: {TileCountInTileset} tiles, tiles at {blockset.TilesetAddress:X6}";
-            AnimationDescription = animations.DescribeCallback(blockset.Start);
-            if (animations.TryGetTable(blockset.Start, out var table, out _)) {
-               foreach (var entry in animations.ReadEntries(table, isSecondary, constants)) Entries.Add(new TilesetAnimationItem(entry, this) { SpriteScale = spriteScale });
-            }
-            FirstTile = Math.Min(firstTile, Math.Max(0, TileCountInTileset - 1));
-            NotifyPropertyChanged(nameof(SelectionPreview));
-            NotifyPropertyChanged(nameof(SelectionText));
-            NotifyPropertyChanged(nameof(TileCountInTileset));
-            LoadDoors(blockset);
-            Status = $"{Entries.Count} custom animation{(Entries.Count == 1 ? "" : "s")} and {Doors.Count} door{(Doors.Count == 1 ? "" : "s")} on this tileset.";
          } catch (Exception e) {
-            Status = "Could not read this tileset: " + e.Message;
-            TilesetImage = new ReadonlyPixelViewModel(128, 256);
+            problems.Add("palettes: " + e.Message);
          }
+         foreach (var pane in Panes) {
+            try {
+               LoadPane(pane);
+               if (pane.Blockset == null) continue;
+               foreach (var entry in animations.ReadBuiltInEntries(pane.Blockset.Start, pane.IsSecondary, constants)) Entries.Add(new TilesetAnimationItem(entry, this, pane) { SpriteScale = spriteScale });
+               if (animations.TryGetTable(pane.Blockset.Start, out var table, out _)) {
+                  foreach (var entry in animations.ReadEntries(table, pane.IsSecondary, constants)) Entries.Add(new TilesetAnimationItem(entry, this, pane) { SpriteScale = spriteScale });
+               }
+               LoadDoors(pane);
+            } catch (Exception e) {
+               problems.Add($"{pane.Title}: {e.Message}");
+            }
+         }
+         NotifyPropertyChanged(nameof(ActivePane));
+         NotifyPropertyChanged(nameof(NewAnimationTitle));
+         FirstTile = Math.Min(firstTile, Math.Max(0, activePane.TileCount - 1));
+         NotifySelectionChanged();
+         NotifyPropertyChanged(nameof(TileCountInTileset));
+         NotifyPropertyChanged(nameof(NewDoorPreview));
+         if (keepEntry != null) SelectedEntry = Entries.FirstOrDefault(item => item.Pane == keepEntry.Pane && item.IsBuiltIn == keepEntry.IsBuiltIn && item.Entry.Index == keepEntry.Index);
+         else RefreshHighlights();
+         if (keepDoor != null) SelectedDoor = Doors.FirstOrDefault(door => door.Pane == keepDoor.Pane && door.Entry.Index == keepDoor.Index);
+         var builtIn = Entries.Count(item => item.IsBuiltIn);
+         var custom = Entries.Count - builtIn;
+         Status = problems.Count > 0
+            ? "Could not read everything: " + string.Join("; ", problems)
+            : $"{builtIn} animation{(builtIn == 1 ? "" : "s")} built into the game, {custom} added with HexManiac, and {Doors.Count} door{(Doors.Count == 1 ? "" : "s")} on these tilesets."
+              + (animations.HasBuiltInTable ? string.Empty : " (This ROM doesn't list the game's own animations.)");
          addAnimation?.RaiseCanExecuteChanged();
-         gotoTable?.RaiseCanExecuteChanged();
-      }
-
-      private static byte[] ReadRawTiles(BlocksetModel blockset, int tileCount) {
-         var data = new byte[tileCount * 32];
-         var tiles = blockset.ReadTiles();
-         for (int t = 0; t < tileCount; t++) {
-            for (int y = 0; y < 8; y++) {
-               for (int x = 0; x < 8; x += 2) {
-                  data[t * 32 + y * 4 + x / 2] = (byte)((tiles[t][x, y] & 0xF) | ((tiles[t][x + 1, y] & 0xF) << 4));
-               }
-            }
-         }
-         return data;
-      }
-
-      private void LoadPalettes() {
-         palettes = null;
-         if (selectedMap == null) return;
-         var all = AllMapsModel.Create(model);
-         var layout = all[selectedMap.Group]?[selectedMap.Map]?.Layout;
-         if (layout?.PrimaryBlockset == null || layout.SecondaryBlockset == null) return;
-         palettes = BlockmapRun.ReadPalettes(layout.PrimaryBlockset.FullBlocksetModel, layout.SecondaryBlockset.FullBlocksetModel, model.IsFRLG() ? 7 : 6);
-      }
-
-      /// <summary>
-      /// Tiles don't store which palette they use: the blocks do. Count which palette each tile is drawn with, and use the most common one.
-      /// </summary>
-      private void GuessTilePalettes(BlocksetModel blockset) {
-         tilePalette = new int[Math.Max(1, TileCountInTileset)];
-         var counts = new Dictionary<int, int[]>();
-         var tileBase = isSecondary ? constants.PrimaryTiles : 0;
-         try {
-            var blocks = blockset.ReadBlocks(blockset.PrimaryBlocks);
-            foreach (var block in blocks) {
-               for (int i = 0; i < 8; i++) {
-                  var value = block[i * 2] | (block[i * 2 + 1] << 8);
-                  var tile = (value & 0x3FF) - tileBase;
-                  var palette = value >> 12;
-                  if (tile < 0 || tile >= tilePalette.Length) continue;
-                  if (!counts.TryGetValue(tile, out var tally)) counts[tile] = tally = new int[16];
-                  tally[palette]++;
-               }
-            }
-         } catch (Exception) {
-            // no block information: every tile gets the default palette
-         }
-         var defaultPalette = isSecondary ? (model.IsFRLG() ? 7 : 6) : 0;
-         for (int t = 0; t < tilePalette.Length; t++) {
-            tilePalette[t] = defaultPalette;
-            if (!counts.TryGetValue(t, out var tally)) continue;
-            int best = 0;
-            for (int p = 1; p < 16; p++) if (tally[p] > tally[best]) best = p;
-            if (tally[best] > 0) tilePalette[t] = best;
-         }
-      }
-
-      public IReadOnlyList<short> PaletteFor(int tile) {
-         var index = tilePalette != null && tile >= 0 && tile < tilePalette.Length ? tilePalette[tile] : 0;
-         if (palettes != null && index < palettes.Length && palettes[index] != null) return palettes[index];
-         return Enumerable.Range(0, 16).Select(i => (short)(i * 0x0421 * 2)).ToList(); // grayscale fallback
-      }
-
-      private IPixelViewModel RenderTileset() {
-         int rows = (TileCountInTileset + TilesPerRow - 1) / TilesPerRow;
-         var canvas = new CanvasPixelViewModel(TilesPerRow * 8, Math.Max(8, rows * 8)) { SpriteScale = spriteScale };
-         var pixels = new short[canvas.PixelWidth * canvas.PixelHeight];
-         for (int t = 0; t < TileCountInTileset; t++) {
-            var palette = PaletteFor(t);
-            int tx = (t % TilesPerRow) * 8, ty = (t / TilesPerRow) * 8;
-            for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) pixels[(ty + y) * canvas.PixelWidth + tx + x] = palette[tiles[t][x, y] & 0xF];
-         }
-         canvas.Fill(pixels);
-         return canvas;
-      }
-
-      /// <summary>
-      /// Render 'count' tiles from raw 4bpp data as one row (used for the selection preview and each animation frame).
-      /// </summary>
-      public IPixelViewModel RenderTileRow(int firstTile, int count, byte[] data, int dataTileOffset = -1, double scale = 1) {
-         count = Math.Max(1, count);
-         var pixels = new short[count * 8 * 8];
-         if (data != null) {
-            var palette = PaletteFor(firstTile);
-            for (int t = 0; t < count; t++) {
-               int sourceTile = dataTileOffset < 0 ? firstTile + t : dataTileOffset + t;
-               if ((sourceTile + 1) * 32 > data.Length) break;
-               for (int y = 0; y < 8; y++) {
-                  for (int x = 0; x < 8; x++) {
-                     var b = data[sourceTile * 32 + y * 4 + x / 2];
-                     var index = x % 2 == 0 ? b & 0xF : b >> 4;
-                     pixels[y * count * 8 + t * 8 + x] = palette[index];
-                  }
-               }
-            }
-         }
-         return new ReadonlyPixelViewModel(count * 8, 8, pixels) { SpriteScale = scale };
-      }
-
-      public IPixelViewModel RenderFrame(TilesetAnimationEntry entry, int frame) {
-         var data = animations.ReadFrame(entry, frame);
-         return RenderTileRow(entry.FirstTile, entry.TileCount, data, 0);
+         addDoor?.RaiseCanExecuteChanged();
+         removeEntry?.RaiseCanExecuteChanged();
+         importFrames?.RaiseCanExecuteChanged();
+         exportFrames?.RaiseCanExecuteChanged();
       }
    }
+
+   /// <summary>One of the two tilesets (primary or secondary) of the chosen map: its picture, and the outlines drawn over it.</summary>
+   public class TilesetPane : ViewModelCore {
+      private readonly TilesetAnimationTab tab;
+      private const int TilesPerRow = 16;
+
+      public bool IsSecondary { get; }
+      public string Title => IsSecondary ? "Secondary tileset" : "Primary tileset";
+
+      internal MiniBlocksetModel Blockset { get; set; }
+      internal int[][,] Tiles { get; set; }
+      internal byte[] RawTiles { get; set; }
+      internal int[] TilePalette { get; set; }
+      public int TileCount { get; internal set; }
+
+      private IPixelViewModel image = new ReadonlyPixelViewModel(128, 256);
+      public IPixelViewModel Image { get => image; private set { image = value; NotifyPropertyChanged(); } }
+
+      private string description = string.Empty;
+      public string Description { get => description; internal set => Set(ref description, value); }
+
+      private bool isActive;
+      /// <summary>True for the tileset the 'new animation' box currently works on.</summary>
+      public bool IsActive { get => isActive; internal set => Set(ref isActive, value); }
+
+      private double spriteScale = 2;
+      public double SpriteScale {
+         get => spriteScale;
+         set {
+            spriteScale = value;
+            if (image is CanvasPixelViewModel canvas) canvas.SpriteScale = value;
+         }
+      }
+
+      /// <summary>An outline around each animated range (the selected animation stands out).</summary>
+      public ObservableCollection<TileHighlight> Highlights { get; } = new();
+      /// <summary>The tiles the 'new animation' box is set to.</summary>
+      public ObservableCollection<TileHighlight> SelectionRects { get; } = new();
+
+      public TilesetPane(TilesetAnimationTab tab, bool isSecondary) => (this.tab, IsSecondary) = (tab, isSecondary);
+
+      internal void Clear() {
+         Blockset = null;
+         Tiles = null;
+         RawTiles = null;
+         TilePalette = null;
+         TileCount = 0;
+         live = null;
+         liveDirty = false;
+         Image = new ReadonlyPixelViewModel(128, 256);
+         Description = string.Empty;
+         Highlights.Clear();
+         SelectionRects.Clear();
+      }
+
+      private CanvasPixelViewModel live;
+      private bool liveDirty;
+
+      internal void SetImage(IPixelViewModel picture, double scale) {
+         spriteScale = scale;
+         live = picture as CanvasPixelViewModel;
+         Image = picture;
+      }
+
+      /// <summary>Draw the animation's current frame into the tileset picture, the way the game does in video memory.</summary>
+      internal void PaintLive(TilesetAnimationTab owner, TilesetAnimationItem item) {
+         if (live == null) return;
+         var data = item.LiveData;
+         if (data == null) return;
+         var entry = item.Entry;
+         var pixels = live.PixelData;
+         for (int t = 0; t < entry.TileCount; t++) {
+            var tile = entry.FirstTile + t;
+            if (tile < 0 || tile >= TileCount || (t + 1) * 32 > data.Length) continue;
+            var palette = owner.PaletteFor(this, tile);
+            int tx = (tile % TilesPerRow) * 8, ty = (tile / TilesPerRow) * 8;
+            for (int y = 0; y < 8; y++) {
+               for (int x = 0; x < 8; x++) {
+                  var b = data[t * 32 + y * 4 + x / 2];
+                  var index = x % 2 == 0 ? b & 0xF : b >> 4;
+                  pixels[(ty + y) * live.PixelWidth + tx + x] = palette[index];
+               }
+            }
+         }
+         liveDirty = true;
+      }
+
+      internal void FlushLive() {
+         if (!liveDirty || live == null) return;
+         liveDirty = false;
+         live.Fill(live.PixelData);
+      }
+
+      /// <summary>Rectangles (one per tileset row) covering 'count' consecutive tiles.</summary>
+      internal static IEnumerable<(double x, double y, double width, double height)> Segments(int first, int count, int tileCount, double scale) {
+         int tile = first, remaining = count;
+         while (remaining > 0 && tile < tileCount) {
+            if (tile < 0) { remaining += tile; tile = 0; continue; }
+            int column = tile % TilesPerRow;
+            int inRow = Math.Min(Math.Min(remaining, TilesPerRow - column), tileCount - tile);
+            yield return (column * 8 * scale, tile / TilesPerRow * 8 * scale, inRow * 8 * scale, 8 * scale);
+            tile += inRow;
+            remaining -= inRow;
+         }
+      }
+
+      internal void SetHighlights(IReadOnlyList<TilesetAnimationItem> items, TilesetAnimationItem selected, double scale) {
+         Highlights.Clear();
+         foreach (var item in items) {
+            if (item == selected) continue;
+            foreach (var (x, y, width, height) in Segments(item.Entry.FirstTile, item.Entry.TileCount, TileCount, scale)) Highlights.Add(new TileHighlight(x, y, width, height, false));
+         }
+         if (selected != null && items.Contains(selected)) {
+            foreach (var (x, y, width, height) in Segments(selected.Entry.FirstTile, selected.Entry.TileCount, TileCount, scale)) Highlights.Add(new TileHighlight(x, y, width, height, true));
+         }
+      }
+
+      internal void SetSelection(int first, int count, double scale) {
+         SelectionRects.Clear();
+         if (first < 0) return;
+         foreach (var (x, y, width, height) in Segments(first, count, TileCount, scale)) SelectionRects.Add(new TileHighlight(x, y, width, height, true));
+      }
+   }
+
+   /// <summary>A rectangle drawn over a tileset picture (scaled pixels).</summary>
+   public record TileHighlight(double X, double Y, double Width, double Height, bool Selected);
 
    public record MapOption(int Group, int Map, string Name) {
       public string Label => $"{Group}-{Map} {Name}";
@@ -810,22 +1029,39 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
    public class TilesetAnimationItem : ViewModelCore {
       private readonly TilesetAnimationTab tab;
+      public TilesetPane Pane { get; }
       public TilesetAnimationEntry Entry { get; private set; }
       public ObservableCollection<TilesetAnimationFrame> Frames { get; } = new();
+      private List<byte[]> rawFrames = new();
 
-      public string Label => $"#{Entry.Index + 1}: tiles {Entry.FirstTile}-{Entry.FirstTile + Entry.TileCount - 1}, {Entry.FrameCount} frame{(Entry.FrameCount == 1 ? "" : "s")}";
-      public string Details => $"Changes {TilesetAnimationTab.DescribeSpeed(Entry.Timer)}. Frames at {Entry.FramesAddress:X6}.";
+      public bool IsBuiltIn => Entry.IsBuiltIn;
+      /// <summary>The speed and the number of frames of the game's own animations are decided by its code.</summary>
+      public bool IsEditable => !Entry.IsBuiltIn;
+
+      public string Header => $"{Pane.Title} - {(IsBuiltIn ? "built into the game" : "added with HexManiac")}";
+      public string Label => IsBuiltIn
+         ? $"{Entry.Name}: tiles {Entry.FirstTile}-{Entry.FirstTile + Entry.TileCount - 1}, {Entry.FrameCount} frame{(Entry.FrameCount == 1 ? "" : "s")}"
+         : $"#{Entry.Index + 1}: tiles {Entry.FirstTile}-{Entry.FirstTile + Entry.TileCount - 1}, {Entry.FrameCount} frame{(Entry.FrameCount == 1 ? "" : "s")}";
+      public string Details => $"Changes {TilesetAnimationTab.DescribeSpeed(Entry.Timer)}. Frames at {Entry.FramesAddress:X6}." + (IsBuiltIn ? " Speed and frame count are set by the game's code." : string.Empty);
 
       private IPixelViewModel baseTiles;
       /// <summary>What these tiles look like in the tileset itself (frame 0 of the animation replaces them in game).</summary>
       public IPixelViewModel BaseTiles { get => baseTiles; private set { baseTiles = value; NotifyPropertyChanged(); } }
 
-      public int Speed { get => Entry.Timer; set { if (value != Entry.Timer) tab.SetEntrySpeed(this, value); } }
+      public int Speed { get => Entry.Timer; set { if (IsEditable && value != Entry.Timer) tab.SetEntrySpeed(this, value); } }
       public string SpeedText => TilesetAnimationTab.DescribeSpeed(Entry.Timer);
-      public int FrameCount { get => Entry.FrameCount; set { if (value != Entry.FrameCount) tab.SetEntryFrameCount(this, value); } }
+      public int FrameCount { get => Entry.FrameCount; set { if (IsEditable && value != Entry.FrameCount) tab.SetEntryFrameCount(this, value); } }
 
       private double spriteScale = 2;
-      public double SpriteScale { get => spriteScale; set { Set(ref spriteScale, value); foreach (var frame in Frames) frame.SpriteScale = value; NotifyPropertyChanged(nameof(LiveFrame)); } }
+      public double SpriteScale {
+         get => spriteScale;
+         set {
+            Set(ref spriteScale, value);
+            foreach (var frame in Frames) frame.SpriteScale = value;
+            if (baseTiles is TilesetAnimationFrame wrapped) wrapped.SpriteScale = value;
+            NotifyPropertyChanged(nameof(LiveFrame));
+         }
+      }
 
       private bool selected;
       public bool Selected { get => selected; set => TryUpdate(ref selected, value); }
@@ -833,24 +1069,34 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private int liveIndex;
       /// <summary>The frame the game would be showing right now (the view advances this with Tick).</summary>
       public IPixelViewModel LiveFrame => Frames.Count == 0 ? BaseTiles : Frames[Math.Min(liveIndex, Frames.Count - 1)];
-      public void Tick(int tick) {
-         if (Frames.Count < 2) return;
-         if ((tick & ((1 << Entry.Timer) - 1)) != 0) return;
+      /// <summary>The raw 4bpp tiles of the frame being shown.</summary>
+      public byte[] LiveData => liveIndex < rawFrames.Count ? rawFrames[liveIndex] : null;
+
+      /// <summary>Returns true when the animation moved on to its next frame.</summary>
+      public bool Tick(int tick) {
+         if (Frames.Count < 2) return false;
+         if ((tick & ((1 << Entry.Timer) - 1)) != 0) return false;
          liveIndex = (liveIndex + 1) % Frames.Count;
          NotifyPropertyChanged(nameof(LiveFrame));
+         return true;
       }
 
-      public TilesetAnimationItem(TilesetAnimationEntry entry, TilesetAnimationTab tab) {
+      public TilesetAnimationItem(TilesetAnimationEntry entry, TilesetAnimationTab tab, TilesetPane pane) {
          this.tab = tab;
+         Pane = pane;
          Refresh(entry, tab);
       }
 
       public void Refresh(TilesetAnimationEntry entry, TilesetAnimationTab tab) {
          Entry = entry;
          Frames.Clear();
-         for (int f = 0; f < entry.FrameCount; f++) Frames.Add(new TilesetAnimationFrame(this, f, tab.RenderFrame(entry, f)) { SpriteScale = spriteScale });
-         BaseTiles = tab.RenderTileRow(entry.FirstTile, entry.TileCount, null, scale: spriteScale);
-         liveIndex = 0;
+         rawFrames = new List<byte[]>();
+         for (int f = 0; f < entry.FrameCount; f++) {
+            Frames.Add(new TilesetAnimationFrame(this, f, tab.RenderFrame(Pane, entry, f)) { SpriteScale = spriteScale });
+            rawFrames.Add(tab.ReadRawFrame(entry, f));
+         }
+         BaseTiles = new TilesetAnimationFrame(this, -1, tab.RenderTileRow(Pane, entry.FirstTile, entry.TileCount, Pane.RawTiles)) { SpriteScale = spriteScale };
+         liveIndex = Frames.Count == 0 ? 0 : entry.Phase % Frames.Count;
          NotifyPropertyChanged(nameof(LiveFrame));
          NotifyPropertyChanged(nameof(Label));
          NotifyPropertyChanged(nameof(Details));
@@ -864,9 +1110,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
    public class DoorItem : ViewModelCore {
       private readonly TilesetAnimationTab tab;
+      public TilesetPane Pane { get; }
       public DoorEntry Entry { get; private set; }
       public ObservableCollection<TilesetAnimationFrame> Frames { get; } = new();
-      public string Label => $"Door on block {Entry.Metatile} ({Entry.SizeName}, {Entry.SoundName} sound)";
+      public string Label => $"{Pane.Title}: door on block {Entry.Metatile} ({Entry.SizeName}, {Entry.SoundName} sound)";
       public string Details => $"Frames at {Entry.TilesAddress:X6}, palettes at {Entry.PalettesAddress:X6}.";
 
       private IPixelViewModel block;
@@ -895,8 +1142,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          NotifyPropertyChanged(nameof(LiveFrame));
       }
 
-      public DoorItem(DoorEntry entry, TilesetAnimationTab tab) {
+      public DoorItem(DoorEntry entry, TilesetAnimationTab tab, TilesetPane pane) {
          this.tab = tab;
+         Pane = pane;
          Refresh(entry, tab);
       }
 

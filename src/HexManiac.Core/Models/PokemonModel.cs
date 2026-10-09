@@ -203,6 +203,7 @@ namespace HavenSoft.HexManiac.Core.Models {
             foreach (var list in metadata.Lists) {
                lists[list.Name] = new ValidationList(list.Hash, list, list.Comments);
             }
+            romScriptLines = null; // a script parser may have asked for commands before the ROM's own were loaded
             var anchorHashes = new Dictionary<string, string>();
 
             // load MatchedWords before loading NamedAnchors, since some tables may have length based on constants (like type names)
@@ -1796,7 +1797,7 @@ namespace HavenSoft.HexManiac.Core.Models {
       public override IReadOnlyList<Code.IScriptLine> GetScriptLines(IReadOnlyList<Code.IScriptLine> sharedLines) {
          if (romScriptLines != null && romScriptLinesSource == sharedLines) return romScriptLines;
          romScriptLinesSource = sharedLines;
-         if (!TryGetList(ScriptMacroListName, out var list) || list == null || list.Count == 0) return romScriptLines = sharedLines;
+         if (!TryGetList(ScriptMacroListName, out var list) || list == null || list.Count == 0) return sharedLines; // not cached: the list may still be loading
          var extra = new List<Code.IScriptLine>();
          foreach (var raw in list) {
             var line = raw?.Trim();

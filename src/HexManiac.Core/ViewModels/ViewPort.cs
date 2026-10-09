@@ -2578,8 +2578,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          } else if (editor.Equals("sprites", StringComparison.OrdinalIgnoreCase) || editor.Equals("gallery", StringComparison.OrdinalIgnoreCase)) {
             OpenSpriteGalleryTab();
          } else if (editor.Equals("animations", StringComparison.OrdinalIgnoreCase) || editor.Equals("tiles", StringComparison.OrdinalIgnoreCase)) {
-            var map = MapEditor?.PrimaryMap;
-            OpenTilesetAnimationTab(map?.MapID / 1000 ?? 0, map?.MapID % 1000 ?? 0, false);
+            OpenTilesetAnimationTab(TilesetAnimationTab.DefaultGroup, TilesetAnimationTab.DefaultMap, false);
          } else {
             RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites' or 'editor:animations'.");
          }

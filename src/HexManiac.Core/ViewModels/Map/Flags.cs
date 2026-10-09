@@ -354,6 +354,19 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          return 1;
       }
 
+      /// <summary>
+      /// True for pokeemerald-expansion ROMs. They differ from the vanilla games in ways the event templates care about:
+      /// trainers have a 52-byte record and a unified trainerbattle, move tutors are given a move id (not a tutor-table index),
+      /// and the in-game trade specials read the trade number from script variable 0x8005.
+      /// </summary>
+      public static bool IsExpansion(IDataModel model) => IsUnifiedTrainerBattle(model);
+
+      /// <summary>True for ROMs (pokeemerald-expansion 1.17+) whose trainerbattle command is the unified 41-byte form.</summary>
+      public static bool IsUnifiedTrainerBattle(IDataModel model) {
+         var trainers = model.GetTableModel(HardcodeTablesModel.TrainerTableName, null);
+         return trainers != null && TrainerLayout.For(trainers.Run) != TrainerLayout.Vanilla;
+      }
+
       public static ISet<int> GetUsedTrainerFlags(IDataModel model, ScriptParser parser) {
          return GetUsedTrainerFlags(model, GetAllScriptSpots(model, parser, GetAllTopLevelScripts(model), TrainerBattleCommands));
       }
@@ -363,9 +376,23 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var trainerFlags = new HashSet<int>();
 
          // check all scripts
+         var expansionLayout = IsUnifiedTrainerBattle(model);
          foreach (var spot in trainerBattleSpots) {
-            var trainerFlag = model.ReadMultiByteValue(spot.Address + 2, 2);
-            trainerFlags.Add(trainerFlag);
+            if (expansionLayout) {
+               // 5C flags localIdA trainerA: ... localIdB trainerB: ... (trainer B only matters for two-trainer battles)
+               foreach (var id in new[] { model.ReadMultiByteValue(spot.Address + 3, 2), model.ReadMultiByteValue(spot.Address + 18, 2) }) if (id > 0) trainerFlags.Add(id);
+            } else {
+               trainerFlags.Add(model.ReadMultiByteValue(spot.Address + 2, 2));
+            }
+         }
+
+         // check the Ruby/Sapphire/Emerald rematch table: base trainer and its rematches (base:data.trainers.stats rematch1:... rematch4:...)
+         var rematchesRSE = model.GetTableModel(HardcodeTablesModel.RematchTableRSE);
+         if (rematchesRSE != null) {
+            foreach (var rematch in rematchesRSE) {
+               if (!rematch.TryGetValue("base", out var baseTrainer) || !trainerFlags.Contains(baseTrainer)) continue;
+               for (int i = 1; i <= 4; i++) if (rematch.TryGetValue("rematch" + i, out var later) && later > 0) trainerFlags.Add(later);
+            }
          }
 
          // check rematch table
@@ -498,9 +525,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       public static ISet<int> GetTrainerFlagUsages(IDataModel model, ScriptParser parser, int flag) {
          var flagUsages = new HashSet<int>();
+         var trainerOffset = IsUnifiedTrainerBattle(model) ? 3 : 2; // the unified command has a flags byte and an object id before the trainer
          foreach (var spot in GetAllScriptSpots(model, parser, GetAllTopLevelScripts(model), 0x5C)) {
-            var trainerFlag = model.ReadMultiByteValue(spot.Address + 2, 2);
-            if (trainerFlag == flag) flagUsages.Add(spot.Address + 2);
+            var trainerFlag = model.ReadMultiByteValue(spot.Address + trainerOffset, 2);
+            if (trainerFlag == flag) flagUsages.Add(spot.Address + trainerOffset);
          }
          // TODO need to check the rematch table
          return flagUsages;
@@ -508,6 +536,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       public static IReadOnlyDictionary<int, TrainerPreference> GetTrainerPreference(IDataModel model, ScriptParser parser) {
          var trainers = model.GetTableModel(HardcodeTablesModel.TrainerTableName);
+         var trainerOffset = IsUnifiedTrainerBattle(model) ? 3 : 2;
 
          var classHistogram = new Dictionary<int, Dictionary<int, int>>();
          var musicHistogram = new Dictionary<int, Dictionary<int, int>>();
@@ -522,8 +551,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             if (!musicHistogram.TryGetValue(graphics, out var desiredMusic)) musicHistogram[graphics] = desiredMusic = new();
             if (!spriteHistogram.TryGetValue(graphics, out var desiredSprite)) spriteHistogram[graphics] = desiredSprite = new();
             foreach (var spot in GetAllScriptSpots(model, parser, new[] { element.GetAddress("script") }, 0x5C)) {
-               var trainerFlag = model.ReadMultiByteValue(spot.Address + 2, 2);
-               if (trainerFlag >= trainers.Count) continue;
+               var trainerFlag = model.ReadMultiByteValue(spot.Address + trainerOffset, 2);
+               if (trainerFlag <= 0 || trainerFlag >= trainers.Count) continue;
                var trainer = trainers[trainerFlag];
                var pref = new TrainerPreference(trainer.GetValue("class"), trainer.GetValue("introMusicAndGender"), trainer.GetValue("sprite"));
 

@@ -47,6 +47,13 @@ namespace HavenSoft.HexManiac.WPF.Controls {
          playerStream = null;
       }
 
+      private void SongNameKeyDown(object sender, KeyEventArgs e) {
+         if (e.Key != Key.Enter || sender is not System.Windows.Controls.TextBox box) return;
+         // commit the name now: the binding updates when the box loses focus
+         box.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+         e.Handled = true;
+      }
+
       private void CryDoubleClick(object sender, MouseButtonEventArgs e) {
          if (ViewModel?.PlayCry.CanExecute(null) == true) ViewModel.PlayCry.Execute(null);
       }

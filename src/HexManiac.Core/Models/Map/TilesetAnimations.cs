@@ -46,6 +46,11 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
       public int FramesAddress { get; init; }  // the `mat` run (table of frame pointers)
       public int EntryAddress { get; init; }
       public int FrameDelay => 1 << Timer;
+      /// <summary>True for the game's own (code driven) animations: water, flowers... Their speed and frame count are fixed by the game code, but their frames can be edited.</summary>
+      public bool IsBuiltIn { get; init; }
+      public string Name { get; init; }
+      /// <summary>How many frames this animation is ahead by (the second steam plume of Lavaridge runs 2 frames ahead of the first).</summary>
+      public int Phase { get; init; }
    }
 
    /// <summary>
@@ -124,6 +129,53 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
             });
          }
          return results;
+      }
+
+      /// <summary>
+      /// The table that describes the game's own tileset animations (written into the ROM by the build, see BuiltInTableName):
+      /// tileset<> frames<> frameCount:: firstTile:: tileCount. timerShift. phase. padding. name""32
+      /// </summary>
+      public const string BuiltInTableName = "data.maps.tilesets.builtinanimations";
+      private const int BuiltInNameOffset = 16, BuiltInNameLength = 32;
+
+      public bool HasBuiltInTable => model.GetTable(BuiltInTableName) != null;
+
+      /// <summary>
+      /// The animations the game's own code plays for the tileset that starts at 'tilesetStart'. Empty when the ROM has no such table.
+      /// </summary>
+      public IReadOnlyList<TilesetAnimationEntry> ReadBuiltInEntries(int tilesetStart, bool isSecondary, TilesetAnimationConstants constants) {
+         var results = new List<TilesetAnimationEntry>();
+         var table = model.GetTable(BuiltInTableName);
+         if (table == null || table.ElementLength < BuiltInNameOffset + 1) return results;
+         int tileBase = isSecondary ? constants.PrimaryTiles : 0;
+         for (int i = 0; i < table.ElementCount; i++) {
+            var entry = table.Start + table.ElementLength * i;
+            if (model.ReadPointer(entry) != tilesetStart) continue;
+            var frames = model.ReadPointer(entry + 4);
+            var frameCount = model.ReadMultiByteValue(entry + 8, 2);
+            var tileCount = model[entry + 12];
+            if (frames < 0 || frameCount < 1 || tileCount < 1) continue;
+            results.Add(new TilesetAnimationEntry {
+               IsBuiltIn = true,
+               Index = i,
+               EntryAddress = entry,
+               FramesAddress = frames,
+               FrameCount = frameCount,
+               FirstTile = model.ReadMultiByteValue(entry + 10, 2) - tileBase,
+               TileCount = tileCount,
+               Timer = Math.Min(MaxTimer, (int)model[entry + 13]),
+               Phase = model[entry + 14],
+               Name = ReadName(entry + BuiltInNameOffset),
+            });
+         }
+         return results;
+      }
+
+      private string ReadName(int start) {
+         int length = 0;
+         while (length < BuiltInNameLength && start + length < model.Count && model[start + length] != 0xFF) length++;
+         if (length == 0) return string.Empty;
+         return PCSString.Convert(model.RawData, start, length).Trim('"');
       }
 
       /// <summary>
@@ -215,14 +267,18 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          var frameAddress = model.ReadPointer(entry.FramesAddress + 4 * frame);
          var length = 32 * entry.TileCount;
          if (frameAddress < 0 || frameAddress + length > model.Count) return -1;
-         if (!TryGetTable(tilesetStart, out _, out var baseName)) return frameAddress;
+         // the tileset's palettes are named after the tileset, whether it uses a HexManiac table or only the game's own animations
+         if (!TryGetTable(tilesetStart, out _, out var baseName)) baseName = AnchorPrefix + $"t{tilesetStart:x6}";
          var token = tokenFactory();
          var hint = EnsurePaletteAnchor(tilesetStart, baseName, token);
          if (hint == null) return frameAddress;
          var existing = model.GetNextRun(frameAddress);
          if (existing is ISpriteRun sprite && sprite.Start == frameAddress && sprite.SpriteFormat.PaletteHint == hint && sprite.PointerSources.Count > 0) return frameAddress;
          var sources = existing.Start == frameAddress && existing.PointerSources != null ? existing.PointerSources : SortedSpan<int>.None;
-         sources = sources.Add1(entry.FramesAddress + 4 * frame);
+         // every slot of the frame table that points at this frame (the flower animation reuses its first frame)
+         for (int f = 0; f < entry.FrameCount; f++) {
+            if (model.ReadPointer(entry.FramesAddress + 4 * f) == frameAddress) sources = sources.Add1(entry.FramesAddress + 4 * f);
+         }
          if (existing.Start != frameAddress) model.ClearFormat(token, frameAddress, length);
          model.ObserveRunWritten(token, new TilesetRun(new TilesetFormat(4, entry.TileCount, -1, hint), model, frameAddress, sources));
          return frameAddress;

@@ -144,5 +144,48 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(2, table.ElementCount);
          Assert.Equal(1, doors.TerminatorIndex(table));
       }
+
+      [Fact]
+      public void BuiltInEntries_AreReadFromTheBuildTable() {
+         // two rows of: tileset<> frames<> frameCount:: firstTile:: tileCount. timerShift. phase. padding. name""32
+         const int table = 0x700, secondTileset = 0x40;
+         for (int row = 0; row < 2; row++) {
+            var start = table + row * 48;
+            Model.WritePointer(Token, start, row == 0 ? TilesetStart : secondTileset);
+            Model.WritePointer(Token, start + 4, 0x300 + row * 0x20);
+            Model.WriteMultiByteValue(start + 8, 2, Token, 2);
+            Model.WriteMultiByteValue(start + 10, 2, Token, row == 0 ? 432 : 512 + 96);
+            Model[start + 12] = 2;
+            Model[start + 13] = (byte)(row == 0 ? 3 : 4);
+            Model[start + 14] = (byte)row;
+            var name = row == 0 ? "Water" : "Steam";
+            var text = Model.TextConverter.Convert(name, out var _);
+            for (int i = 0; i < 32; i++) Model[start + 16 + i] = i < text.Count && text[i] != 0xFF ? text[i] : (byte)0xFF;
+            Model.WritePointer(Token, 0x300 + row * 0x20, 0x400 + row * 0x80);
+            Model.WritePointer(Token, 0x304 + row * 0x20, 0x440 + row * 0x80);
+         }
+         for (int i = 0; i < 64; i++) Model[0x440 + i] = (byte)(i + 1);
+         ViewPort.Edit($"@{table:X6} ^{TilesetAnimations.BuiltInTableName}[tileset<> frames<> frameCount:: firstTile:: tileCount. timerShift. phase. padding. name\"\"32]2 ");
+         var animations = CreateAnimations();
+         TilesetAnimationConstants.TryRead(Model, out var constants);
+
+         var primary = animations.ReadBuiltInEntries(TilesetStart, false, constants);
+         var secondary = animations.ReadBuiltInEntries(secondTileset, true, constants);
+
+         Assert.True(animations.HasBuiltInTable);
+         var water = Assert.Single(primary);
+         Assert.True(water.IsBuiltIn);
+         Assert.Equal("Water", water.Name);
+         Assert.Equal(432, water.FirstTile);
+         Assert.Equal(2, water.TileCount);
+         Assert.Equal(2, water.FrameCount);
+         Assert.Equal(3, water.Timer);
+         Assert.Equal(0, water.Phase);
+         Assert.Equal(Enumerable.Range(0, 64).Select(i => (byte)(i + 1)), animations.ReadFrame(water, 1));
+         var steam = Assert.Single(secondary);
+         Assert.Equal("Steam", steam.Name);
+         Assert.Equal(96, steam.FirstTile);      // secondary tilesets count from the end of the primary tiles
+         Assert.Equal(1, steam.Phase);
+      }
    }
 }

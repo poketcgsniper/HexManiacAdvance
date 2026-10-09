@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -145,7 +146,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          if (trainers != null && trainerClasses != null) {
             var options = model.GetOptions(HardcodeTablesModel.TrainerClassNamesTable);
             for (int i = 0; i < trainers.Count; i++) {
-               trainerOptions.Add(ObjectEventViewModel.CreateOption(options, i, trainers[i].GetValue(1), trainers[i].GetStringValue("name")));
+               trainerOptions.Add(ObjectEventViewModel.CreateOption(options, i, trainers[i].TryGetValue("class", out var trainerClass) ? trainerClass : trainers[i].GetValue(1), trainers[i].GetStringValue("name")));
             }
          }
          TrainerOptions.Update(trainerOptions, TrainerOptions.SelectedIndex);
@@ -204,9 +205,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          set {
             Set(ref trainerGraphics, value, old => {
                if (!TrainerPreferences.TryGetValue(trainerGraphics, out var pref)) pref = new(0, 0, 0);
-               var spriteAddress = model.GetTableModel(HardcodeTablesModel.TrainerSpritesName)[pref.Sprite].GetAddress("sprite");
-               var spriteRun = model.GetNextRun(spriteAddress) as ISpriteRun;
-               TrainerSprite = ReadonlyPixelViewModel.Create(model, spriteRun, true);
+               var spriteAddress = GetTrainerSpriteAddress(model, pref.Sprite);
+               var spriteRun = spriteAddress >= 0 && spriteAddress < model.Count ? model.GetNextRun(spriteAddress) as ISpriteRun : null;
+               TrainerSprite = spriteRun == null ? null : ReadonlyPixelViewModel.Create(model, spriteRun, true);
                NotifyPropertyChanged(nameof(TrainerSprite));
                UpdateObjectTemplateImage();
             });
@@ -221,11 +222,23 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       public IPixelViewModel TrainerSprite { get; private set; }
 
+      /// <summary>True when the trainer template has everything it needs: the pokedex tables (vanilla) or the species stats (expansion).</summary>
+      public bool CanCreateTrainer(out string reason) {
+         reason = null;
+         if (UseExistingTrainer) return true;
+         if (Flags.IsUnifiedTrainerBattle(model)) {
+            if (model.GetTable(HardcodeTablesModel.PokemonStatsTable) == null) reason = $"Cannot create trainer without the species table {HardcodeTablesModel.PokemonStatsTable}.";
+            return reason == null;
+         }
+         var dexName = UseNationalDex ? HardcodeTablesModel.NationalDexTableName : HardcodeTablesModel.RegionalDexTableName;
+         if (model.GetTable(dexName) == null) reason = $"Cannot create trainer without pokedex table {dexName}.";
+         return reason == null;
+      }
+
       // TODO use all-caps name or mixed-caps name depending on other trainers in the table
       // TODO use reference file to get names and before/win/after text
       public void CreateTrainer(ObjectEventViewModel objectEventModel, ModelDelta token) {
-         const int ChosenTypeOddsMultiplier = 100;
-
+         var expansion = Flags.IsUnifiedTrainerBattle(model);
          var trainers = model.GetTableModel(HardcodeTablesModel.TrainerTableName, () => token);
          var trainerFlag = 1;
          if (UseExistingTrainer) {
@@ -233,83 +246,70 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             UsedTrainerFlags.Add(trainerFlag);
          } else {
             // part 1: the team
-            var availablePokemon = new List<int>();
-            var dexName = HardcodeTablesModel.RegionalDexTableName;
-            if (useNationalDex) dexName = HardcodeTablesModel.NationalDexTableName;
-            var pokedex = model.GetTableModel(dexName, () => token);
-            var pokestats = model.GetTableModel(HardcodeTablesModel.PokemonStatsTable, () => token);
-            for (int i = 1; i < pokedex.Count; i++) {
-               if (pokedex[i - 1].GetValue(0) > maxPokedex) continue;
-               if (MinLevel is { } minLevels && minLevels.TryGetValue(i, out var level) && level > maxLevel) continue;
-               availablePokemon.Add(i);
-               if (pokestats != null) {
-                  if (pokestats[i].GetValue("type1") == preferredType || pokestats[i].GetValue("type2") == preferredType) {
-                     for (int j = 0; j < ChosenTypeOddsMultiplier; j++) availablePokemon.Add(i);
-                  }
-               }
-            }
-
             var teamSize = rnd.Next(3) + 1;
-            var teamStart = model.FindFreeSpace(model.FreeSpaceStart, 8 * teamSize);
-            if (availablePokemon.Count == 0) availablePokemon.Add(1);
-            for (int i = 0; i < teamSize; i++) {
-               // ivSpread: level: mon: padding:
-               var pokemon = availablePokemon[rnd.Next(availablePokemon.Count)];
-               var level = maxLevel;
-               while (level > maxLevel - 5 && rnd.Next(2) == 1) level--;
-               model.WriteMultiByteValue(teamStart + i * 8 + 0, 2, token, 0);
-               model.WriteMultiByteValue(teamStart + i * 8 + 2, 2, token, level);
-               model.WriteMultiByteValue(teamStart + i * 8 + 4, 2, token, pokemon);
-               model.WriteMultiByteValue(teamStart + i * 8 + 6, 2, token, 0);
-            }
+            var availablePokemon = expansion ? GetExpansionPokemonPool() : GetVanillaPokemonPool(token);
 
             // part 2: the trainer
             while (UsedTrainerFlags.Contains(trainerFlag)) trainerFlag++;
+            if (trainerFlag >= trainers.Count) {
+               throw new InvalidOperationException("Every trainer in the trainer table is already in use.");
+            }
             usedTrainerFlags.Add(trainerFlag);
 
             var trainer = trainers[trainerFlag];
-            // structType. class. introMusicAndGender. sprite. name""12 item1: item2: item3: item4: doubleBattle:: ai:: pokemonCount:: pokemon<>
-            trainer.SetValue("structType", 0);
-            trainer.SetStringValue("name", "NAME ME");
-            trainer.SetValue("item1", 0);
-            trainer.SetValue("item2", 0);
-            trainer.SetValue("item3", 0);
-            trainer.SetValue("item4", 0);
-            trainer.SetValue("doubleBattle", 0);
-            trainer.SetValue("ai", 0);
-            trainer.SetValue("pokemonCount", teamSize);
-            trainer.SetAddress("pokemon", teamStart);
             if (!TrainerPreferences.TryGetValue(trainerGraphics, out var pref)) pref = new(0, 0, 0);
-            trainer.SetValue("class", pref.TrainerClass);
-            trainer.SetValue("introMusicAndGender", pref.MusicAndGender);
-            trainer.SetValue("sprite", pref.Sprite);
+            if (expansion) {
+               var teamStart = WriteExpansionTeam(token, teamSize, availablePokemon);
+               WriteExpansionTrainer(token, trainer, trainerFlag, pref, teamSize, teamStart);
+            } else {
+               var teamStart = WriteVanillaTeam(token, teamSize, availablePokemon);
+               // structType. class. introMusicAndGender. sprite. name""12 item1: item2: item3: item4: doubleBattle:: ai:: pokemonCount:: pokemon<>
+               trainer.SetValue("structType", 0);
+               trainer.SetStringValue("name", "NAME ME");
+               trainer.SetValue("item1", 0);
+               trainer.SetValue("item2", 0);
+               trainer.SetValue("item3", 0);
+               trainer.SetValue("item4", 0);
+               trainer.SetValue("doubleBattle", 0);
+               trainer.SetValue("ai", 0);
+               trainer.SetValue("pokemonCount", teamSize);
+               trainer.SetAddress("pokemon", teamStart);
+               trainer.SetValue("class", pref.TrainerClass);
+               trainer.SetValue("introMusicAndGender", pref.MusicAndGender);
+               trainer.SetValue("sprite", pref.Sprite);
+            }
          }
 
          // part 3: the script
-         /*
-              trainerbattle 00 102 0 <before> <during>
-              loadpointer 0 <after>
-              callstd 6
-              end
-          */
-         //       2                  6       10          16
-         // 5C 00 trainerFlag: 00 00 <before> <win> 0F 00 <after> 09 06 02
          var before = WriteText(token, "Let's battle!");
          var win = WriteText(token, "You Win!");
          var after = WriteText(token, "Post-battle chat!");
-         var scriptStart = model.FindFreeSpace(model.FreeSpaceStart, 24);
-         token.ChangeData(model, scriptStart, "5C 00 00 00 00 00 00 00 00 00 00 00 00 00 0F 00 00 00 00 00 09 06 02 00".ToByteArray());
-         model.WriteMultiByteValue(scriptStart + 2, 2, token, trainerFlag);
-         model.WritePointer(token, scriptStart + 6, before);
-         model.WritePointer(token, scriptStart + 10, win);
-         model.WritePointer(token, scriptStart + 16, after);
-         model.ObserveRunWritten(token, new PointerRun(scriptStart + 6));
-         model.ObserveRunWritten(token, new PointerRun(scriptStart + 10));
-         model.ObserveRunWritten(token, new PointerRun(scriptStart + 16));
-         var factory = new PCSRunContentStrategy();
-         factory.TryAddFormatAtDestination(model, token, scriptStart + 6, before, default, default, default);
-         factory.TryAddFormatAtDestination(model, token, scriptStart + 10, win, default, default, default);
-         factory.TryAddFormatAtDestination(model, token, scriptStart + 16, after, default, default, default);
+         int scriptStart;
+         if (expansion) {
+            scriptStart = WriteExpansionTrainerScript(token, trainerFlag, before, win, after);
+         } else {
+            /*
+                 trainerbattle 00 102 0 <before> <during>
+                 loadpointer 0 <after>
+                 callstd 6
+                 end
+             */
+            //       2                  6       10          16
+            // 5C 00 trainerFlag: 00 00 <before> <win> 0F 00 <after> 09 06 02
+            scriptStart = model.FindFreeSpace(model.FreeSpaceStart, 24);
+            token.ChangeData(model, scriptStart, "5C 00 00 00 00 00 00 00 00 00 00 00 00 00 0F 00 00 00 00 00 09 06 02 00".ToByteArray());
+            model.WriteMultiByteValue(scriptStart + 2, 2, token, trainerFlag);
+            model.WritePointer(token, scriptStart + 6, before);
+            model.WritePointer(token, scriptStart + 10, win);
+            model.WritePointer(token, scriptStart + 16, after);
+            model.ObserveRunWritten(token, new PointerRun(scriptStart + 6));
+            model.ObserveRunWritten(token, new PointerRun(scriptStart + 10));
+            model.ObserveRunWritten(token, new PointerRun(scriptStart + 16));
+            var factory = new PCSRunContentStrategy();
+            factory.TryAddFormatAtDestination(model, token, scriptStart + 6, before, default, default, default);
+            factory.TryAddFormatAtDestination(model, token, scriptStart + 10, win, default, default, default);
+            factory.TryAddFormatAtDestination(model, token, scriptStart + 16, after, default, default, default);
+         }
 
          // part 4: the event
          objectEventModel.Graphics = trainerGraphics;
@@ -324,6 +324,157 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
          model.ObserveRunWritten(token, new XSERun(scriptStart, SortedSpan.One(objectEventModel.Start + 16)));
       }
+
+      #region Vanilla trainer data
+
+      private List<int> GetVanillaPokemonPool(ModelDelta token) {
+         const int ChosenTypeOddsMultiplier = 100;
+         var availablePokemon = new List<int>();
+         var dexName = HardcodeTablesModel.RegionalDexTableName;
+         if (useNationalDex) dexName = HardcodeTablesModel.NationalDexTableName;
+         var pokedex = model.GetTableModel(dexName, () => token);
+         var pokestats = model.GetTableModel(HardcodeTablesModel.PokemonStatsTable, () => token);
+         for (int i = 1; i < pokedex.Count; i++) {
+            if (pokedex[i - 1].GetValue(0) > maxPokedex) continue;
+            if (MinLevel is { } minLevels && minLevels.TryGetValue(i, out var level) && level > maxLevel) continue;
+            availablePokemon.Add(i);
+            if (pokestats != null) {
+               if (pokestats[i].GetValue("type1") == preferredType || pokestats[i].GetValue("type2") == preferredType) {
+                  for (int j = 0; j < ChosenTypeOddsMultiplier; j++) availablePokemon.Add(i);
+               }
+            }
+         }
+         if (availablePokemon.Count == 0) availablePokemon.Add(1);
+         return availablePokemon;
+      }
+
+      private int WriteVanillaTeam(ModelDelta token, int teamSize, IReadOnlyList<int> availablePokemon) {
+         var teamStart = model.FindFreeSpace(model.FreeSpaceStart, 8 * teamSize);
+         for (int i = 0; i < teamSize; i++) {
+            // ivSpread: level: mon: padding:
+            var pokemon = availablePokemon[rnd.Next(availablePokemon.Count)];
+            var level = maxLevel;
+            while (level > maxLevel - 5 && rnd.Next(2) == 1) level--;
+            model.WriteMultiByteValue(teamStart + i * 8 + 0, 2, token, 0);
+            model.WriteMultiByteValue(teamStart + i * 8 + 2, 2, token, level);
+            model.WriteMultiByteValue(teamStart + i * 8 + 4, 2, token, pokemon);
+            model.WriteMultiByteValue(teamStart + i * 8 + 6, 2, token, 0);
+         }
+         return teamStart;
+      }
+
+      #endregion
+
+      #region Expansion trainer data
+
+      // the expansion's species ids follow the national dex, so the species id is also the national dex number
+      private List<int> GetExpansionPokemonPool() {
+         const int ChosenTypeOddsMultiplier = 100;
+         var stats = model.GetTableModel(HardcodeTablesModel.PokemonStatsTable);
+         var available = new List<int>();
+         if (stats == null) return new List<int> { 1 };
+
+         // which species may appear: the first maxPokedex of the regional (hoenn) dex or of the national dex
+         IEnumerable<int> candidates;
+         var hoenn = model.GetTableModel("data.pokedex.hoennToNational");
+         if (!useNationalDex && hoenn != null) {
+            candidates = Enumerable.Range(0, Math.Min(maxPokedex, hoenn.Count)).Select(i => hoenn[i].GetValue(0));
+         } else {
+            candidates = Enumerable.Range(1, Math.Min(maxPokedex, stats.Count - 1));
+         }
+
+         // there is no usable evolution table to ask for each species' minimum level, so the base stat total stands in for it:
+         // a level 9 trainer can use ~345 total stats (starters, bugs, normals), a level 50 trainer ~550, and so on.
+         var maxTotal = Math.Min(780, 300 + 5 * maxLevel);
+         foreach (var species in candidates) {
+            if (species <= 0 || species >= stats.Count) continue;
+            var entry = stats[species];
+            var total = 0;
+            foreach (var stat in new[] { "hp", "attack", "def", "speed", "spatk", "spdef" }) if (entry.TryGetValue(stat, out var value)) total += value;
+            if (total > maxTotal) continue;
+            available.Add(species);
+            if (entry.GetValue("type1") == preferredType || entry.GetValue("type2") == preferredType) {
+               for (int j = 0; j < ChosenTypeOddsMultiplier; j++) available.Add(species);
+            }
+         }
+         if (available.Count == 0) available.Add(1);
+         return available;
+      }
+
+      // a freshly added pokemon, like the team editor makes: default ball, any gender, default dynamax level
+      private const int Mon_Species = 20, Mon_Level = 26, Mon_Ball = 27, Mon_NatureGenderShiny = 29, Mon_DynamaxLevel = 31;
+      private const byte Mon_DefaultBall = 28, Mon_AnyGender = 3 << 5, Mon_DefaultDynamaxLevel = 10;
+
+      private int WriteExpansionTeam(ModelDelta token, int teamSize, IReadOnlyList<int> availablePokemon) {
+         const int Size = ExpansionTrainerTeamRun.ElementSize;
+         var teamStart = model.FindFreeSpace(model.FreeSpaceStart, Size * teamSize);
+         var team = new byte[Size * teamSize];
+         for (int i = 0; i < teamSize; i++) {
+            var pokemon = availablePokemon[rnd.Next(availablePokemon.Count)];
+            var level = maxLevel;
+            while (level > maxLevel - 5 && level > 1 && rnd.Next(2) == 1) level--;
+            var offset = i * Size;
+            team[offset + Mon_Species] = (byte)pokemon; team[offset + Mon_Species + 1] = (byte)(pokemon >> 8);
+            team[offset + Mon_Level] = (byte)level;
+            team[offset + Mon_Ball] = Mon_DefaultBall;
+            team[offset + Mon_NatureGenderShiny] = Mon_AnyGender;
+            team[offset + Mon_DynamaxLevel] = Mon_DefaultDynamaxLevel;
+         }
+         token.ChangeData(model, teamStart, team);
+         return teamStart;
+      }
+
+      private void WriteExpansionTrainer(ModelDelta token, ModelArrayElement trainer, int trainerIndex, TrainerPreference pref, int teamSize, int teamStart) {
+         // start from a clean record: ai flags, items, starting status, mugshot, ... are all 0
+         for (int i = 0; i < trainer.Length; i++) token.ChangeData(model, trainer.Start + i, 0);
+         trainer.SetStringValue("name", "NAME ME");
+         trainer.SetValue("class", pref.TrainerClass);
+         trainer.SetValue("introMusicAndGender", pref.MusicAndGender);
+         trainer.SetValue("sprite", pref.Sprite);
+         trainer.SetValue("pokemonCount", teamSize);
+         trainer.SetAddress("pokemon", teamStart);
+
+         // the same trainer exists once per difficulty (easy/normal/hard); keep them identical so the new trainer works at any difficulty
+         foreach (var other in new[] { "data.trainers.stats.easy", "data.trainers.stats.hard" }) {
+            var table = model.GetTable(other);
+            if (table == null || table.ElementLength != trainer.Length || trainerIndex >= table.ElementCount) continue;
+            var start = table.Start + table.ElementLength * trainerIndex;
+            for (int i = 0; i < trainer.Length; i++) token.ChangeData(model, start + i, model[trainer.Start + i]);
+            if (trainer.Table.ElementContent.Any(segment => segment.Name == "pokemon" && segment.Type == ElementContentType.Pointer)) {
+               var otherElement = new ModelArrayElement(model, table.Start, trainerIndex, () => token, table);
+               otherElement.SetAddress("pokemon", teamStart);
+            }
+         }
+      }
+
+      /// <summary>
+      /// trainerbattle (unified, 41 bytes) followed by the post-battle message:
+      /// 5C flags localIdA trainerA: introA loseA scriptA localIdB trainerB: introB loseB scriptB victory cannotBattle rivalFlags
+      /// 0F 00 &lt;after&gt; 09 06 02   (msgbox after, MSGBOX_AUTOCLOSE; end)
+      /// </summary>
+      private int WriteExpansionTrainerScript(ModelDelta token, int trainerIndex, int before, int win, int after) {
+         const byte Flags_PlayMusicA = 1 << 2, Flags_FacePlayer = 1 << 5;
+         var script = new byte[ExpansionTrainerBattleLength + 9];
+         script[0] = 0x5C;
+         script[1] = Flags_PlayMusicA | Flags_FacePlayer;
+         script[3] = (byte)trainerIndex; script[4] = (byte)(trainerIndex >> 8);
+         script[ExpansionTrainerBattleLength + 0] = 0x0F;
+         script[ExpansionTrainerBattleLength + 6] = 0x09;
+         script[ExpansionTrainerBattleLength + 7] = 0x06;
+         script[ExpansionTrainerBattleLength + 8] = 0x02;
+         var scriptStart = model.FindFreeSpace(model.FreeSpaceStart, script.Length + 3);
+         token.ChangeData(model, scriptStart, script);
+         var pointers = new[] { (scriptStart + 5, before), (scriptStart + 9, win), (scriptStart + ExpansionTrainerBattleLength + 2, after) };
+         var factory = new PCSRunContentStrategy();
+         foreach (var (source, destination) in pointers) {
+            model.WritePointer(token, source, destination);
+            model.ObserveRunWritten(token, new PointerRun(source));
+            factory.TryAddFormatAtDestination(model, token, source, destination, default, default, default);
+         }
+         return scriptStart;
+      }
+
+      #endregion
 
       private int FindPreferredTrainerElevation(IDataModel model, int graphics) {
          var histogram = new Dictionary<int, int>();
@@ -350,7 +501,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var trainersTable = model.GetTableModel(HardcodeTablesModel.TrainerTableName, null);
          if (trainersTable == null) return null;
          var layout = TrainerLayout.For(trainersTable.Run);
-         if (layout != TrainerLayout.Vanilla) return GetExpansionTrainerContent(model, address, trainersTable, layout);
+         if (layout != TrainerLayout.Vanilla) {
+            var content = GetExpansionTrainerContent(model, address, trainersTable, layout);
+            if (content != null) return content;
+            // rivals and gym leaders: the battle is somewhere inside a longer script
+            var battle = FindTrainerBattleInScript(model, objectModel.Parser, objectModel);
+            return battle == Pointer.NULL ? null : GetExpansionTrainerContent(model, battle, trainersTable, layout);
+         }
          // 5C 00 trainerFlag: 00 00 <before> <win> 0F 00 <after> 09 06 02
          var expectedValues = new Dictionary<int, byte> {
             { 0, 0x5C },
@@ -381,24 +538,53 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             trainerStart, trainerStart + layout.SpriteOffset, layout.NameLength);
       }
 
+      private const int ExpansionTrainerBattleLength = 41;
+      private static readonly ConditionalWeakTable<IEventViewModel, int[]> trainerBattleCache = new();
+
+      /// <summary>
+      /// The address of the first trainerbattle command (with a real trainer) reachable from this event's script, or Pointer.NULL.
+      /// Only meaningful for ROMs with the unified trainerbattle command. The answer is remembered per event as long as it stays valid.
+      /// </summary>
+      public static int FindTrainerBattleInScript(IDataModel model, ScriptParser parser, IEventViewModel eventModel) {
+         if (eventModel is not ObjectEventViewModel objectModel || parser == null) return Pointer.NULL;
+         var scriptAddress = objectModel.ScriptAddress;
+         if (scriptAddress < 0 || scriptAddress + 1 >= model.Count) return Pointer.NULL;
+         var trainersTable = model.GetTableModel(HardcodeTablesModel.TrainerTableName, null);
+         if (trainersTable == null || TrainerLayout.For(trainersTable.Run) == TrainerLayout.Vanilla) return Pointer.NULL;
+         if (trainerBattleCache.TryGetValue(eventModel, out var cached) && cached[0] == scriptAddress && (cached[1] == Pointer.NULL || (cached[1] >= 0 && model[cached[1]] == 0x5C))) return cached[1];
+         var found = Pointer.NULL;
+         foreach (var spot in Flags.GetAllScriptSpots(model, parser, new[] { scriptAddress }, 0x5C)) {
+            if (spot.Address + ExpansionTrainerBattleLength > model.Count) continue;
+            var trainerID = model.ReadMultiByteValue(spot.Address + 3, 2);
+            if (trainerID <= 0 || trainerID >= trainersTable.Count) continue;
+            found = spot.Address;
+            break;
+         }
+         trainerBattleCache.Remove(eventModel);
+         trainerBattleCache.Add(eventModel, new[] { scriptAddress, found });
+         return found;
+      }
+
       /// <summary>
       /// pokeemerald-expansion (1.17+) trainer scripts start with the unified 41-byte trainerbattle command:
       /// 5C flags localIdA trainerA: introA(pointer) loseA(pointer) scriptA(pointer) localIdB trainerB: introB(pointer) loseB(pointer) scriptB(pointer) victory(pointer) cannotBattle(pointer) rivalFlags
       /// The post-battle text is the first msgbox of scriptA (0F 00 text ...), when there is one.
       /// </summary>
       private static TrainerEventContent GetExpansionTrainerContent(IDataModel model, int address, ModelTable trainers, TrainerLayout layout) {
-         const int CommandLength = 41;
-         if (address + CommandLength > model.Count) return null;
+         const int CommandLength = ExpansionTrainerBattleLength;
+         if (address < 0 || address + CommandLength > model.Count) return null;
          if (model[address] != 0x5C) return null;
          var trainerID = model.ReadMultiByteValue(address + 3, 2);
-         if (trainerID < 0 || trainerID >= trainers.Count) return null;
+         if (trainerID <= 0 || trainerID >= trainers.Count) return null;
          var introPointer = address + 5;
          var losePointer = address + 9;
-         var intro = model.ReadPointer(introPointer);
-         if (intro < 0 || intro >= model.Count) return null;
+         // battles without an intro (gym leaders and the like) have a null pointer here: the intro editor simply stays hidden
+         // the usual post-battle message is the msgbox right after the command (0F 00 text); gym leaders and the like have it in the script they point to
          var afterPointer = Pointer.NULL;
          var scriptA = model.ReadPointer(address + 13);
-         if (scriptA >= 0 && scriptA + 6 <= model.Count && model[scriptA] == 0x0F && model[scriptA + 1] == 0x00) afterPointer = scriptA + 2;
+         var next = address + CommandLength;
+         if (next + 6 <= model.Count && model[next] == 0x0F && model[next + 1] == 0x00 && GoodPointer(model, next + 2)) afterPointer = next + 2;
+         else if (scriptA >= 0 && scriptA + 6 <= model.Count && model[scriptA] == 0x0F && model[scriptA + 1] == 0x00) afterPointer = scriptA + 2;
          var trainerStart = trainers[trainerID].Start;
          return new TrainerEventContent(introPointer, losePointer, afterPointer, trainerStart + layout.ClassOffset, trainerID, address + 3, trainerStart + layout.NameOffset, trainerStart + layout.TeamOffset,
             trainerStart, trainerStart + layout.SpriteOffset, layout.NameLength);
@@ -680,7 +866,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
          var tutorFlag = FindNextUnusedFlag();
 
+         // vanilla scripts name the tutor by its index in the tutor table, the expansion's by the move itself
          int tutor = 0;
+         if (Flags.IsExpansion(model) && model.GetTableModel(HardcodeTablesModel.MoveTutors) is { Count: > 0 } tutorMoves) {
+            tutor = model.ReadMultiByteValue(tutorMoves[0].Start, 2);
+            if (tutor < 0 || tutor >= 0xFFFF) tutor = 0;
+         }
          int infoStart = WriteText(token, "Want to learn a cool move?");
          int warningStart = WriteText(token, "This move can be learned only\\nonce. Is that okay?");
          int whichStart = WriteText(token, "Which POKéMON wants to learn\\nthe move?");
@@ -824,11 +1015,18 @@ failed:
          int failText = WriteText(token, "That's too bad.");
          int wrongSpeciesText = WriteText(token, "\\.This is no \\\\02.\\pnIf you get one, please trade it\\nfor my \\\\03!");
 
+         // the expansion's trade specials read the trade number from 0x8005 and the chosen party slot from 0x8004,
+         // while the vanilla ones use 0x8004 for the trade and 0x8005 for the slot
+         var expansion = Flags.IsExpansion(model);
+         var selectTrade = expansion ? "copyvar 0x8005 0x8008" : "copyvar 0x8004 0x8008";
+         var chosenSlotToSpecialArgs = expansion ? string.Empty : "copyvar 0x8005 0x800A";
+         var tradeAndSlotForCreate = expansion ? "copyvar 0x8005 0x8008" : "copyvar 0x8004 0x8008\n  copyvar 0x8005 0x800A";
+
          var script = @$"
   lock
   faceplayer
   setvar 0x8008 {tradeId}
-  copyvar 0x8004 0x8008
+  {selectTrade}
   special2 0x800D GetInGameTradeSpeciesInfo
   copyvar 0x8009 0x800D
   checkflag {tradeFlag}
@@ -844,13 +1042,12 @@ failed:
   copyvar 0x800A 0x8004
   compare 0x8004 6
   if1 >= <fail>
-  copyvar 0x8005 0x800A
+  {chosenSlotToSpecialArgs}
   special2 0x800D GetTradeSpecies
   copyvar 0x800B 0x800D
   comparevars 0x800D 0x8009
   if1 != <wrongspecies>
-  copyvar 0x8004 0x8008
-  copyvar 0x8005 0x800A
+  {tradeAndSlotForCreate}
   special CreateInGameTradePokemon
   special DoInGameTradeScene
   waitstate

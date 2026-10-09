@@ -496,8 +496,10 @@ namespace HavenSoft.HexManiac.Core.Models {
          var sourceArray = model.GetNextRun(enumSourceAddress) as ArrayRun;
          if (sourceArray == null) return false;
          using (ModelCacheScope.CreateScope(model)) {
-            var allNames = sourceArray.ElementNames;
-            if (allNames.Count == 0) return false;
+            IReadOnlyList<string> allNames = sourceArray.ElementNames;
+            // the expansion keeps names inside a bigger table (data.pokemon.stats): those names come from the table's options
+            if (allNames.Count == 0) allNames = model.GetOptions(mainEnumSegment.EnumName);
+            if (allNames == null || allNames.Count == 0) return false;
             var list = new List<string>();
 
             for (int i = 0; i < enumArray.ElementCount; i++) {

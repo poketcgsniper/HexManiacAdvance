@@ -18,7 +18,24 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       private CodeMode mode;
       private readonly Singletons singletons;
       private readonly ThumbParser thumb;
-      private readonly ScriptParser script, battleScript, animationScript, battleAIScript;
+      private ScriptParser scriptParser;
+      private IReadOnlyList<IScriptLine> scriptParserLines;
+      private readonly ScriptParser battleScript, animationScript, battleAIScript;
+      /// <summary>
+      /// The event-script parser. The model loads its metadata (including a ROM's own 'scriptmacros' commands) on a background
+      /// thread, so the first parser built can predate those commands: rebuild it whenever the model's command set changes.
+      /// </summary>
+      private ScriptParser script {
+         get {
+            var lines = model.GetScriptLines(singletons.ScriptLines);
+            if (scriptParser == null || !ReferenceEquals(lines, scriptParserLines)) {
+               scriptParserLines = lines;
+               var requireCompleteAddresses = scriptParser?.RequireCompleteAddresses ?? true;
+               scriptParser = new ScriptParser(model.GetShortGameCode(), lines, 0x02) { RequireCompleteAddresses = requireCompleteAddresses };
+            }
+            return scriptParser;
+         }
+      }
       private readonly ViewPort viewPort;
       private readonly IDataModel model;
       private readonly Selection selection;
@@ -102,7 +119,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          recompileTimer = singletons.WorkDispatcher.CreateDelayTimer();
          var gameHash = viewPort.Model.GetShortGameCode();
          thumb = new ThumbParser(singletons);
-         script = new ScriptParser(gameHash, viewPort.Model.GetScriptLines(singletons.ScriptLines), 0x02);
+         this.model = viewPort.Model;
          battleScript = new ScriptParser(gameHash, singletons.BattleScriptLines, 0x3D);
          animationScript = new ScriptParser(gameHash, singletons.AnimationScriptLines, 0x08);
          battleAIScript = new ScriptParser(gameHash, singletons.BattleAIScriptLines, 0x5A);
