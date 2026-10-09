@@ -1,6 +1,8 @@
 using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
+using HavenSoft.HexManiac.Core.Models.Runs.Sprites;
+using HavenSoft.HexManiac.Core.ViewModels.DataFormats;
 using System.Linq;
 using Xunit;
 
@@ -106,6 +108,41 @@ namespace HavenSoft.HexManiac.Tests {
 
          Assert.Equal(5, entry.FirstTile);
          Assert.Equal(512 + 5, Model.ReadMultiByteValue(entry.EntryAddress + 8, 4));
+      }
+
+      [Fact]
+      public void AddDoor_GoesInFrontOfTheTerminator() {
+         // a doors table with one real door and the all-zero terminator the game stops at
+         var tableStart = 0x600;
+         Model.WriteMultiByteValue(Token, tableStart, 2, 33);
+         Model.WritePointer(Token, tableStart + 4, TilesetStart);
+         Model[tableStart + 8] = 0; Model[tableStart + 9] = 1;
+         Model.WritePointer(Token, tableStart + 12, 0xC00);
+         Model.WritePointer(Token, tableStart + 16, 0xD00);
+         for (int i = 20; i < 40; i++) Model[tableStart + i] = 0;
+         ViewPort.Edit($"@{tableStart:X6} ^{DoorAnimations.TableName}[metatile: unused: tileset<> sound. size. unused: tiles<`ucs4x2x12`> palettes<>]2 ");
+         var doors = new DoorAnimations(Model, () => Token);
+         Assert.True(DoorAnimations.IsSupported(Model));
+         Assert.Equal(1, doors.TerminatorIndex(doors.Table));
+
+         var added = doors.AddDoor(TilesetStart, 34, 1, 1, 2);
+
+         var table = doors.Table;
+         Assert.Equal(3, table.ElementCount);
+         Assert.Equal(1, added.Index);
+         Assert.Equal(34, added.Metatile);
+         Assert.Equal(2, doors.TerminatorIndex(table));
+         Assert.Equal(Pointer.NULL, Model.ReadPointer(table.Start + table.ElementLength * 2 + 12));
+         Assert.Equal(33, Model.ReadMultiByteValue(table.Start, 2));
+         Assert.Equal(0xC00, Model.ReadPointer(table.Start + 12));
+         Assert.IsType<SpriteRun>(Model.GetNextRun(added.TilesAddress));
+         Assert.Equal(DoorAnimations.PaletteHint, ((ISpriteRun)Model.GetNextRun(added.TilesAddress)).SpriteFormat.PaletteHint);
+
+         doors.RemoveDoor(1);
+
+         table = doors.Table;
+         Assert.Equal(2, table.ElementCount);
+         Assert.Equal(1, doors.TerminatorIndex(table));
       }
    }
 }

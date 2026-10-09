@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:hshmwpfc="clr-namespace:HavenSoft.HexManiac.WPF.Controls">
    <UserControl.Resources>
-      <Style x:Key="SoundListItem" TargetType="ListBoxItem">
+      <Style x:Key="SoundListItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
          <Setter Property="Padding" Value="4,1"/>
          <Style.Triggers>
             <DataTrigger Binding="{Binding IsFilteredOut}" Value="True">
@@ -11,16 +11,16 @@
             </DataTrigger>
          </Style.Triggers>
       </Style>
-      <Style x:Key="SectionTitle" TargetType="TextBlock">
+      <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
          <Setter Property="FontSize" Value="18"/>
          <Setter Property="Margin" Value="0,0,0,4"/>
       </Style>
-      <Style x:Key="Hint" TargetType="TextBlock">
+      <Style x:Key="Hint" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
          <Setter Property="Foreground" Value="{DynamicResource Secondary}"/>
          <Setter Property="TextWrapping" Value="Wrap"/>
          <Setter Property="Margin" Value="0,2"/>
       </Style>
-      <Style x:Key="ToolButton" TargetType="Button">
+      <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
          <Setter Property="Padding" Value="10,2"/>
          <Setter Property="Margin" Value="0,0,6,0"/>
          <Setter Property="MinWidth" Value="70"/>
@@ -124,6 +124,9 @@
                   </Grid.RowDefinitions>
                   <TextBlock Grid.Row="0" Text="{Binding SongDetails}" FontFamily="Consolas" TextWrapping="Wrap"/>
                   <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,4">
+                     <Button Content="▶ Play" Command="{Binding PlaySong}" Style="{StaticResource ToolButton}" ToolTip="Play the selected song (rendered by a software version of the game's music engine: close, but not identical to the real thing)"/>
+                     <Button Content="■ Stop" Command="{Binding StopSong}" Style="{StaticResource ToolButton}" ToolTip="Stop playback"/>
+                     <Button Content="Export .wav" Command="{Binding ExportSongWav}" Style="{StaticResource ToolButton}" ToolTip="Save the rendered song as a .wav file"/>
                      <Button Content="Export .s" Command="{Binding ExportSong}" Style="{StaticResource ToolButton}" ToolTip="Save the selected song as a Sappy / mid2agb .s file"/>
                      <Button Content="Insert .s…" Command="{Binding InsertSong}" Style="{StaticResource ToolButton}" ToolTip="Assemble a .s file into free space and put it in the song table"/>
                      <Button Content="Open in table" Command="{Binding GotoSong}" Style="{StaticResource ToolButton}" ToolTip="Jump to this song's entry in the song table"/>

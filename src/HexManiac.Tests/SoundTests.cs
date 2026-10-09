@@ -145,5 +145,62 @@ test:
          Assert.True(again.Success, again.Error);
          Assert.Equal(result.Bytes, again.Bytes);
       }
+
+      [Fact]
+      public void Renderer_PlaysSquareAndSampleNotes_ThenGoesQuiet() {
+         // voicegroup at 0x100: voice 0 = square 1 (50% duty, instant attack, no decay), voice 1 = a direct-sound sine sample at 0x200
+         int voicegroup = 0x100;
+         Model[voicegroup] = 1; Model[voicegroup + 1] = 60; Model[voicegroup + 4] = 2; Model[voicegroup + 8] = 0; Model[voicegroup + 9] = 0; Model[voicegroup + 10] = 15; Model[voicegroup + 11] = 0;
+         var sine = new sbyte[2000];
+         for (int i = 0; i < sine.Length; i++) sine[i] = (sbyte)(Math.Sin(i * 2 * Math.PI * 220 / 13379) * 100);
+         var sample = GbaSample.Build(sine, 13379, compressed: false, loopStart: 0);
+         for (int i = 0; i < sample.Length; i++) Model[0x200 + i] = sample[i];
+         Model[voicegroup + 12] = 0; Model[voicegroup + 13] = 60; Model.WritePointer(Token, voicegroup + 16, 0x200);
+         Model[voicegroup + 20] = 255; Model[voicegroup + 21] = 0; Model[voicegroup + 22] = 255; Model[voicegroup + 23] = 0;
+
+         // the song: tempo 120, voice 0 Cn3 for a quarter note, then voice 1 En3 for a quarter note, then FINE
+         var song = SongAssembler.Assemble(@"
+	.include ""MPlayDef.s""
+	.equ	t_grp, voicegroup000
+t_1:
+	.byte	TEMPO , 120*1/2
+	.byte	VOICE , 0
+	.byte	VOL , 127
+	.byte	N24 , Cn3 , v127
+	.byte	W24
+	.byte	VOICE , 1
+	.byte	N24 , En3 , v127
+	.byte	W24
+	.byte	W24
+	.byte	FINE
+t:
+	.byte	1
+	.byte	0
+	.byte	0
+	.byte	0
+	.word	t_grp
+	.word	t_1
+	.end
+", 0x08000400, new System.Collections.Generic.Dictionary<string, int> { ["voicegroup000"] = 0x08000000 + voicegroup });
+         Assert.True(song.Success, song.Error);
+         for (int i = 0; i < song.Bytes.Length; i++) Model[0x400 + i] = song.Bytes[i];
+         Assert.True(SongHeader.TryRead(Model, 0x400 + song.HeaderOffset, out var header));
+
+         var (left, right) = new M4aRenderer(Model).Render(header);
+
+         // 120 bpm: a quarter note is half a second. The song is 1.5 seconds long, then everything stops.
+         double Rms(int fromSecondsTenths, int toSecondsTenths) {
+            int from = fromSecondsTenths * M4aRenderer.OutputRate / 10, to = Math.Min(left.Length, toSecondsTenths * M4aRenderer.OutputRate / 10);
+            if (to <= from) return 0;
+            double sum = 0;
+            for (int i = from; i < to; i++) sum += left[i] * left[i] + right[i] * right[i];
+            return Math.Sqrt(sum / (to - from) / 2);
+         }
+         Assert.True(left.Length > 1.4 * M4aRenderer.OutputRate, $"only {left.Length} samples");
+         Assert.True(Rms(1, 4) > 0.05, "the square wave note should be audible");
+         Assert.True(Rms(6, 9) > 0.05, "the sampled note should be audible");
+         Assert.True(Rms(12, 15) < 0.01, "nothing should play after the notes end");
+         Assert.True(left.Length < 4 * M4aRenderer.OutputRate, "the render should stop soon after FINE");
+      }
    }
 }

@@ -170,6 +170,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          var error = ArrayRun.TryParse(model, TableFormat, tableAddress, SortedSpan<int>.None, out var tableRun);
          if (error.HasError) throw new InvalidOperationException(error.ErrorMessage);
          model.ObserveAnchorWritten(token, tableName, tableRun);
+         EnsurePaletteAnchor(tilesetStart, baseName, token);
 
          var callbackAddress = InsertCallback(baseName + ".callback", tableAddress, originalCallback, constants);
          var initAddress = InsertInit(baseName + ".init", tableAddress, callbackAddress, originalInit, isSecondary, constants);
@@ -187,6 +188,54 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
       }
 
       /// <summary>
+      /// Name the tileset's 16-palette table '<name>.palette' so the frames (uct4xN|<name>.palette) show in the right colours.
+      /// </summary>
+      public string EnsurePaletteAnchor(int tilesetStart, string baseName, ModelDelta token) {
+         var paletteName = baseName + ".palette";
+         if (model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, paletteName) >= 0) return paletteName;
+         var paletteAddress = model.ReadPointer(tilesetStart + 8);
+         if (paletteAddress < 0 || paletteAddress + 512 > model.Count) return null;
+         var existing = model.GetNextRun(paletteAddress);
+         if (existing is IPaletteRun paletteRun && paletteRun.Start == paletteAddress) {
+            model.ObserveAnchorWritten(token, paletteName, paletteRun);
+            return paletteName;
+         }
+         if (!PaletteRun.TryParsePaletteFormat("`ucp4:0123456789ABCDEF`", out var format)) return null;
+         model.ClearFormat(token, paletteAddress, 512);
+         model.ObserveAnchorWritten(token, paletteName, new PaletteRun(paletteAddress, format, SortedSpan.One(tilesetStart + 8)));
+         return paletteName;
+      }
+
+      /// <summary>
+      /// Make sure a frame is registered as tiles that know which palette they use, so the image editor shows them in colour.
+      /// Returns the frame's address, or -1 if the frame pointer is bad.
+      /// </summary>
+      public int EnsureFrameFormat(int tilesetStart, TilesetAnimationEntry entry, int frame) {
+         if (entry.FramesAddress < 0 || entry.FramesAddress + 4 * entry.FrameCount > model.Count || frame < 0 || frame >= entry.FrameCount) return -1;
+         var frameAddress = model.ReadPointer(entry.FramesAddress + 4 * frame);
+         var length = 32 * entry.TileCount;
+         if (frameAddress < 0 || frameAddress + length > model.Count) return -1;
+         if (!TryGetTable(tilesetStart, out _, out var baseName)) return frameAddress;
+         var token = tokenFactory();
+         var hint = EnsurePaletteAnchor(tilesetStart, baseName, token);
+         if (hint == null) return frameAddress;
+         var existing = model.GetNextRun(frameAddress);
+         if (existing is ISpriteRun sprite && sprite.Start == frameAddress && sprite.SpriteFormat.PaletteHint == hint && sprite.PointerSources.Count > 0) return frameAddress;
+         var sources = existing.Start == frameAddress && existing.PointerSources != null ? existing.PointerSources : SortedSpan<int>.None;
+         sources = sources.Add1(entry.FramesAddress + 4 * frame);
+         if (existing.Start != frameAddress) model.ClearFormat(token, frameAddress, length);
+         model.ObserveRunWritten(token, new TilesetRun(new TilesetFormat(4, entry.TileCount, -1, hint), model, frameAddress, sources));
+         return frameAddress;
+      }
+
+      private string PaletteHintFor(ITableRun table) {
+         var anchor = model.GetAnchorFromAddress(-1, table.Start);
+         if (string.IsNullOrEmpty(anchor) || !anchor.EndsWith(".table")) return null;
+         var paletteName = anchor.Substring(0, anchor.Length - ".table".Length) + ".palette";
+         return model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, paletteName) >= 0 ? paletteName : null;
+      }
+
+      /// <summary>
       /// Add an animation entry whose frames all start as copies of the tileset's current tiles.
       /// </summary>
       public TilesetAnimationEntry AddEntry(ITableRun table, int firstTile, int tileCount, int frameCount, int timer, bool isSecondary, TilesetAnimationConstants constants, byte[] currentTiles) {
@@ -194,6 +243,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          tileCount = tileCount.LimitToRange(1, 255);
          frameCount = frameCount.LimitToRange(1, 64);
          timer = timer.LimitToRange(0, MaxTimer);
+         var paletteHint = PaletteHintFor(table);
          var index = table.ElementCount;
          table = model.RelocateForExpansion(token, table, table.Length + table.ElementLength);
          table = table.Append(token, 1);
@@ -216,7 +266,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
                token.ChangeData(model, frameAddress + i, value);
             }
             model.WritePointer(token, framesAddress + 4 * f, frameAddress);
-            model.ObserveRunWritten(token, new TilesetRun(new TilesetFormat(4, tileCount, -1, default), model, frameAddress, SortedSpan.One(framesAddress + 4 * f)));
+            model.ObserveRunWritten(token, new TilesetRun(new TilesetFormat(4, tileCount, -1, paletteHint), model, frameAddress, SortedSpan.One(framesAddress + 4 * f)));
          }
 
          // the entry itself (write the pointer last so the `mat` run can read frames/tiles from its parent)
@@ -230,7 +280,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          for (int f = 0; f < frameCount; f++) {
             var frameAddress = model.ReadPointer(framesAddress + 4 * f);
             if (model.GetNextRun(frameAddress) is TilesetRun) continue;
-            model.ObserveRunWritten(token, new TilesetRun(new TilesetFormat(4, tileCount, -1, default), model, frameAddress, SortedSpan.One(framesAddress + 4 * f)));
+            model.ObserveRunWritten(token, new TilesetRun(new TilesetFormat(4, tileCount, -1, paletteHint), model, frameAddress, SortedSpan.One(framesAddress + 4 * f)));
          }
          return ReadEntries((ITableRun)model.GetNextRun(table.Start), isSecondary, constants)[index];
       }
@@ -306,7 +356,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
                if (frameAddress < 0) { frameAddress = model.Count; model.ExpandData(token, model.Count + 32 * tileCount + 0x10); }
                for (int i = 0; i < 32 * tileCount; i++) token.ChangeData(model, frameAddress + i, last != null && i < last.Length ? last[i] : (byte)0);
                model.WritePointer(token, framesAddress + 4 * f, frameAddress);
-               model.ObserveRunWritten(token, new TilesetRun(new TilesetFormat(4, tileCount, -1, default), model, frameAddress, SortedSpan.One(framesAddress + 4 * f)));
+               model.ObserveRunWritten(token, new TilesetRun(new TilesetFormat(4, tileCount, -1, PaletteHintFor(table)), model, frameAddress, SortedSpan.One(framesAddress + 4 * f)));
             }
          }
       }

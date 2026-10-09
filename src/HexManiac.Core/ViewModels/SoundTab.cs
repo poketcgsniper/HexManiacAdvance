@@ -139,6 +139,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             NotifyPropertyChanged();
             NotifyPropertyChanged(nameof(HasSelectedCry));
             UpdateCryDetails();
+            playCry?.RaiseCanExecuteChanged();
+            exportCry?.RaiseCanExecuteChanged();
+            importCry?.RaiseCanExecuteChanged();
+            gotoCry?.RaiseCanExecuteChanged();
          }
       }
       public bool HasSelectedCry => selectedCry?.Sample != null;
@@ -380,6 +384,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             NotifyPropertyChanged();
             NotifyPropertyChanged(nameof(HasSelectedSong));
             UpdateSongDetails();
+            exportSong?.RaiseCanExecuteChanged();
+            gotoSong?.RaiseCanExecuteChanged();
+            playSong?.RaiseCanExecuteChanged();
          }
       }
       public bool HasSelectedSong => selectedSong?.Header != null;
@@ -407,8 +414,43 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private int insertMusicPlayer;
       public int InsertMusicPlayer { get => insertMusicPlayer; set => Set(ref insertMusicPlayer, value.LimitToRange(0, 3)); }
 
-      private StubCommand exportSong, insertSong, gotoSong;
+      private StubCommand exportSong, insertSong, gotoSong, playSong, exportSongWav, stopSong;
       public ICommand ExportSong => StubCommand(ref exportSong, ExecuteExportSong, () => HasSelectedSong);
+      /// <summary>Render the selected song with a software version of the game's music engine and play it.</summary>
+      public ICommand PlaySong => StubCommand(ref playSong, ExecutePlaySong, () => HasSelectedSong);
+      public ICommand ExportSongWav => StubCommand(ref exportSongWav, ExecuteExportSongWav, () => HasSelectedSong);
+      public ICommand StopSong => StubCommand(ref stopSong, () => RequestStopPlayback?.Invoke(this, EventArgs.Empty), () => true);
+
+      public event EventHandler RequestStopPlayback;
+
+      private byte[] RenderSelectedSong() {
+         if (selectedSong?.Header == null) return null;
+         if (selectedSong.Header.TrackCount == 0) { OnError?.Invoke(this, "This song has no tracks."); return null; }
+         try {
+            var renderer = new M4aRenderer(model);
+            return renderer.RenderWav(selectedSong.Header);
+         } catch (Exception e) {
+            OnError?.Invoke(this, "Could not render the song: " + e.Message);
+            return null;
+         }
+      }
+
+      private void ExecutePlaySong() {
+         var wav = RenderSelectedSong();
+         if (wav == null) return;
+         Status = $"Playing song {selectedSong.Index}{(string.IsNullOrEmpty(selectedSong.Name) ? "" : " (" + selectedSong.Name + ")")}: {(wav.Length - 44) / 4.0 / M4aRenderer.OutputRate:0.#} seconds (one loop, then a fade). This is a preview: the real game may sound a little different.";
+         RequestPlayWav?.Invoke(this, wav);
+      }
+
+      private void ExecuteExportSongWav() {
+         if (selectedSong?.Header == null) return;
+         var defaultName = string.IsNullOrEmpty(selectedSong.Name) ? $"song_{selectedSong.Index}" : selectedSong.Name.ToLower();
+         var name = fileSystem.RequestNewName(defaultName + ".wav", "Wave audio", "wav");
+         if (string.IsNullOrEmpty(name)) return;
+         var wav = RenderSelectedSong();
+         if (wav == null) return;
+         if (fileSystem.Save(new LoadedFile(name, wav))) Status = $"Exported song {selectedSong.Index} to {name}";
+      }
       public ICommand InsertSong => StubCommand(ref insertSong, ExecuteInsertSong, () => HasSongs);
       public ICommand GotoSong => StubCommand(ref gotoSong, ExecuteGotoSong, () => selectedSong != null);
 

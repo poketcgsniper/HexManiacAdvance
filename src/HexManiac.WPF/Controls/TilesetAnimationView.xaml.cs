@@ -1,12 +1,21 @@
 using HavenSoft.HexManiac.Core.ViewModels;
+using System;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 
 namespace HavenSoft.HexManiac.WPF.Controls {
    public partial class TilesetAnimationView {
       private TilesetAnimationTab ViewModel => DataContext as TilesetAnimationTab;
 
-      public TilesetAnimationView() => InitializeComponent();
+      private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(1000.0 / 60) };
+
+      public TilesetAnimationView() {
+         InitializeComponent();
+         timer.Tick += (sender, e) => ViewModel?.Tick();
+         Loaded += (sender, e) => timer.Start();
+         Unloaded += (sender, e) => timer.Stop();
+      }
 
       private void TilesetClicked(object sender, MouseButtonEventArgs e) {
          var position = e.GetPosition(TilesetImage); // the image's own (unscaled) pixel coordinates

@@ -37,6 +37,8 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
    public class DoorAnimations {
       public const string TableName = "data.maps.doors";
       public const int EntryLength = 20;
+      /// <summary>The door tiles use the palettes of the tileset named by the entry's tileset pointer.</summary>
+      public const string PaletteHint = "tileset/pal";
 
       private readonly IDataModel model;
       private readonly Func<ModelDelta> tokenFactory;
@@ -97,6 +99,18 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          for (int i = 0; i < entry.TilesPerFrame; i++) token.ChangeData(model, entry.PalettesAddress + i, (byte)(palette & 15));
       }
 
+      /// <summary>Make sure the door's tiles are registered as a sprite that knows its palette (the tileset's), so the image editor shows them in colour.</summary>
+      public void EnsureTilesFormat(DoorEntry entry) {
+         if (entry.TilesAddress < 0 || entry.TilesAddress + entry.TilesLength > model.Count) return;
+         var existing = model.GetNextRun(entry.TilesAddress);
+         if (existing is ISpriteRun sprite && sprite.Start == entry.TilesAddress && sprite.SpriteFormat.PaletteHint == PaletteHint && sprite.PointerSources.Count > 0) return;
+         var token = tokenFactory();
+         var sources = existing.Start == entry.TilesAddress && existing.PointerSources != null ? existing.PointerSources : SortedSpan<int>.None;
+         sources = sources.Add1(entry.EntryAddress + 12);
+         if (existing.Start != entry.TilesAddress) model.ClearFormat(token, entry.TilesAddress, entry.TilesLength);
+         model.ObserveRunWritten(token, new SpriteRun(model, entry.TilesAddress, new SpriteFormat(4, entry.WidthTiles, entry.HeightTiles * DoorEntry.FrameCount, PaletteHint), sources));
+      }
+
       public void SetSound(DoorEntry entry, int sound) => tokenFactory().ChangeData(model, entry.EntryAddress + 8, (byte)sound.LimitToRange(0, 2));
 
       public void SetMetatile(DoorEntry entry, int metatile) => model.WriteMultiByteValue(entry.EntryAddress, 2, tokenFactory(), metatile.LimitToRange(0, 0x3FF));
@@ -112,11 +126,14 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          int width = DoorEntry.WidthTilesFor(size), height = DoorEntry.HeightTilesFor(size);
          int tilesPerFrame = width * height, tilesLength = tilesPerFrame * 32 * DoorEntry.FrameCount;
 
-         var index = table.ElementCount;
+         // the game reads the table until an entry with no tiles, so the new door goes in front of that terminator
+         var index = TerminatorIndex(table);
          table = model.RelocateForExpansion(token, table, table.Length + table.ElementLength);
          table = table.Append(token, 1);
          model.ObserveRunWritten(token, table);
+         for (int i = table.ElementCount - 1; i > index; i--) MoveEntry(token, table, i - 1, i);
          var entry = table.Start + table.ElementLength * index;
+         for (int b = 0; b < table.ElementLength; b++) token.ChangeData(model, entry + b, 0);
 
          // palette indices (one byte per tile of a frame), registered before the next allocation
          var palettesAddress = model.FindFreeSpace(model.FreeSpaceStart, tilesPerFrame + 4);
@@ -129,7 +146,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          var tilesAddress = model.FindFreeSpace(model.FreeSpaceStart, tilesLength);
          if (tilesAddress < 0) { tilesAddress = model.Count; model.ExpandData(token, model.Count + tilesLength + 0x10); }
          for (int i = 0; i < tilesLength; i++) token.ChangeData(model, tilesAddress + i, initialTiles != null && i < initialTiles.Length ? initialTiles[i] : (byte)0);
-         model.ObserveRunWritten(token, new SpriteRun(model, tilesAddress, new SpriteFormat(4, width, height * DoorEntry.FrameCount, null), SortedSpan.One(entry + 12)));
+         model.ObserveRunWritten(token, new SpriteRun(model, tilesAddress, new SpriteFormat(4, width, height * DoorEntry.FrameCount, PaletteHint), SortedSpan.One(entry + 12)));
 
          // the entry
          model.WriteMultiByteValue(entry, 2, token, metatile.LimitToRange(0, 0x3FF));
@@ -143,7 +160,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          element.SetAddress("palettes", palettesAddress);
          element.SetAddress("tiles", tilesAddress, writeDestinationFormat: false);
          if (model.GetNextRun(tilesAddress) is not ISpriteRun) {
-            model.ObserveRunWritten(token, new SpriteRun(model, tilesAddress, new SpriteFormat(4, width, height * DoorEntry.FrameCount, null), SortedSpan.One(entry + 12)));
+            model.ObserveRunWritten(token, new SpriteRun(model, tilesAddress, new SpriteFormat(4, width, height * DoorEntry.FrameCount, PaletteHint), SortedSpan.One(entry + 12)));
          }
          return ReadEntries()[index];
       }
@@ -164,21 +181,34 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
             model.ClearFormatAndData(token, entry.PalettesAddress, entry.TilesPerFrame);
          }
          // shift the later entries down
-         for (int i = index + 1; i < table.ElementCount; i++) {
-            var from = table.Start + table.ElementLength * i;
-            var to = from - table.ElementLength;
-            var pointers = new[] { 4, 12, 16 }.Select(offset => model.ReadPointer(from + offset)).ToArray();
-            foreach (var offset in new[] { 4, 12, 16 }) model.ClearPointer(token, from + offset, model.ReadPointer(from + offset));
-            for (int b = 0; b < table.ElementLength; b++) {
-               if (b == 4 || b == 12 || b == 16) { b += 3; continue; }
-               token.ChangeData(model, to + b, model[from + b]);
-            }
-            model.WritePointer(token, to + 4, pointers[0]);
-            model.WritePointer(token, to + 12, pointers[1]);
-            model.WritePointer(token, to + 16, pointers[2]);
-         }
+         for (int i = index + 1; i < table.ElementCount; i++) MoveEntry(token, table, i, i - 1);
          var shorter = table.Append(token, -1);
          model.ObserveRunWritten(token, shorter);
+      }
+
+      /// <summary>The index of the first entry with no tiles (the game stops reading there), or the element count if there is none.</summary>
+      public int TerminatorIndex(ITableRun table) {
+         for (int i = 0; i < table.ElementCount; i++) {
+            var tiles = model.ReadPointer(table.Start + table.ElementLength * i + 12);
+            if (tiles < 0 || tiles >= model.Count) return i;
+         }
+         return table.ElementCount;
+      }
+
+      /// <summary>Copy one entry over another, keeping the pointer bookkeeping straight.</summary>
+      private void MoveEntry(ModelDelta token, ITableRun table, int fromIndex, int toIndex) {
+         var from = table.Start + table.ElementLength * fromIndex;
+         var to = table.Start + table.ElementLength * toIndex;
+         var pointers = new[] { 4, 12, 16 }.Select(offset => model.ReadPointer(from + offset)).ToArray();
+         foreach (var offset in new[] { 4, 12, 16 }) model.ClearPointer(token, from + offset, model.ReadPointer(from + offset));
+         foreach (var offset in new[] { 4, 12, 16 }) model.ClearPointer(token, to + offset, model.ReadPointer(to + offset));
+         for (int b = 0; b < table.ElementLength; b++) {
+            if (b == 4 || b == 12 || b == 16) { b += 3; continue; }
+            token.ChangeData(model, to + b, model[from + b]);
+         }
+         model.WritePointer(token, to + 4, pointers[0]);
+         model.WritePointer(token, to + 12, pointers[1]);
+         model.WritePointer(token, to + 16, pointers[2]);
       }
    }
 }

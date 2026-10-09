@@ -207,7 +207,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       public string SelectionText => $"Tiles {firstTile} to {Math.Min(TileCountInTileset - 1, firstTile + tileCount - 1)}";
-      public IPixelViewModel SelectionPreview => RenderTileRow(firstTile, tileCount, rawTiles);
+      public IPixelViewModel SelectionPreview => RenderTileRow(firstTile, tileCount, rawTiles, scale: Math.Max(2, spriteScale));
 
       /// <summary>Called by the view when the user clicks a tile in the tileset image (pixel coordinates, unscaled).</summary>
       public void PickTile(int x, int y) {
@@ -242,6 +242,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       public ObservableCollection<TilesetAnimationItem> Entries { get; } = new();
 
+      private int tickCount;
+      /// <summary>Called by the view about 60 times a second (once per game frame): advance every live preview the way the game would.</summary>
+      public void Tick() {
+         tickCount++;
+         foreach (var entry in Entries) entry.Tick(tickCount);
+         foreach (var door in Doors) door.Tick();
+      }
+
       private TilesetAnimationItem selectedEntry;
       public TilesetAnimationItem SelectedEntry {
          get => selectedEntry;
@@ -252,6 +260,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             if (selectedEntry != null) selectedEntry.Selected = true;
             NotifyPropertyChanged();
             NotifyPropertyChanged(nameof(HasSelectedEntry));
+            removeEntry?.RaiseCanExecuteChanged();
+            importFrames?.RaiseCanExecuteChanged();
+            exportFrames?.RaiseCanExecuteChanged();
          }
       }
       public bool HasSelectedEntry => selectedEntry != null;
@@ -291,13 +302,35 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          SelectedEntry = index < Entries.Count ? Entries[index] : null;
       }
 
-      /// <summary>Open the frame's graphics in the main tab, where it can be drawn on or imported over with the usual sprite tools.</summary>
+      /// <summary>Open the frame in the image editor (with the palette these tiles use), where it can be drawn on or imported over.</summary>
       public void EditFrame(TilesetAnimationItem item, int frame) {
          if (item == null || frame < 0 || frame >= item.Entry.FrameCount) return;
-         var frameAddress = model.ReadPointer(item.Entry.FramesAddress + 4 * frame);
+         var blockset = CurrentBlockset();
+         var frameAddress = blockset == null ? -1 : animations.EnsureFrameFormat(blockset.Start, item.Entry, frame);
+         if (frameAddress < 0) frameAddress = model.ReadPointer(item.Entry.FramesAddress + 4 * frame);
          if (frameAddress < 0 || frameAddress >= model.Count) return;
+         viewPort.ChangeHistory.ChangeCompleted();
+         var page = tilePalette != null && item.Entry.FirstTile >= 0 && item.Entry.FirstTile < tilePalette.Length ? tilePalette[item.Entry.FirstTile] : 0;
+         if (model.GetNextRun(frameAddress) is ISpriteRun && TryOpenImageEditor(frameAddress, page, item.Entry.TileCount)) return;
          viewPort.Goto.Execute(frameAddress);
          RequestTabChange?.Invoke(this, new TabChangeRequestedEventArgs(viewPort));
+      }
+
+      /// <summary>
+      /// Open the image editor on a sprite. The editor is created by the main tab; if nothing is listening for new tabs, fall back to the main tab.
+      /// </summary>
+      private bool TryOpenImageEditor(int address, int palettePage, int preferredTileWidth) {
+         bool opened = false;
+         void Capture(object sender, TabChangeRequestedEventArgs e) {
+            if (e.NewTab is ImageEditorViewModel) { RequestTabChange?.Invoke(this, e); opened = e.RequestAccepted; }
+         }
+         viewPort.RequestTabChange += Capture;
+         try {
+            viewPort.OpenImageEditorTab(address, 0, palettePage, preferredTileWidth);
+         } finally {
+            viewPort.RequestTabChange -= Capture;
+         }
+         return opened;
       }
 
       private void ExecuteGotoTable() {
@@ -416,6 +449,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             if (selectedDoor != null) selectedDoor.Selected = true;
             NotifyPropertyChanged();
             NotifyPropertyChanged(nameof(HasSelectedDoor));
+            removeDoor?.RaiseCanExecuteChanged();
+            importDoorFrames?.RaiseCanExecuteChanged();
+            exportDoorFrames?.RaiseCanExecuteChanged();
          }
       }
       public bool HasSelectedDoor => selectedDoor != null;
@@ -542,9 +578,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Reload();
       }
 
+      /// <summary>Open the door's 3 frames (stacked top to bottom) in the image editor, using the palette the door's tiles use.</summary>
       public void EditDoorFrame(DoorItem item, int frame) {
          if (item == null) return;
-         viewPort.Goto.Execute(item.Entry.TilesAddress);
+         var entry = item.Entry;
+         if (entry.TilesAddress < 0 || entry.TilesAddress + entry.TilesLength > model.Count) return;
+         doors.EnsureTilesFormat(entry);
+         viewPort.ChangeHistory.ChangeCompleted();
+         var indices = doors.ReadPaletteIndices(entry);
+         var page = indices.Length > 0 ? indices[0] : 0;
+         if (model.GetNextRun(entry.TilesAddress) is ISpriteRun && TryOpenImageEditor(entry.TilesAddress, page, -1)) return;
+         viewPort.Goto.Execute(entry.TilesAddress);
          RequestTabChange?.Invoke(this, new TabChangeRequestedEventArgs(viewPort));
       }
 
@@ -733,7 +777,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <summary>
       /// Render 'count' tiles from raw 4bpp data as one row (used for the selection preview and each animation frame).
       /// </summary>
-      public IPixelViewModel RenderTileRow(int firstTile, int count, byte[] data, int dataTileOffset = -1) {
+      public IPixelViewModel RenderTileRow(int firstTile, int count, byte[] data, int dataTileOffset = -1, double scale = 1) {
          count = Math.Max(1, count);
          var pixels = new short[count * 8 * 8];
          if (data != null) {
@@ -750,7 +794,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                }
             }
          }
-         return new ReadonlyPixelViewModel(count * 8, 8, pixels);
+         return new ReadonlyPixelViewModel(count * 8, 8, pixels) { SpriteScale = scale };
       }
 
       public IPixelViewModel RenderFrame(TilesetAnimationEntry entry, int frame) {
@@ -781,10 +825,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public int FrameCount { get => Entry.FrameCount; set { if (value != Entry.FrameCount) tab.SetEntryFrameCount(this, value); } }
 
       private double spriteScale = 2;
-      public double SpriteScale { get => spriteScale; set { Set(ref spriteScale, value); foreach (var frame in Frames) frame.SpriteScale = value; } }
+      public double SpriteScale { get => spriteScale; set { Set(ref spriteScale, value); foreach (var frame in Frames) frame.SpriteScale = value; NotifyPropertyChanged(nameof(LiveFrame)); } }
 
       private bool selected;
       public bool Selected { get => selected; set => TryUpdate(ref selected, value); }
+
+      private int liveIndex;
+      /// <summary>The frame the game would be showing right now (the view advances this with Tick).</summary>
+      public IPixelViewModel LiveFrame => Frames.Count == 0 ? BaseTiles : Frames[Math.Min(liveIndex, Frames.Count - 1)];
+      public void Tick(int tick) {
+         if (Frames.Count < 2) return;
+         if ((tick & ((1 << Entry.Timer) - 1)) != 0) return;
+         liveIndex = (liveIndex + 1) % Frames.Count;
+         NotifyPropertyChanged(nameof(LiveFrame));
+      }
 
       public TilesetAnimationItem(TilesetAnimationEntry entry, TilesetAnimationTab tab) {
          this.tab = tab;
@@ -795,7 +849,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Entry = entry;
          Frames.Clear();
          for (int f = 0; f < entry.FrameCount; f++) Frames.Add(new TilesetAnimationFrame(this, f, tab.RenderFrame(entry, f)) { SpriteScale = spriteScale });
-         BaseTiles = tab.RenderTileRow(entry.FirstTile, entry.TileCount, null);
+         BaseTiles = tab.RenderTileRow(entry.FirstTile, entry.TileCount, null, scale: spriteScale);
+         liveIndex = 0;
+         NotifyPropertyChanged(nameof(LiveFrame));
          NotifyPropertyChanged(nameof(Label));
          NotifyPropertyChanged(nameof(Details));
          NotifyPropertyChanged(nameof(Speed));
@@ -820,10 +876,24 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public int Metatile { get => Entry.Metatile; set { if (value != Entry.Metatile) tab.SetDoorMetatile(this, value); } }
 
       private double spriteScale = 2;
-      public double SpriteScale { get => spriteScale; set { Set(ref spriteScale, value); foreach (var frame in Frames) frame.SpriteScale = value; } }
+      public double SpriteScale { get => spriteScale; set { Set(ref spriteScale, value); foreach (var frame in Frames) frame.SpriteScale = value; NotifyPropertyChanged(nameof(LiveFrame)); } }
 
       private bool selected;
       public bool Selected { get => selected; set => TryUpdate(ref selected, value); }
+
+      // closed, open (4 game frames per step, like the game), stay open while the player walks through, close again
+      private static readonly (int frame, int ticks)[] Timeline = { (0, 45), (1, 4), (2, 4), (2, 40), (1, 4), (0, 4) };
+      private int timelineStep, stepTicks;
+      /// <summary>The frame the game would be showing right now as the door opens and closes (the view advances this with Tick).</summary>
+      public IPixelViewModel LiveFrame => Frames.Count == 0 ? Block : Frames[Math.Min(Timeline[timelineStep].frame, Frames.Count - 1)];
+      public void Tick() {
+         if (Frames.Count == 0) return;
+         stepTicks++;
+         if (stepTicks < Timeline[timelineStep].ticks) return;
+         stepTicks = 0;
+         timelineStep = (timelineStep + 1) % Timeline.Length;
+         NotifyPropertyChanged(nameof(LiveFrame));
+      }
 
       public DoorItem(DoorEntry entry, TilesetAnimationTab tab) {
          this.tab = tab;
@@ -835,6 +905,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Frames.Clear();
          for (int f = 0; f < DoorEntry.FrameCount; f++) Frames.Add(new TilesetAnimationFrame(null, f, tab.RenderDoorFrame(entry, f)) { SpriteScale = spriteScale, Door = this });
          Block = tab.RenderBlock(entry.Metatile);
+         timelineStep = 0; stepTicks = 0;
+         NotifyPropertyChanged(nameof(LiveFrame));
          NotifyPropertyChanged(nameof(Label));
          NotifyPropertyChanged(nameof(Details));
          NotifyPropertyChanged(nameof(Sound));

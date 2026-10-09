@@ -209,6 +209,30 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
                }
             }
 
+            // option 3c: `sibling/field` - the palette is the 'field' pointer of the struct that this element's 'sibling' pointer points at.
+            // Example: a door's tiles<`ucs4x2x12|tileset/pal`> use the 'pal' palette of the tileset named by the door's 'tileset' pointer.
+            if (hint.Contains('/') && !hint.Contains(':') && spriteTable != null && offset.ElementIndex != -1) {
+               var parts = hint.Split('/');
+               if (parts.Length == 2) {
+                  var sibling = spriteTable.ElementContent.FirstOrDefault(seg => seg.Name == parts[0] && seg.Type == ElementContentType.Pointer);
+                  if (sibling != null) {
+                     var siblingOffset = spriteTable.ElementContent.Until(seg => seg == sibling).Sum(seg => seg.Length);
+                     var target = model.ReadPointer(spriteTable.Start + offset.ElementIndex * spriteTable.ElementLength + siblingOffset);
+                     if (target >= 0 && target < model.Count && model.GetNextRun(target) is ITableRun targetTable && targetTable.Start == target) {
+                        var field = targetTable.ElementContent.FirstOrDefault(seg => seg.Name == parts[1] && seg.Type == ElementContentType.Pointer);
+                        if (field != null) {
+                           var fieldOffset = targetTable.ElementContent.Until(seg => seg == field).Sum(seg => seg.Length);
+                           var paletteStart = model.ReadPointer(targetTable.Start + fieldOffset);
+                           if (model.GetNextRun(paletteStart) is IPaletteRun fieldPalette && fieldPalette.Start == paletteStart) {
+                              results.Add(fieldPalette);
+                              return results;
+                           }
+                        }
+                     }
+                  }
+               }
+            }
+
             // option 4: I'm in a table, and my hint is a table name
             if (offset.ElementIndex == -1) return results;
             if (!(run is ArrayRun array)) return results;

@@ -15,8 +15,8 @@ namespace HavenSoft.HexManiac.WPF.Controls {
       public SoundView() {
          InitializeComponent();
          DataContextChanged += (sender, e) => {
-            if (e.OldValue is SoundTab old) old.RequestPlayWav -= PlayWav;
-            if (e.NewValue is SoundTab vm) vm.RequestPlayWav += PlayWav;
+            if (e.OldValue is SoundTab old) { old.RequestPlayWav -= PlayWav; old.RequestStopPlayback -= StopRequested; }
+            if (e.NewValue is SoundTab vm) { vm.RequestPlayWav += PlayWav; vm.RequestStopPlayback += StopRequested; }
          };
          Unloaded += (sender, e) => StopPlayback();
       }
@@ -26,11 +26,14 @@ namespace HavenSoft.HexManiac.WPF.Controls {
             StopPlayback();
             playerStream = new MemoryStream(wav);
             player = new SoundPlayer(playerStream);
+            player.Load();
             player.Play();
          } catch (Exception ex) {
-            MessageBox.Show("Could not play the cry: " + ex.Message, "Hex Maniac Advance", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Could not play the sound: " + ex.Message, "Hex Maniac Advance", MessageBoxButton.OK, MessageBoxImage.Warning);
          }
       }
+
+      private void StopRequested(object sender, EventArgs e) => StopPlayback();
 
       private void StopPlayback() {
          try {

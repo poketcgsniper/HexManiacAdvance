@@ -3,12 +3,12 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:hshmwpfc="clr-namespace:HavenSoft.HexManiac.WPF.Controls">
    <UserControl.Resources>
-      <Style x:Key="Hint" TargetType="TextBlock">
+      <Style x:Key="Hint" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
          <Setter Property="Foreground" Value="{DynamicResource Secondary}"/>
          <Setter Property="TextWrapping" Value="Wrap"/>
          <Setter Property="Margin" Value="0,2"/>
       </Style>
-      <Style x:Key="ToolButton" TargetType="Button">
+      <Style x:Key="ToolButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
          <Setter Property="Padding" Value="10,2"/>
          <Setter Property="Margin" Value="0,0,6,0"/>
       </Style>
@@ -96,7 +96,7 @@
             </Grid.RowDefinitions>
          <DockPanel Grid.Row="0">
             <TextBlock DockPanel.Dock="Top" Text="Animations on this tileset" FontSize="14" Margin="0,0,0,4"/>
-            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="Each frame replaces the tiles while it plays. Click a frame to open it in the main tab and draw on it (or import a picture over it), or import all frames at once from one picture: each frame is (tiles x 8) pixels wide and 8 pixels tall, stacked top to bottom."/>
+            <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="Each frame replaces the tiles while it plays. Click a frame to open it in the image editor and draw on it (or import a picture over it), or import all frames at once from one picture: each frame is (tiles x 8) pixels wide and 8 pixels tall, stacked top to bottom."/>
             <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
                <Button Content="Import frames…" Command="{Binding ImportFrames}" Style="{StaticResource ToolButton}" ToolTip="Replace every frame of the selected animation from one picture"/>
                <Button Content="Export frames…" Command="{Binding ExportFrames}" Style="{StaticResource ToolButton}" ToolTip="Save the selected animation's frames as one picture"/>
@@ -122,6 +122,12 @@
                               <TextBlock Text="{Binding Label}" FontWeight="Bold"/>
                               <TextBlock Text="{Binding Details}" Foreground="{DynamicResource Secondary}"/>
                               <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                 <StackPanel Margin="0,0,12,0" ToolTip="How the animation looks in game">
+                                    <TextBlock Text="Live" FontSize="10" Foreground="{DynamicResource Accent}"/>
+                                    <Border BorderBrush="{DynamicResource Accent}" BorderThickness="1">
+                                       <hshmwpfc:PixelImage DataContext="{Binding LiveFrame}"/>
+                                    </Border>
+                                 </StackPanel>
                                  <StackPanel Margin="0,0,12,0">
                                     <TextBlock Text="In tileset" FontSize="10" Foreground="{DynamicResource Secondary}"/>
                                     <hshmwpfc:PixelImage DataContext="{Binding BaseTiles}"/>
@@ -134,7 +140,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                          <StackPanel Margin="0,0,8,0" Cursor="Hand" MouseLeftButtonDown="FrameClicked" ToolTip="Click to open this frame in the main tab">
+                                          <StackPanel Margin="0,0,8,0" Cursor="Hand" MouseLeftButtonDown="FrameClicked" ToolTip="Click to open this frame in the image editor">
                                              <TextBlock Text="{Binding Label}" FontSize="10" Foreground="{DynamicResource Secondary}"/>
                                              <Border BorderBrush="{DynamicResource Secondary}" BorderThickness="1">
                                                 <hshmwpfc:PixelImage/>
@@ -211,6 +217,12 @@
                               <TextBlock Text="{Binding Label}" FontWeight="Bold"/>
                               <TextBlock Text="{Binding Details}" Foreground="{DynamicResource Secondary}"/>
                               <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                 <StackPanel Margin="0,0,12,0" ToolTip="How the door opens and closes in game">
+                                    <TextBlock Text="Live" FontSize="10" Foreground="{DynamicResource Accent}"/>
+                                    <Border BorderBrush="{DynamicResource Accent}" BorderThickness="1">
+                                       <hshmwpfc:PixelImage DataContext="{Binding LiveFrame}"/>
+                                    </Border>
+                                 </StackPanel>
                                  <StackPanel Margin="0,0,12,0">
                                     <TextBlock Text="Block" FontSize="10" Foreground="{DynamicResource Secondary}"/>
                                     <hshmwpfc:PixelImage DataContext="{Binding Block}"/>
@@ -223,7 +235,7 @@
                                     </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                        <DataTemplate>
-                                          <StackPanel Margin="0,0,8,0" Cursor="Hand" MouseLeftButtonDown="DoorFrameClicked" ToolTip="Click to open the door's graphics in the main tab">
+                                          <StackPanel Margin="0,0,8,0" Cursor="Hand" MouseLeftButtonDown="DoorFrameClicked" ToolTip="Click to open the door's frames in the image editor">
                                              <TextBlock Text="{Binding Label}" FontSize="10" Foreground="{DynamicResource Secondary}"/>
                                              <Border BorderBrush="{DynamicResource Secondary}" BorderThickness="1">
                                                 <hshmwpfc:PixelImage/>
