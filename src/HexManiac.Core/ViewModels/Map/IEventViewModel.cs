@@ -999,14 +999,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             if (trainerSprite != null) return trainerSprite;
             var trainerContent = EventTemplate.GetTrainerContent(element.Model, this);
             if (trainerContent == null) return null;
-            if (!(trainerContent.TrainerClassAddress + 2).InRange(0, element.Model.Count)) return null;
-            var spriteIndex = element.Model[trainerContent.TrainerClassAddress + 2];
+            if (!trainerContent.TrainerSpriteAddress.InRange(0, element.Model.Count)) return null;
+            var spriteIndex = element.Model[trainerContent.TrainerSpriteAddress];
             // hacks can point at a sprite that doesn't exist in the table: show no sprite rather than failing to show the event
-            var spriteTable = element.Model.GetTableModel(HardcodeTablesModel.TrainerSpritesName);
-            if (spriteTable == null || spriteIndex >= spriteTable.Count) return null;
-            var spriteAddress = spriteTable[spriteIndex].GetAddress("sprite");
+            var spriteAddress = EventTemplate.GetTrainerSpriteAddress(element.Model, spriteIndex);
             if (!spriteAddress.InRange(0, element.Model.Count)) return null;
-            var spriteRun = element.Model.GetNextRun(spriteAddress) as ISpriteRun;
+            if (element.Model.GetNextRun(spriteAddress) is not ISpriteRun spriteRun || spriteRun.Start != spriteAddress) return null;
             return trainerSprite = ReadonlyPixelViewModel.Create(element.Model, spriteRun, true, .5);
          }
       }
@@ -1017,7 +1015,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             if (trainerName != null) return trainerName;
             var trainerContent = EventTemplate.GetTrainerContent(element.Model, this);
             if (trainerContent == null) return null;
-            var text = element.Model.TextConverter.Convert(element.Model, trainerContent.TrainerNameAddress, 12);
+            var text = element.Model.TextConverter.Convert(element.Model, trainerContent.TrainerNameAddress, trainerContent.TrainerNameLength);
             return trainerName = text.Trim('"');
          }
          set {
@@ -1025,11 +1023,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             var trainerContent = EventTemplate.GetTrainerContent(element.Model, this);
             if (trainerContent == null) return;
             var bytes = element.Model.TextConverter.Convert(value, out _);
-            while (bytes.Count > 12) {
+            var nameLength = trainerContent.TrainerNameLength;
+            while (bytes.Count > nameLength) {
                bytes.RemoveAt(bytes.Count - 1);
                bytes[bytes.Count - 1] = 0xFF;
             }
-            while (bytes.Count < 12) bytes.Add(0);
+            while (bytes.Count < nameLength) bytes.Add(0);
             element.Token.ChangeData(element.Model, trainerContent.TrainerNameAddress, bytes);
             NotifyPropertyChanged();
             var options = TrainerOptions.AllOptions.ToList();
@@ -1045,8 +1044,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
          var trainerContent = EventTemplate.GetTrainerContent(element.Model, this);
          var options = new List<ComboOption>();
+         var layout = TrainerLayout.For(trainerTable.Run);
          for (int i = 0; i < trainers.Count; i++) {
-            options.Add(CreateOption(i, trainerTable[i].GetValue(1), trainers[i]));
+            options.Add(CreateOption(i, element.Model[trainerTable[i].Start + layout.ClassOffset], trainers[i]));
          }
          trainerOptions.Update(options, trainerContent?.TrainerIndex ?? 0);
       }
@@ -1064,7 +1064,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             if (trainerContent == null) return null;
             var address = element.Model.ReadPointer(trainerContent.TeamPointer);
             if (address < 0 || address >= element.Model.Count) return null;
-            if (element.Model.GetNextRun(address) is not TrainerPokemonTeamRun run) return null;
+            if (element.Model.GetNextRun(address) is not ITrainerTeamRun run) return null;
             if (run.Start != address) return null;
             if (TeamVisualizations.Count == 0) UpdateTeamVisualizations(run);
             return teamText = run.SerializeRun();
@@ -1075,20 +1075,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             if (trainerContent == null) return;
             var address = element.Model.ReadPointer(trainerContent.TeamPointer);
             if (address < 0 || address >= element.Model.Count) return;
-            if (element.Model.GetNextRun(address) is not TrainerPokemonTeamRun run) return;
+            if (element.Model.GetNextRun(address) is not ITrainerTeamRun run) return;
             if (run.Start != address) return;
-            var newRun = run.DeserializeRun(value, element.Token, false, false, out _);
+            var newRun = run.DeserializeRun(value, element.Token, out _, out _);
             element.Model.ObserveRunWritten(element.Token, newRun);
             if (newRun.Start != run.Start) DataMoved.Raise(this, new("Trainer Team", newRun.Start));
-            UpdateTeamVisualizations(newRun);
+            UpdateTeamVisualizations(newRun as IStreamRun);
             NotifyPropertyChanged();
          }
       }
 
       public ObservableCollection<IPixelViewModel> TeamVisualizations { get; } = new();
 
-      private void UpdateTeamVisualizations(TrainerPokemonTeamRun team) {
+      private void UpdateTeamVisualizations(IStreamRun team) {
          TeamVisualizations.Clear();
+         if (team == null) return;
          foreach (var vis in team.Visualizations) {
             TeamVisualizations.Add(vis);
          }
@@ -1098,7 +1099,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public ICommand OpenTrainerData => StubCommand(ref openTrainerData, () => {
          var trainerContent = EventTemplate.GetTrainerContent(element.Model, this);
          if (trainerContent == null) return;
-         gotoAddress(trainerContent.TrainerClassAddress - 1);
+         gotoAddress(trainerContent.TrainerStart);
       });
 
       public static ComboOption CreateOption(IReadOnlyList<string> classOptions, int index, int trainerClass, string name) => new($"{index} - {classOptions[trainerClass.LimitToRange(0, classOptions.Count - 1)]} {name}", index);
@@ -1110,7 +1111,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          if (trainerContent == null) return null;
          var address = element.Model.ReadPointer(trainerContent.TeamPointer);
          if (address < 0 || address >= element.Model.Count) return null;
-         if (element.Model.GetNextRun(address) is not TrainerPokemonTeamRun run) return null;
+         if (element.Model.GetNextRun(address) is not ITrainerTeamRun run) return null;
          if (run.Start != address) return null;
          return run.GetAutoCompleteOptions(line, lineIndex, characterIndex);
       }
@@ -2151,7 +2152,7 @@ show:
             var table = model.GetTableModel(HardcodeTablesModel.TrainerTableName);
             if (table == null || !trainerID.InRange(0, table.Count)) return string.Empty;
             var teamAddress = table[trainerID].GetAddress("pokemon");
-            if (model.GetNextRun(teamAddress) is not TrainerPokemonTeamRun team) return string.Empty;
+            if (model.GetNextRun(teamAddress) is not ITrainerTeamRun team) return string.Empty;
 
             if (TeamVisualizations.Count == 0) UpdateTeamVisualizations(team);
             return teamText = team.SerializeRun();
@@ -2162,12 +2163,12 @@ show:
             var table = model.GetTableModel(HardcodeTablesModel.TrainerTableName);
             if (table == null || !trainerID.InRange(0, table.Count)) return;
             var teamAddress = table[trainerID].GetAddress("pokemon");
-            if (model.GetNextRun(teamAddress) is not TrainerPokemonTeamRun team) return;
+            if (model.GetNextRun(teamAddress) is not ITrainerTeamRun team) return;
 
-            var newRun = team.DeserializeRun(value, tokenGenerator(), false, false, out _);
+            var newRun = team.DeserializeRun(value, tokenGenerator(), out _, out _);
             model.ObserveRunWritten(tokenGenerator(), newRun);
             if (newRun.Start != team.Start) DataMoved.Raise(this, new("Trainer Team", newRun.Start));
-            UpdateTeamVisualizations(newRun);
+            UpdateTeamVisualizations(newRun as IStreamRun);
             NotifyPropertyChanged();
          }
       }
@@ -2176,8 +2177,9 @@ show:
 
       public ObservableCollection<IPixelViewModel> TeamVisualizations { get; } = new();
 
-      private void UpdateTeamVisualizations(TrainerPokemonTeamRun team) {
+      private void UpdateTeamVisualizations(IStreamRun team) {
          TeamVisualizations.Clear();
+         if (team == null) return;
          foreach (var vis in team.Visualizations) {
             TeamVisualizations.Add(vis);
          }
@@ -2187,7 +2189,7 @@ show:
          var table = model.GetTableModel(HardcodeTablesModel.TrainerTableName);
          if (table == null || !trainerID.InRange(0, table.Count)) return null;
          var teamAddress = table[trainerID].GetAddress("pokemon");
-         if (model.GetNextRun(teamAddress) is not TrainerPokemonTeamRun team) return null;
+         if (model.GetNextRun(teamAddress) is not ITrainerTeamRun team) return null;
          return team.GetAutoCompleteOptions(line, lineIndex, characterIndex);
       }
 

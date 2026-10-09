@@ -348,6 +348,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          if (eventModel is not ObjectEventViewModel objectModel) return null;
          var address = objectModel.ScriptAddress;
          if (address < 0) return null;
+         var trainersTable = model.GetTableModel(HardcodeTablesModel.TrainerTableName, null);
+         if (trainersTable == null) return null;
+         var layout = TrainerLayout.For(trainersTable.Run);
+         if (layout != TrainerLayout.Vanilla) return GetExpansionTrainerContent(model, address, trainersTable, layout);
          // 5C 00 trainerFlag: 00 00 <before> <win> 0F 00 <after> 09 06 02
          var expectedValues = new Dictionary<int, byte> {
             { 0, 0x5C },
@@ -366,17 +370,57 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
          var trainerID = model.ReadMultiByteValue(address + 2, 2);
          if (trainerID < 0) return null;
-         var trainers = model.GetTableModel(HardcodeTablesModel.TrainerTableName, null);
+         var trainers = trainersTable;
          if (trainerID >= trainers.Count) return null;
 
          var beforePointer = address + 6;
          var winPointer = address + 10;
          var afterPointer = address + 16;
-         var trainerClassAddress = trainers[trainerID].Start + 1;
-         var trainerNameAddress = trainers[trainerID].Start + 4;
-         var teamPointer = trainers[trainerID].Start + 36;
+         var trainerStart = trainers[trainerID].Start;
 
-         return new TrainerEventContent(beforePointer, winPointer, afterPointer, trainerClassAddress, trainerID, address + 2, trainerNameAddress, teamPointer);
+         return new TrainerEventContent(beforePointer, winPointer, afterPointer, trainerStart + layout.ClassOffset, trainerID, address + 2, trainerStart + layout.NameOffset, trainerStart + layout.TeamOffset,
+            trainerStart, trainerStart + layout.SpriteOffset, layout.NameLength);
+      }
+
+      /// <summary>
+      /// pokeemerald-expansion (1.17+) trainer scripts start with the unified 41-byte trainerbattle command:
+      /// 5C flags localIdA trainerA: introA<> loseA<> scriptA<> localIdB trainerB: introB<> loseB<> scriptB<> victory<> cannotBattle<> rivalFlags
+      /// The post-battle text is the first msgbox of scriptA (0F 00 text ...), when there is one.
+      /// </summary>
+      private static TrainerEventContent GetExpansionTrainerContent(IDataModel model, int address, ModelTable trainers, TrainerLayout layout) {
+         const int CommandLength = 41;
+         if (address + CommandLength > model.Count) return null;
+         if (model[address] != 0x5C) return null;
+         var trainerID = model.ReadMultiByteValue(address + 3, 2);
+         if (trainerID < 0 || trainerID >= trainers.Count) return null;
+         var introPointer = address + 5;
+         var losePointer = address + 9;
+         var intro = model.ReadPointer(introPointer);
+         if (intro < 0 || intro >= model.Count) return null;
+         var afterPointer = Pointer.NULL;
+         var scriptA = model.ReadPointer(address + 13);
+         if (scriptA >= 0 && scriptA + 6 <= model.Count && model[scriptA] == 0x0F && model[scriptA + 1] == 0x00) afterPointer = scriptA + 2;
+         var trainerStart = trainers[trainerID].Start;
+         return new TrainerEventContent(introPointer, losePointer, afterPointer, trainerStart + layout.ClassOffset, trainerID, address + 3, trainerStart + layout.NameOffset, trainerStart + layout.TeamOffset,
+            trainerStart, trainerStart + layout.SpriteOffset, layout.NameLength);
+      }
+
+      /// <summary>
+      /// Resolve the address of a trainer's front sprite, for either the vanilla layout (graphics.trainers.sprites.front)
+      /// or a decomp layout where the pic table holds {sprite, palette, ...} records (data.trainers.sprites/N/front/0/sprite/).
+      /// </summary>
+      public static int GetTrainerSpriteAddress(IDataModel model, int spriteIndex) {
+         var spriteTable = model.GetTableModel(HardcodeTablesModel.TrainerSpritesName);
+         if (spriteTable != null) {
+            if (spriteIndex >= spriteTable.Count) return Pointer.NULL;
+            return spriteTable[spriteIndex].GetAddress("sprite");
+         }
+         var noChange = new NoDataChangeDeltaModel();
+         var picTable = model.GetTable("data.trainers.sprites");
+         if (picTable == null || spriteIndex >= picTable.ElementCount) return Pointer.NULL;
+         var address = model.GetAddressFromAnchor(noChange, -1, $"data.trainers.sprites/{spriteIndex}/front/0/sprite/");
+         if (address < 0) address = model.GetAddressFromAnchor(noChange, -1, $"data.trainers.sprites/{spriteIndex}/sprite/");
+         return address;
       }
 
       #endregion
@@ -1116,7 +1160,31 @@ end
       #endregion
    }
 
-   public record TrainerEventContent(int BeforeTextPointer, int WinTextPointer, int AfterTextPointer, int TrainerClassAddress, int TrainerIndex, int TrainerIndexAddress, int TrainerNameAddress, int TeamPointer);
+   public record TrainerEventContent(int BeforeTextPointer, int WinTextPointer, int AfterTextPointer, int TrainerClassAddress, int TrainerIndex, int TrainerIndexAddress, int TrainerNameAddress, int TeamPointer, int TrainerStart, int TrainerSpriteAddress, int TrainerNameLength);
+
+   /// <summary>
+   /// Where the fields the trainer editors care about live inside a trainer record.
+   /// Vanilla: [structType. class. introMusic. sprite. name""12 ... pokemonCount:: pokemon<>] (class +1, sprite +3, name +4, team +36).
+   /// Other layouts (decomp hacks) are read from the table's segment names: class, sprite, name, pokemon.
+   /// </summary>
+   public record TrainerLayout(int ClassOffset, int SpriteOffset, int NameOffset, int NameLength, int TeamOffset) {
+      public static readonly TrainerLayout Vanilla = new(1, 3, 4, 12, 36);
+      public static TrainerLayout For(ITableRun trainers) {
+         if (trainers == null) return Vanilla;
+         int classOffset = -1, spriteOffset = -1, nameOffset = -1, nameLength = 12, teamOffset = -1, offset = 0;
+         foreach (var segment in trainers.ElementContent) {
+            switch (segment.Name) {
+               case "class": classOffset = offset; break;
+               case "sprite": spriteOffset = offset; break;
+               case "name": nameOffset = offset; nameLength = segment.Length; break;
+               case "pokemon": if (segment.Type == ElementContentType.Pointer) teamOffset = offset; break;
+            }
+            offset += segment.Length;
+         }
+         if (classOffset < 0 || spriteOffset < 0 || nameOffset < 0 || teamOffset < 0) return Vanilla;
+         return new(classOffset, spriteOffset, nameOffset, nameLength, teamOffset);
+      }
+   }
 
    public record RematchTrainerEventContent(int TrainerID, int BeforeTextPointer, int WinTextPointer, int AfterTextPointer);
 

@@ -102,7 +102,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          recompileTimer = singletons.WorkDispatcher.CreateDelayTimer();
          var gameHash = viewPort.Model.GetShortGameCode();
          thumb = new ThumbParser(singletons);
-         script = new ScriptParser(gameHash, singletons.ScriptLines, 0x02);
+         script = new ScriptParser(gameHash, viewPort.Model.GetScriptLines(singletons.ScriptLines), 0x02);
          battleScript = new ScriptParser(gameHash, singletons.BattleScriptLines, 0x3D);
          animationScript = new ScriptParser(gameHash, singletons.AnimationScriptLines, 0x08);
          battleAIScript = new ScriptParser(gameHash, singletons.BattleAIScriptLines, 0x5A);

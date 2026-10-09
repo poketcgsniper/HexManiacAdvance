@@ -9,7 +9,7 @@ using System.Linq;
 using System.Text;
 
 namespace HavenSoft.HexManiac.Core.Models.Runs {
-   public class TrainerPokemonTeamRun : BaseRun, IStreamRun, ITableRun, IUpdateFromParentRun {
+   public class TrainerPokemonTeamRun : BaseRun, ITrainerTeamRun, IUpdateFromParentRun {
       public const int IV_Cap = 31;
       public const int TrainerFormat_StructTypeOffset = 0;
       public const int TrainerFormat_PokemonCountOffset = 32;

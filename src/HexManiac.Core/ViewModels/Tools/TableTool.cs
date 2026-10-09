@@ -563,7 +563,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             if (!child.DependsOn(basename)) continue;
             if (child is PLMRun plmRun) plmResults.AddRange(plmRun.Search(index));
             if (child is EggMoveRun eggRun) eggResults.AddRange(eggRun.Search(basename, index));
-            if (child is TrainerPokemonTeamRun trainerRun) trainerResults.AddRange(trainerRun.Search(basename, index));
+            if (child is ITrainerTeamRun trainerRun) trainerResults.AddRange(trainerRun.Search(basename, index));
             if (child is TableStreamRun streamRun) streamResults.AddRange(streamRun.Search(basename, index));
          }
          var parentOffset = array is ArrayRun arrayRun ? arrayRun.ParentOffset.BeginningMargin : 0;

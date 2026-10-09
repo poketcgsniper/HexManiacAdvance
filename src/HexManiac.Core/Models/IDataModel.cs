@@ -68,6 +68,7 @@ namespace HavenSoft.HexManiac.Core.Models {
 
       bool TryGetUsefulHeader(int address, out string header);
       bool TryGetList(string name, out ValidationList nameArray);
+      IReadOnlyList<Code.IScriptLine> GetScriptLines(IReadOnlyList<Code.IScriptLine> sharedLines);
 
       bool IsAtEndOfArray(int dataIndex, out ITableRun tableRun); // is this byte the first one after the end of a table run? (also return true if the table is length 0 and starts right here)
 
@@ -273,6 +274,12 @@ namespace HavenSoft.HexManiac.Core.Models {
       public virtual bool TryGetUsefulHeader(int address, out string header) { header = null; return false; }
 
       public virtual bool TryGetList(string name, out ValidationList list) { list = null; return false; }
+
+      /// <summary>
+      /// The event-script command reference to use for this ROM. By default this is the shared reference,
+      /// but a ROM's metadata can put extra lines in front of it (see PokemonModel).
+      /// </summary>
+      public virtual IReadOnlyList<Code.IScriptLine> GetScriptLines(IReadOnlyList<Code.IScriptLine> sharedLines) => sharedLines;
 
       public abstract bool IsAtEndOfArray(int dataIndex, out ITableRun tableRun);
 

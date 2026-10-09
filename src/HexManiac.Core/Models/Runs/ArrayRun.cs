@@ -228,6 +228,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
                      pointerSegment.InnerFormat.EndsWith("/" + self.ElementContent[segmentIndex].Name)
                   ||
                      (pointerSegment.InnerFormat == TrainerPokemonTeamRun.SharedFormatString && self.ElementContent[segmentIndex].Name == "pokemonCount")
+                  ||
+                     (pointerSegment.InnerFormat == ExpansionTrainerTeamRun.SharedFormatString && self.ElementContent[segmentIndex].Name == "pokemonCount")
                   ) {
                      var length = model.FormatRunFactory.GetStrategy(pointerSegment.InnerFormat).LengthForNewRun(model, pointerSource);
                      if (length > 0) {

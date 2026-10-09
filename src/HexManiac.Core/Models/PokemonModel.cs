@@ -1649,7 +1649,7 @@ namespace HavenSoft.HexManiac.Core.Models {
       public override int GetScriptLength(IScriptStartRun run, IDictionary<int, int> destinationLengths) {
          var gameHash = this.GetShortGameCode();
          IReadOnlyList<IScriptLine> lines = null;
-         if (run is XSERun) lines = singletons.ScriptLines;
+         if (run is XSERun) lines = GetScriptLines(singletons.ScriptLines);
          if (run is BSERun) lines = singletons.BattleScriptLines;
          if (run is ASERun) lines = singletons.AnimationScriptLines;
          if (run is TSERun) lines = singletons.BattleAIScriptLines;
@@ -1771,6 +1771,7 @@ namespace HavenSoft.HexManiac.Core.Models {
       }
 
       public override void SetList(ModelDelta changeToken, string name, IEnumerable<string> list, IReadOnlyDictionary<int, string> comments, string hash) {
+         if (name == ScriptMacroListName) romScriptLines = null;
          if (!lists.TryGetValue(name, out var oldContent)) oldContent = null;
          if (list == null && lists.ContainsKey(name)) lists.Remove(name);
          else {
@@ -1781,6 +1782,38 @@ namespace HavenSoft.HexManiac.Core.Models {
 
       public override bool TryGetList(string name, out ValidationList list) {
          return lists.TryGetValueCaseInsensitive(name, out list);
+      }
+
+      /// <summary>
+      /// A ROM whose script engine differs from vanilla (decomp hacks such as pokeemerald-expansion) can describe its
+      /// commands in a list called 'scriptmacros'. Each entry is a line in the same syntax as scriptReference.txt
+      /// (a command line such as "23 49 38 23 0A vsseeker_rematchid rematchId:" or a macro line). Those lines are
+      /// placed in front of the shared reference, so they take precedence over the built-in definitions.
+      /// </summary>
+      public const string ScriptMacroListName = "scriptmacros";
+      private IReadOnlyList<Code.IScriptLine> romScriptLines;
+      private IReadOnlyList<Code.IScriptLine> romScriptLinesSource;
+      public override IReadOnlyList<Code.IScriptLine> GetScriptLines(IReadOnlyList<Code.IScriptLine> sharedLines) {
+         if (romScriptLines != null && romScriptLinesSource == sharedLines) return romScriptLines;
+         romScriptLinesSource = sharedLines;
+         if (!TryGetList(ScriptMacroListName, out var list) || list == null || list.Count == 0) return romScriptLines = sharedLines;
+         var extra = new List<Code.IScriptLine>();
+         foreach (var raw in list) {
+            var line = raw?.Trim();
+            if (string.IsNullOrEmpty(line) || line.StartsWith("#")) continue;
+            try {
+               if (Code.MacroScriptLine.IsMacroLine(line)) {
+                  var macro = new Code.MacroScriptLine(line);
+                  if (macro.IsValid) extra.Add(macro);
+               } else {
+                  extra.Add(new Code.XSEScriptLine(line));
+               }
+            } catch (Exception) {
+               // a malformed line in the metadata shouldn't stop the ROM from loading
+            }
+         }
+         if (extra.Count == 0) return romScriptLines = sharedLines;
+         return romScriptLines = extra.Concat(sharedLines).ToList();
       }
 
       // for each of the results, we recognized it as text: see if we need to add a matching string run / pointers
