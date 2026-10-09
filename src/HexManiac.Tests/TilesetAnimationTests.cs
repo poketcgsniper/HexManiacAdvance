@@ -114,7 +114,7 @@ namespace HavenSoft.HexManiac.Tests {
       public void AddDoor_GoesInFrontOfTheTerminator() {
          // a doors table with one real door and the all-zero terminator the game stops at
          var tableStart = 0x600;
-         Model.WriteMultiByteValue(Token, tableStart, 2, 33);
+         Model.WriteMultiByteValue(tableStart, 2, Token, 33);
          Model.WritePointer(Token, tableStart + 4, TilesetStart);
          Model[tableStart + 8] = 0; Model[tableStart + 9] = 1;
          Model.WritePointer(Token, tableStart + 12, 0xC00);
