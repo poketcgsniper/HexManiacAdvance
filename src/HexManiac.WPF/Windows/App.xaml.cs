@@ -1,4 +1,4 @@
-﻿using HavenSoft.HexManiac.Core;
+using HavenSoft.HexManiac.Core;
 using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.ViewModels;
 using HavenSoft.HexManiac.Core.ViewModels.Tools;
@@ -17,11 +17,11 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media;
 
-[assembly: AssemblyTitle("HexManiacAdvance")]
+[assembly: AssemblyTitle("CUBHMA")]
 
 namespace HavenSoft.HexManiac.WPF.Windows {
    partial class App {
-      public const string ReleaseUrl = "https://github.com/haven1433/HexManiacAdvance/releases";
+      public const string ReleaseUrl = "https://github.com/poketcgsniper/HexManiacAdvance/releases";
       public const string
          Arg_Skip_Splash_Screen = "--skip-splash",
          Arg_No_Metadata = "--no-metadata",
@@ -239,6 +239,10 @@ namespace HavenSoft.HexManiac.WPF.Windows {
       }
 
       private static void CheckIsNewerVersionAvailable(EditorViewModel viewModel) {
+         // CUBHMA is versioned by its own releases (v0.6.1-perf-N), not by upstream Hex Maniac Advance's version numbers:
+         // the upstream check would nag about versions this build already includes or doesn't want.
+         return;
+#pragma warning disable CS0162
          if (DateTime.Now < viewModel.LastUpdateCheck + TimeSpan.FromDays(1)) return;
          viewModel.LastUpdateCheck = DateTime.Now;
          try {
@@ -255,6 +259,7 @@ namespace HavenSoft.HexManiac.WPF.Windows {
             // Exceptions are expected on Windows 7.
             // If anything goes wrong, we probably don't care. It just means that the IsNewVersionAvailable will be false.
          }
+#pragma warning restore CS0162
       }
    }
 }

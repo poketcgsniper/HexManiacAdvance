@@ -1,4 +1,4 @@
-name: Build HexManiacAdvance
+name: Build CUBHMA
 
 # Builds the x64 release zip (the same way release.sh does) and publishes it on the Releases page.
 on:
@@ -46,7 +46,7 @@ jobs:
         shell: pwsh
         run: |
           $version = (Select-String -Path src/SharedAssemblyInfo.cs -Pattern 'AssemblyVersion\("([^"]+)"\)').Matches[0].Groups[1].Value
-          Compress-Archive -Path artifacts/HexManiac.WPF/bin/Release/net6.0-windows/* -DestinationPath "HexManiacAdvance_x64.$version-perf.zip"
+          Compress-Archive -Path artifacts/HexManiac.WPF/bin/Release/net6.0-windows/* -DestinationPath "CUBHMA_x64.$version-perf.zip"
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
           $failed = if (Test-Path failed-tests.txt) { (Get-Content failed-tests.txt) -join "`n" } else { "" }
           "FAILED_TESTS<<EOF`n$failed`nEOF" | Out-File -FilePath $env:GITHUB_ENV -Append
@@ -54,8 +54,8 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HexManiacAdvance_x64
-          path: HexManiacAdvance_x64.*.zip
+          name: CUBHMA_x64
+          path: CUBHMA_x64.*.zip
 
       - name: Upload test results
         if: always()
@@ -72,9 +72,9 @@ jobs:
         with:
           target_commitish: ${{ github.sha }}
           tag_name: v${{ env.VERSION }}-perf-${{ github.run_number }}
-          name: HexManiacAdvance ${{ env.VERSION }} (performance build ${{ github.run_number }})
+          name: CUBHMA ${{ env.VERSION }} (build ${{ github.run_number }})
           body: |
-            Automated build of the `perf-stability-0.6.1` branch (0.6.1 plus performance and stability fixes).
+            CUBHMA - Cradi's Unofficial Build of Hex Maniac Advance: Hex Maniac Advance 0.6.1 plus performance fixes and the CUBE (pokeemerald-expansion) editors.
             Download the zip below, extract it anywhere, and run `HexManiacAdvance.exe`.
 
             Unit tests: ${{ env.TEST_SUMMARY }}

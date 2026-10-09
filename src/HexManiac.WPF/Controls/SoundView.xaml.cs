@@ -29,7 +29,7 @@ namespace HavenSoft.HexManiac.WPF.Controls {
             player.Load();
             player.Play();
          } catch (Exception ex) {
-            MessageBox.Show("Could not play the sound: " + ex.Message, "Hex Maniac Advance", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Could not play the sound: " + ex.Message, "CUBHMA", MessageBoxButton.OK, MessageBoxImage.Warning);
          }
       }
 

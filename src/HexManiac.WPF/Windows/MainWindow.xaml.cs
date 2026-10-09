@@ -1,4 +1,4 @@
-﻿using HavenSoft.HexManiac.Core;
+using HavenSoft.HexManiac.Core;
 using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
@@ -149,7 +149,7 @@ namespace HavenSoft.HexManiac.WPF.Windows {
       }
 
       private void HandleRenderFailure(Exception ex) {
-         var result = FileSystem.ShowCustomMessageBox("HexManiacAdvance encountered a rendering error." + Environment.NewLine +
+         var result = FileSystem.ShowCustomMessageBox("CUBHMA encountered a rendering error." + Environment.NewLine +
             "The most common render thread failures are associated with video hardware or driver problems." + Environment.NewLine +
             "Do you want to disable hardware acceleration?");
          if (result == true) {

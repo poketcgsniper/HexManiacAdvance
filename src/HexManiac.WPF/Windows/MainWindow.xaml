@@ -1,4 +1,4 @@
-﻿<Window x:Class="HavenSoft.HexManiac.WPF.Windows.MainWindow"
+<Window x:Class="HavenSoft.HexManiac.WPF.Windows.MainWindow"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:hsg3hv="clr-namespace:HavenSoft.HexManiac.WPF.Controls"
@@ -8,7 +8,7 @@
       xmlns:sys="clr-namespace:System;assembly=mscorlib"
       Icon="..\Resources\AppIcon.ico"
       PreviewMouseDown="RunDeferredActions"
-      Title="Hex Maniac Advance" Height="480" MinHeight="300" Width="1105" MinWidth="400" AllowDrop="True" Background="{DynamicResource Backlight}">
+      Title="CUBHMA - Cradi's Unofficial Build of Hex Maniac Advance" Height="480" MinHeight="300" Width="1105" MinWidth="400" AllowDrop="True" Background="{DynamicResource Backlight}">
    <Window.Resources>
       <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
    </Window.Resources>
