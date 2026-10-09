@@ -82,6 +82,8 @@
                </local:AngleBorder>
                <local:AngleComboBox Direction="Out" Width="135" Height="20"
                   ItemsSource="{Binding PrimaryMap.BlockEditor.MovementPermissions}" SelectedIndex="{Binding CollisionIndex}" />
+               <Slider Width="70" Minimum="0" Maximum="100" Value="{Binding CollisionGridOpacity}" VerticalAlignment="Center" Margin="6,0,0,0"
+                       ToolTip="How visible the movement-permission grid is (drag left to fade it out)"/>
             </StackPanel>
             <StackPanel Orientation="Vertical" VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,0,12" Grid.Row="1" Visibility="{Binding BlockEditorVisible, Converter={StaticResource BoolToVisibility}}">
                <local:AngleBorder Direction="Out" VerticalAlignment="Stretch" Content="Block ID" />
@@ -465,15 +467,36 @@
                         <local:AngleTextBox Grid.Row="10" Grid.Column="1" VerticalAlignment="Top" Margin="0,2,2,2" Direction="Out" TextBinding="{Binding Padding, UpdateSourceTrigger=PropertyChanged}" />
 
                         <StackPanel Margin="2,12" Grid.Row="11" Grid.ColumnSpan="2" Visibility="{Binding ShowBerryContent, Converter={StaticResource BoolToVisibility}}">
-                           <Grid>
+                           <Grid Visibility="{Binding HasBerrySpot, Converter={StaticResource BoolToVisibility}}">
+                              <Grid.ColumnDefinitions>
+                                 <ColumnDefinition />
+                                 <ColumnDefinition />
+                              </Grid.ColumnDefinitions>
+                              <Grid.RowDefinitions>
+                                 <RowDefinition />
+                                 <RowDefinition />
+                              </Grid.RowDefinitions>
+                              <local:AngleBorder Direction="Out" Content="Initial Berry:" />
+                              <local:AngleComboBox Direction="Right" Grid.Column="1" Margin="0,2,21,2" ItemsSource="{Binding BerryOptions}" SelectedIndex="{Binding SelectedBerry}"
+                                    ToolTip="The berry the new-game script plants on this tree (edits the setberrytree command for you)"/>
+                              <local:AngleButton Command="{res:MethodCommand GotoBerryCode}" Direction="Right" Grid.Column="1" HorizontalAlignment="Right"
+                                    Width="22" Height="18" IsTabStop="False" Padding="0,2" BorderBrush="{DynamicResource Backlight}" ToolTip="Open the setberrytree command in the script">
+                                 <Path Data="{res:Icon RightAngleArrow}" Fill="{DynamicResource Secondary}" Stretch="Fill" />
+                              </local:AngleButton>
+                              <local:AngleBorder Direction="Out" Content="Growth:" Grid.Row="1" />
+                              <local:AngleComboBox Direction="Right" Grid.Row="1" Grid.Column="1" Margin="0,2,21,2" ItemsSource="{Binding BerryStageOptions}" SelectedIndex="{Binding SelectedBerryStage}"
+                                    ToolTip="How grown the tree is when a new game starts"/>
+                           </Grid>
+                           <Grid Visibility="{Binding HasNoBerrySpot, Converter={StaticResource BoolToVisibility}}">
                               <Grid.ColumnDefinitions>
                                  <ColumnDefinition />
                                  <ColumnDefinition />
                               </Grid.ColumnDefinitions>
                               <local:AngleBorder Direction="Out" Content="Initial Berry:" />
-                              <local:AngleBorder Direction="Right" Grid.Column="1" Content="{Binding BerryText}" Margin="0,2,21,2" />
-                              <local:AngleButton Command="{res:MethodCommand GotoBerryCode}" Direction="Right" Grid.Row="7" Grid.Column="1" HorizontalAlignment="Right"
-                                    Width="22" Height="18" IsTabStop="False" Padding="0,2" BorderBrush="{DynamicResource Backlight}">
+                              <local:AngleBorder Direction="Right" Grid.Column="1" Content="none (empty soil)" Margin="0,2,21,2"
+                                    ToolTip="The new-game script has no setberrytree line for this tree ID. Add one in scripts.newgame.berries to plant something here."/>
+                              <local:AngleButton Command="{res:MethodCommand GotoBerryCode}" Direction="Right" Grid.Column="1" HorizontalAlignment="Right"
+                                    Width="22" Height="18" IsTabStop="False" Padding="0,2" BorderBrush="{DynamicResource Backlight}" ToolTip="Open the berry-planting script">
                                  <Path Data="{res:Icon RightAngleArrow}" Fill="{DynamicResource Secondary}" Stretch="Fill" />
                               </local:AngleButton>
                            </Grid>

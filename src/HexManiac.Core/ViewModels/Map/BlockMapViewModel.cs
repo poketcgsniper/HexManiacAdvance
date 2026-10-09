@@ -280,7 +280,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
       }
 
-      private void ClearPixelCache() {
+      /// <summary>Throw away the rendered map so it's redrawn (for example after the movement-permission grid strength changes).</summary>
+      public void ClearPixelCache() {
          lock (pixelWriteLock) {
             pixelData = null;
             NotifyPropertyChanged(nameof(PixelData));
@@ -562,7 +563,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          if (options == null) options = 100.Range().Select(i => i.ToString()).ToList();
          foreach (var option in options) collection.Add(option);
          var spots = Flags.GetBerrySpots(model, ViewPort.Tools.CodeTool.ScriptParser);
-         return new(spots, collection);
+         return new(spots, collection, Flags.BerryIdOffset(model));
       }
 
       public void InformRepoint(DataMovedEventArgs e) {
@@ -2386,8 +2387,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          pixelData = canvas.PixelData;
       }
 
+      /// <summary>
+      /// How dark the movement-permission grid is drawn (0 = invisible, 31 = black). Shared by every map so the setting sticks while the editor is open.
+      /// </summary>
+      public static int CollisionHighlightStrength { get; set; } = 12;
+
       private void HighlightCollision(short[] pixelData, int x, int y) {
-         new CanvasPixelViewModel(PixelWidth, PixelHeight, pixelData).DarkenRect(x, y, 16, 16, 8);
+         if (CollisionHighlightStrength <= 0) return;
+         new CanvasPixelViewModel(PixelWidth, PixelHeight, pixelData).DarkenRect(x, y, 16, 16, CollisionHighlightStrength.LimitToRange(1, 31));
       }
 
       private void HighlightBlock(short[] pixelData, int x, int y) {
@@ -2866,7 +2873,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public MapDirection OppositeDirection => Direction.Reverse();
    }
 
-   public record BerryInfo(IDictionary<int, BerrySpot> BerryMap, ObservableCollection<string> BerryOptions);
+   /// <param name="IdOffset">What to subtract from a setberrytree berry id to index BerryOptions (see Flags.BerryIdOffset).</param>
+   public record BerryInfo(IDictionary<int, BerrySpot> BerryMap, ObservableCollection<string> BerryOptions, int IdOffset = 1);
 
    public class ConnectionModel {
       private readonly ModelArrayElement connection;

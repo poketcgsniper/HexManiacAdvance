@@ -164,16 +164,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       public ObservableCollection<TemplateType> AvailableTemplateTypes { get; } = new();
 
+      /// <summary>Hand out a flag nothing else uses (see Flags.NextFreeFlag).</summary>
       public int FindNextUnusedFlag() {
-         var flag = 0x21;
-         while (UsedFlags.Contains(flag)) flag++;
+         var flag = Flags.NextFreeFlag(model, UsedFlags);
          UsedFlags.Add(flag);
          return flag;
       }
 
       public int FindNextUnusedVariable() {
-         var variable = 0x4034;
-         while (UsedVariables.Contains(variable)) variable++;
+         var variable = Flags.NextFreeVariable(model, UsedVariables);
          UsedVariables.Add(variable);
          return variable;
       }

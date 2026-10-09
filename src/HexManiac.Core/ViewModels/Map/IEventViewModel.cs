@@ -716,7 +716,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          set {
             element.SetValue("trainerRangeOrBerryID", value);
             RaiseEventVisualUpdated();
-            NotifyPropertiesChanged(nameof(ShowBerryContent), nameof(BerryText));
+            NotifyPropertiesChanged(nameof(ShowBerryContent), nameof(BerryText), nameof(HasBerrySpot), nameof(HasNoBerrySpot), nameof(SelectedBerry), nameof(SelectedBerryStage));
             NotifyPropertyChanged();
          }
       }
@@ -1400,7 +1400,12 @@ show:
 
       #region Berry Content
 
-      public bool ShowBerryContent => TrainerType == 0 && TrainerRangeOrBerryID != 0;
+      /// <summary>A berry tree: an object with the berry-tree movement type whose 'trainer range' field holds the tree id.</summary>
+      public bool ShowBerryContent => TrainerType == 0 && TrainerRangeOrBerryID != 0 && IsBerryTreeMovement(element.Model, MoveType);
+
+      /// <summary>True when the new-game script plants something on this tree (so there's a setberrytree command to edit).</summary>
+      public bool HasBerrySpot => ShowBerryContent && berries.BerryMap.ContainsKey(TrainerRangeOrBerryID);
+      public bool HasNoBerrySpot => ShowBerryContent && !HasBerrySpot;
 
       public string BerryText {
          get {
@@ -1413,10 +1418,108 @@ show:
          }
       }
 
+      public ObservableCollection<string> BerryOptions => berries.BerryOptions;
+
+      /// <summary>Which berry the new-game script plants here. Changing it rewrites the setberrytree command.</summary>
+      public int SelectedBerry {
+         get => berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out var spot) ? spot.BerryID : -1;
+         set {
+            if (value < 0 || !berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out var spot) || spot.BerryID == value) return;
+            var model = element.Model;
+            if (spot.Address + 3 >= model.Count) return;
+            var token = element.Token;
+            token.ChangeData(model, spot.Address + 2, (byte)(value + berries.IdOffset));
+            berries.BerryMap[TrainerRangeOrBerryID] = spot with { BerryID = value };
+            NotifyPropertiesChanged(nameof(SelectedBerry), nameof(BerryText));
+            RaiseEventVisualUpdated();
+         }
+      }
+
+      public static readonly IReadOnlyList<string> BerryStageNames = new[] { "Planted", "Sprouted", "Taller", "Flowering", "Has berries", "Trunk", "Budding" };
+      public IReadOnlyList<string> BerryStageOptions => BerryStageNames;
+
+      /// <summary>How far along the tree is when the game starts (0 = planted ... 4 = has berries).</summary>
+      public int SelectedBerryStage {
+         get => berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out var spot) ? (spot.Stage - 1).LimitToRange(0, BerryStageNames.Count - 1) : -1;
+         set {
+            if (value < 0 || !berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out var spot) || spot.Stage == value + 1) return;
+            var model = element.Model;
+            if (spot.Address + 3 >= model.Count) return;
+            element.Token.ChangeData(model, spot.Address + 3, (byte)(value + 1));
+            berries.BerryMap[TrainerRangeOrBerryID] = spot with { Stage = value + 1 };
+            NotifyPropertyChanged();
+            RaiseEventVisualUpdated();
+         }
+      }
+
       public void GotoBerryCode() {
          if (berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out BerrySpot spot)) {
             gotoAddress(spot.Address);
+         } else {
+            var script = element.Model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, "scripts.newgame.berries");
+            if (script < 0) script = element.Model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, "scripts.newgame.setflags");
+            if (script >= 0) gotoAddress(script);
          }
+      }
+
+      /// <summary>
+      /// Berry trees don't use their own graphics: the game draws gBerries[berry].treePicTable with the tree's growth stage.
+      /// Returns null if this object isn't a berry tree the editor knows about.
+      /// </summary>
+      private IPixelViewModel RenderBerryTree(IDataModel model) {
+         if (TrainerType != 0 || TrainerRangeOrBerryID == 0) return null;
+         if (!IsBerryTreeMovement(model, MoveType)) return null;
+         if (!berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out var spot)) return null;
+         var berryTable = model.GetTableModel(HardcodeTablesModel.BerryTableName);
+         if (berryTable == null || spot.BerryID < 0 || spot.BerryID >= berryTable.Count) return null;
+         var berry = berryTable[spot.BerryID];
+         if (!berry.HasField("treePicTable") || !berry.HasField("treePaletteSlots")) return null;
+         var picTable = berry.GetAddress("treePicTable");
+         var slots = berry.GetAddress("treePaletteSlots");
+         if (picTable < 0 || slots < 0) return null;
+         // stage 1 (planted) shows the dirt pile; every later stage animates between two frames, the first of which we draw
+         int stage = (spot.Stage - 1).LimitToRange(0, 6);
+         int frame = stage == 0 ? 0 : 1 + (stage - 1) * 2;
+         // the frame table ends where the data isn't a plausible {pointer, size} pair: clamp to the last real frame
+         int frameCount = 0;
+         while (frameCount < 16 && picTable + frameCount * 8 + 8 <= model.Count && model.ReadPointer(picTable + frameCount * 8) >= 0 && model.ReadMultiByteValue(picTable + frameCount * 8 + 4, 2) is > 0 and <= 4096) frameCount++;
+         if (frameCount == 0) return null;
+         frame = Math.Min(frame, frameCount - 1);
+         var data = model.ReadPointer(picTable + frame * 8);
+         var size = model.ReadMultiByteValue(picTable + frame * 8 + 4, 2);
+         const int widthTiles = 2;
+         int heightTiles = size / 32 / widthTiles;
+         if (heightTiles <= 0 || data < 0 || data + size > model.Count) return null;
+         var palettes = model.GetTableModel(HardcodeTablesModel.OverworldPalettes);
+         int slot = slots + stage < model.Count ? model[slots + stage] - 2 : -1;
+         IReadOnlyList<short> palette = null;
+         if (palettes != null && slot >= 0 && slot < palettes.Count && model.GetNextRun(palettes[slot].GetAddress("pal")) is IPaletteRun paletteRun) palette = paletteRun.GetPalette(model, 0);
+         palette ??= TileViewModel.CreateDefaultPalette(16);
+         int width = widthTiles * 8, height = heightTiles * 8;
+         var pixels = new short[width * height];
+         for (int t = 0; t < widthTiles * heightTiles; t++) {
+            int tx = (t % widthTiles) * 8, ty = (t / widthTiles) * 8;
+            for (int y = 0; y < 8; y++) {
+               for (int x = 0; x < 8; x++) {
+                  var b = model[data + t * 32 + y * 4 + x / 2];
+                  var index = x % 2 == 0 ? b & 0xF : b >> 4;
+                  pixels[(ty + y) * width + tx + x] = index == 0 ? (short)-1 : palette[index];
+               }
+            }
+         }
+         return new ReadonlyPixelViewModel(width, height, pixels, -1);
+      }
+
+      private static int berryTreeMovementType = -2;
+      private static bool IsBerryTreeMovement(IDataModel model, int moveType) {
+         if (berryTreeMovementType == -2) {
+            berryTreeMovementType = 57; // MOVEMENT_TYPE_BERRY_TREE_GROWTH in the vanilla games
+            if (model.TryGetList("movementtypes", out var types)) {
+               var index = types.FindIndex(name => name != null && name.Contains("BERRY_TREE", StringComparison.OrdinalIgnoreCase));
+               if (index >= 0) berryTreeMovementType = index;
+            }
+         }
+         return moveType == berryTreeMovementType;
       }
 
       #endregion
@@ -1598,7 +1701,7 @@ show:
             76 => 76, // invisible
             _ => 0,
          };
-         EventRender = Render(model, owTable, DefaultOW, Graphics, facing, PullValueFromTransitionScript);
+         EventRender = RenderBerryTree(model) ?? Render(model, owTable, DefaultOW, Graphics, facing, PullValueFromTransitionScript);
          NotifyPropertyChanged(nameof(EventRender));
       }
 
