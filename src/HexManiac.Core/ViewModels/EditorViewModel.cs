@@ -389,6 +389,27 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private bool animateScroll = true;
       public bool AnimateScroll { get => animateScroll; set => Set(ref animateScroll, value); }
 
+      /// <summary>The View menu's choices for the opacity of the movement-permission grid in the map editor, in percent.</summary>
+      public static IReadOnlyList<int> CollisionGridOpacityChoices { get; } = new[] { 10, 25, BlockMapViewModel.DefaultCollisionGridOpacity, 50, 75, 100 };
+
+      /// <summary>
+      /// 0 to 100: how strongly the movement-permission grid is drawn in the map editor.
+      /// There is only one value: the slider in the map editor changes the same one (MapEditorViewModel.CollisionGridOpacity).
+      /// It is saved with the other application settings.
+      /// </summary>
+      public int CollisionGridOpacity {
+         get => BlockMapViewModel.CollisionGridOpacity;
+         set {
+            value = value.LimitToRange(0, 100);
+            if (value == BlockMapViewModel.CollisionGridOpacity) return;
+            BlockMapViewModel.CollisionGridOpacity = value;
+            NotifyPropertyChanged();
+            foreach (var tab in this) {
+               if (tab is MapEditorViewModel mapTab) mapTab.RefreshCollisionGrid();
+            }
+         }
+      }
+
       private bool autoAdjustDataWidth = true;
       public bool AutoAdjustDataWidth { get => autoAdjustDataWidth; set => Set(ref autoAdjustDataWidth, value); }
 
@@ -588,6 +609,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          ShowMatrix = !metadata.Contains("ShowMatrixGrid = False");
          FocusOnGotoShortcuts = !metadata.Contains("FocusOnGotoShortcuts = False");
          AnimateScroll = !metadata.Contains("AnimateScroll = False");
+         var collisionGridLine = metadata.FirstOrDefault(line => line.StartsWith("CollisionGridOpacity = "));
+         if (collisionGridLine != null && int.TryParse(collisionGridLine.Split('=').Last().Trim(), out var collisionGridOpacity)) BlockMapViewModel.CollisionGridOpacity = collisionGridOpacity;
          AutoAdjustDataWidth = !metadata.Contains("AutoAdjustDataWidth = False");
          StretchData = !metadata.Contains("StretchData = False");
          IsNewVersionAvailable = metadata.Contains("IsNewVersionAvailable = True");
@@ -633,6 +656,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             $"MaximumSearchResults = {MaximumSearchResults}",
             $"CopyLimit = {Singletons.CopyLimit}",
             $"AnimateScroll = {AnimateScroll}",
+            $"CollisionGridOpacity = {CollisionGridOpacity}",
             $"AutoAdjustDataWidth = {AutoAdjustDataWidth}",
             $"StretchData = {StretchData}",
             $"AllowMultipleElementsPerLine = {AllowMultipleElementsPerLine}",

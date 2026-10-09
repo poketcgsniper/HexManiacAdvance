@@ -83,7 +83,7 @@
                <local:AngleComboBox Direction="Out" Width="135" Height="20"
                   ItemsSource="{Binding PrimaryMap.BlockEditor.MovementPermissions}" SelectedIndex="{Binding CollisionIndex}" />
                <Slider Width="70" Minimum="0" Maximum="100" Value="{Binding CollisionGridOpacity}" VerticalAlignment="Center" Margin="6,0,0,0"
-                       ToolTip="How visible the movement-permission grid is (drag left to fade it out)"/>
+                       ToolTip="How visible the movement-permission grid is (drag left to fade it out). Also in the View menu: Movement Permission Grid Opacity."/>
             </StackPanel>
             <StackPanel Orientation="Vertical" VerticalAlignment="Bottom" HorizontalAlignment="Right" Margin="0,0,0,12" Grid.Row="1" Visibility="{Binding BlockEditorVisible, Converter={StaticResource BoolToVisibility}}">
                <local:AngleBorder Direction="Out" VerticalAlignment="Stretch" Content="Block ID" />

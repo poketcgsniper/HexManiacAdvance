@@ -208,6 +208,14 @@
                         </ToolTip>
                      </MenuItem.ToolTip>
                   </MenuItem>
+                  <MenuItem Header="Movement Permission Grid _Opacity" SubmenuOpened="CollisionGridOpacityMenuOpened">
+                     <MenuItem Header="10%" Tag="10" IsCheckable="True" Click="CollisionGridOpacityClick"/>
+                     <MenuItem Header="25%" Tag="25" IsCheckable="True" Click="CollisionGridOpacityClick"/>
+                     <MenuItem Header="40% (default)" Tag="40" IsCheckable="True" Click="CollisionGridOpacityClick"/>
+                     <MenuItem Header="50%" Tag="50" IsCheckable="True" Click="CollisionGridOpacityClick"/>
+                     <MenuItem Header="75%" Tag="75" IsCheckable="True" Click="CollisionGridOpacityClick"/>
+                     <MenuItem Header="100%" Tag="100" IsCheckable="True" Click="CollisionGridOpacityClick"/>
+                  </MenuItem>
                   <Separator/>
                   <MenuItem Header="Reset _Zoom" Command="{Binding ResetZoom}">
                      <MenuItem.ToolTip>

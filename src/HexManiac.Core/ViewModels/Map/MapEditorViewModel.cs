@@ -167,16 +167,24 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          set => Set(ref autoUpdateCollision, value);
       }
 
-      /// <summary>0 to 100: how strongly the movement-permission grid is drawn over matching blocks.</summary>
+      /// <summary>
+      /// 0 to 100: how strongly the movement-permission grid is drawn over matching blocks.
+      /// This is the same value as the View menu's Movement Permission Grid Opacity (see EditorViewModel.CollisionGridOpacity).
+      /// </summary>
       public int CollisionGridOpacity {
-         get => BlockMapViewModel.CollisionHighlightStrength * 100 / 31;
+         get => BlockMapViewModel.CollisionGridOpacity;
          set {
-            var strength = (value.LimitToRange(0, 100) * 31 + 50) / 100;
-            if (strength == BlockMapViewModel.CollisionHighlightStrength) return;
-            BlockMapViewModel.CollisionHighlightStrength = strength;
-            NotifyPropertyChanged();
-            foreach (var map in VisibleMaps) map.ClearPixelCache();
+            value = value.LimitToRange(0, 100);
+            if (value == BlockMapViewModel.CollisionGridOpacity) return;
+            BlockMapViewModel.CollisionGridOpacity = value;
+            RefreshCollisionGrid();
          }
+      }
+
+      /// <summary>Redraw the grid after the shared opacity changed from somewhere else (the View menu).</summary>
+      public void RefreshCollisionGrid() {
+         NotifyPropertyChanged(nameof(CollisionGridOpacity));
+         foreach (var map in VisibleMaps) map.ClearPixelCache();
       }
 
       private int collisionIndex = -1;

@@ -174,10 +174,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       private readonly object pixelWriteLock = new();
       private short[] pixelData; // picture of the map
+      private int renderedGridOpacity = BlockMapViewModel.DefaultCollisionGridOpacity; // the grid opacity that pixelData was drawn with
       public short[] PixelData {
          get {
             lock (pixelWriteLock) {
-               if (pixelData == null) FillMapPixelData();
+               // a map that wasn't on screen when the grid opacity changed still has the old grid in its picture
+               if (pixelData == null || renderedGridOpacity != CollisionGridOpacity) FillMapPixelData();
                return pixelData;
             }
          }
@@ -2307,6 +2309,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       private void FillMapPixelData() {
+         renderedGridOpacity = CollisionGridOpacity;
          var layout = GetLayout();
          if (layout == null) return;
          lock (blockRenders) {
@@ -2387,10 +2390,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          pixelData = canvas.PixelData;
       }
 
+      public const int DefaultCollisionGridOpacity = 40;
+      private static int collisionGridOpacity = DefaultCollisionGridOpacity;
+
       /// <summary>
-      /// How dark the movement-permission grid is drawn (0 = invisible, 31 = black). Shared by every map so the setting sticks while the editor is open.
+      /// 0 to 100: how strongly the movement-permission grid is drawn over matching blocks.
+      /// Shared by every map and saved with the application settings. The View menu and the slider in the map editor both change this value.
+      /// The default draws the grid as dark as it was before the setting existed.
       /// </summary>
-      public static int CollisionHighlightStrength { get; set; } = 12;
+      public static int CollisionGridOpacity {
+         get => collisionGridOpacity;
+         set => collisionGridOpacity = value.LimitToRange(0, 100);
+      }
+
+      /// <summary>How dark the movement-permission grid is drawn (0 = invisible, 31 = black).</summary>
+      public static int CollisionHighlightStrength => (CollisionGridOpacity * 31 + 50) / 100;
 
       private void HighlightCollision(short[] pixelData, int x, int y) {
          if (CollisionHighlightStrength <= 0) return;

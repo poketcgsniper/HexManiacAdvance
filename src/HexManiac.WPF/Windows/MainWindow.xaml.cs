@@ -554,6 +554,31 @@ namespace HavenSoft.HexManiac.WPF.Windows {
          }
       }
 
+      #region Movement permission grid opacity (View menu)
+
+      private void CollisionGridOpacityMenuOpened(object sender, RoutedEventArgs e) {
+         if (sender is MenuItem menu) UpdateCollisionGridOpacityChecks(menu);
+      }
+
+      private void CollisionGridOpacityClick(object sender, RoutedEventArgs e) {
+         var item = sender as MenuItem;
+         if (item == null || !int.TryParse(item.Tag as string, out var percent)) return;
+         ViewModel.CollisionGridOpacity = percent;
+         if (item.Parent is MenuItem menu) UpdateCollisionGridOpacityChecks(menu);
+      }
+
+      /// <summary>
+      /// The check mark follows the one stored value, whether it was last changed here or with the slider in the map editor.
+      /// A value that isn't one of the choices (the slider can pick any percent) leaves every choice unchecked.
+      /// </summary>
+      private void UpdateCollisionGridOpacityChecks(MenuItem menu) {
+         foreach (var choice in menu.Items.OfType<MenuItem>()) {
+            choice.IsChecked = int.TryParse(choice.Tag as string, out var percent) && percent == ViewModel.CollisionGridOpacity;
+         }
+      }
+
+      #endregion
+
       private void ExecuteAnimation(object sender, ExecutedRoutedEventArgs e) {
          if (!IsActive) return;
          var element = (FrameworkElement)e.Parameter;
