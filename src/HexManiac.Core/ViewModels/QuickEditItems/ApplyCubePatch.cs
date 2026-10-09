@@ -136,7 +136,7 @@ If the current tab is not a vanilla Emerald ROM, you will be asked to choose one
 
          return new ErrorInfo(
             $"Created {Path.GetFileName(romPath)} ({FormatMegabytes(rom.Contents.Length)}) and {Path.GetFileName(tomlPath)} in {Path.GetDirectoryName(romPath)}. " +
-            $"The original {Path.GetFileName(sourcePath)} was not changed.", isWarningLevel: true);
+            $"The original {Path.GetFileName(sourcePath)} was not changed; it was checked first and is the unmodified {vanilla.Name} (SHA-1 {vanilla.Sha1}).", isWarningLevel: true);
       }
 
       /// <summary>
