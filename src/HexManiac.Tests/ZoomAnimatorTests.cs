@@ -227,6 +227,108 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.InRange(scale, 1, 2);
       }
 
+      #region Frame pacing
+
+      [Fact]
+      public void IsFrameDue_IsNotDueRightAfterStart_ButIsOnceTheMinimumIntervalHasPassed() {
+         var animator = Create();
+         animator.Start(1, 2);
+         Assert.False(animator.IsFrameDue);
+         Wait(0.016);
+         Assert.False(animator.IsFrameDue);
+         Wait(0.016);
+         Assert.True(animator.IsFrameDue);
+      }
+
+      [Fact]
+      public void IsFrameDue_AfterAFrameWasDrawn_WaitsAgain() {
+         var animator = Create();
+         animator.Start(1, 2);
+         Wait(0.04);
+         Assert.True(animator.IsFrameDue);
+         animator.Update();
+         Assert.False(animator.IsFrameDue);
+         Wait(0.01);
+         Assert.False(animator.IsFrameDue);
+         Wait(0.025);
+         Assert.True(animator.IsFrameDue);
+      }
+
+      [Fact]
+      public void IsFrameDue_WhenTheTimeIsUp_TheExactTargetIsNotHeldBack() {
+         var animator = Create(0.25);
+         animator.Start(1, 2);
+         Wait(0.24);
+         animator.Update(); // drawn at 0.24 seconds
+         Wait(0.011);       // 11 ms later: less than the minimum interval, but the zoom is over
+         Assert.True(animator.IsFrameDue);
+         Assert.Equal(2, animator.Update());
+         Assert.False(animator.IsAnimating);
+      }
+
+      [Fact]
+      public void IsFrameDue_WhenNothingIsAnimating_IsFalse() {
+         var animator = Create();
+         Assert.False(animator.IsFrameDue);
+         animator.Start(1, 2);
+         Wait(1);
+         animator.Update();
+         Assert.False(animator.IsFrameDue);
+      }
+
+      [Theory]
+      [InlineData(60)]
+      [InlineData(75)]
+      [InlineData(144)]
+      [InlineData(240)]
+      public void Display_OfAnyRefreshRate_DrawsAboutThirtyFramesPerSecond_AndEndsOnTheExactTarget(int hertz) {
+         var animator = Create(0.25);
+         animator.Start(1, 2);
+         int refreshes = 0, drawn = 0;
+         double last = 0, previous = 1;
+         while (animator.IsAnimating && refreshes < 1000) {
+            Wait(1.0 / hertz);
+            refreshes++;
+            Assert.False(animator.IsFallingBehind, "frames that come on time are never too slow");
+            if (!animator.IsFrameDue) continue;
+            last = animator.Update();
+            drawn++;
+            Assert.InRange(last, previous, 2);
+            previous = last;
+         }
+         Assert.Equal(2, last);
+         Assert.InRange(drawn, 5, 10);
+         Assert.False(animator.IsAnimating);
+      }
+
+      [Fact]
+      public void IsFallingBehind_FramesOnTime_NoButOneThatTakesTooLong_Yes() {
+         var animator = Create(0.25);
+         animator.Start(1, 2);
+         Wait(0.033);
+         animator.Update();
+         Assert.False(animator.IsFallingBehind);
+         Wait(0.050);
+         Assert.False(animator.IsFallingBehind);
+         Wait(0.050); // 100 ms since the last frame
+         Assert.True(animator.IsFallingBehind);
+      }
+
+      [Fact]
+      public void IsFallingBehind_Idle_IsFalse_AndANewZoomStartsFresh() {
+         var animator = Create();
+         Wait(10);
+         Assert.False(animator.IsFallingBehind);
+
+         animator.Start(1, 2);
+         Wait(0.5);
+         Assert.True(animator.IsFallingBehind);
+         animator.Retarget(3);
+         Assert.False(animator.IsFallingBehind);
+      }
+
+      #endregion
+
       #region NextScale
 
       [Theory]

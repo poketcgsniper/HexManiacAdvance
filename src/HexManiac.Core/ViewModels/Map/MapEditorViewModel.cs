@@ -1736,10 +1736,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       /// <summary>
       /// Move the maps one frame along the zoom animation. Returns true while there are more frames to come.
-      /// The view calls this about 60 times per second while IsZoomAnimating is true.
+      /// The view calls this every time the display refreshes while IsZoomAnimating is true. Only about 30 of those calls a second move the maps
+      /// (every frame redraws every map on screen), and if the frames can't keep up the zoom skips to its end instead of crawling there.
       /// </summary>
       public bool AdvanceZoomAnimation() {
          if (!ZoomAnimator.IsAnimating) return false;
+         if (ZoomAnimator.IsFallingBehind) {
+            FinishZoomAnimation();
+            return false;
+         }
+         if (!ZoomAnimator.IsFrameDue) return true;
          var scale = ZoomAnimator.Update();
          if (ZoomAnimator.IsAnimating) {
             PlaceMapsForZoom(scale);

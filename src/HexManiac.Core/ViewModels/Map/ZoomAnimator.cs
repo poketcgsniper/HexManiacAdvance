@@ -13,10 +13,22 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       private static readonly Stopwatch DefaultStopwatch = Stopwatch.StartNew();
 
+      /// <summary>
+      /// Frames closer together than this are skipped. The display may refresh 120 or 144 times a second, but the picture only has to move
+      /// about 30 times a second: every frame re-lays-out and redraws every map on screen, so skipped frames are saved work.
+      /// </summary>
+      public static readonly TimeSpan MinimumFrameInterval = TimeSpan.FromMilliseconds(30);
+
+      /// <summary>
+      /// If a frame takes longer than this to show up, redrawing the maps is more work than the machine can do smoothly (big maps, zoomed in, a slow display).
+      /// Gliding would then only make every zoom step take longer than it did without the animation, so the zoom jumps to its end instead.
+      /// </summary>
+      public static readonly TimeSpan SlowFrameInterval = TimeSpan.FromMilliseconds(80);
+
       private readonly Func<TimeSpan> clock;
       private readonly TimeSpan duration;
       private double from, to = 1;
-      private TimeSpan startTime;
+      private TimeSpan startTime, lastFrameTime;
       private bool isAnimating;
 
       /// <param name="clock">Says how much time has passed, from any starting point. The default is a real stopwatch.</param>
@@ -48,7 +60,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             return;
          }
          (from, to) = (fromScale, toScale);
-         startTime = clock();
+         startTime = lastFrameTime = clock();
          isAnimating = true;
       }
 
@@ -67,10 +79,29 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       /// <summary>Call once per frame. Returns the scale to show. Once the time is up, this returns the exact target and IsAnimating becomes false.</summary>
       public double Update() {
          if (!isAnimating) return to;
-         var elapsed = clock() - startTime; // the clock is read once: the frame that finishes the animation must show the exact target
+         var now = clock(); // the clock is read once: the frame that finishes the animation must show the exact target
+         var elapsed = now - startTime;
+         lastFrameTime = now;
          if (elapsed >= duration) isAnimating = false;
          return ScaleAfter(elapsed);
       }
+
+      /// <summary>
+      /// True if the next frame should be drawn now: enough time has passed since the last one, or the animation is over and the exact target is due.
+      /// The caller checks this every time the display refreshes, and calls Update only when it is true.
+      /// </summary>
+      public bool IsFrameDue {
+         get {
+            if (!isAnimating) return false;
+            var now = clock();
+            return now - lastFrameTime >= MinimumFrameInterval || now - startTime >= duration;
+         }
+      }
+
+      /// <summary>
+      /// True if the last frame was drawn so long ago that frames can't be drawn smoothly: the caller should stop animating and jump to the target.
+      /// </summary>
+      public bool IsFallingBehind => isAnimating && clock() - lastFrameTime > SlowFrameInterval;
 
       /// <summary>Maps the fraction of the time that has passed (0 to 1) to the fraction of the zoom that is done (0 to 1): fast at first, slow at the end.</summary>
       public static double EaseOut(double fraction) {
