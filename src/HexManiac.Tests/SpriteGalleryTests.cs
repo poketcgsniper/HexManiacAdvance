@@ -7,7 +7,7 @@ using Xunit;
 
 namespace HavenSoft.HexManiac.Tests {
    public class SpriteGalleryTests : BaseViewModelTestClass {
-      public SpriteGalleryTests() {
+      public SpriteGalleryTests() : base(0x1000) {
          SetFullModel(0xFF);
          for (int i = 0x100; i < 0x110; i++) Model[i] = 0;
          Model.SetList(new ModelDelta(), SpriteGalleryElementViewModel.NameListName, "HERO", "RIVAL", "MOM");

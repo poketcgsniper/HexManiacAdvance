@@ -6,6 +6,8 @@ using Xunit;
 
 namespace HavenSoft.HexManiac.Tests {
    public class SoundTests : BaseViewModelTestClass {
+      public SoundTests() : base(0x4000) { }
+
       [Fact]
       public void Dpcm_EncodeDecode_StaysClose() {
          var samples = new sbyte[300];
