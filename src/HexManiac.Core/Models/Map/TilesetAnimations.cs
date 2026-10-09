@@ -133,7 +133,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
 
       /// <summary>
       /// The table that describes the game's own tileset animations (written into the ROM by the build, see BuiltInTableName):
-      /// tileset<> frames<> frameCount:: firstTile:: tileCount. timerShift. phase. padding. name""32
+      /// tileset<> frames<> frameCount: firstTile: tileCount. timerShift. phase. padding. name""32
       /// </summary>
       public const string BuiltInTableName = "data.maps.tilesets.builtinanimations";
       private const int BuiltInNameOffset = 16, BuiltInNameLength = 32;

@@ -147,7 +147,7 @@ namespace HavenSoft.HexManiac.Tests {
 
       [Fact]
       public void BuiltInEntries_AreReadFromTheBuildTable() {
-         // two rows of: tileset<> frames<> frameCount:: firstTile:: tileCount. timerShift. phase. padding. name""32
+         // two rows of: tileset<> frames<> frameCount: firstTile: tileCount. timerShift. phase. padding. name""32
          const int table = 0x700, secondTileset = 0x40;
          for (int row = 0; row < 2; row++) {
             var start = table + row * 48;
@@ -165,7 +165,7 @@ namespace HavenSoft.HexManiac.Tests {
             Model.WritePointer(Token, 0x304 + row * 0x20, 0x440 + row * 0x80);
          }
          for (int i = 0; i < 64; i++) Model[0x440 + i] = (byte)(i + 1);
-         ViewPort.Edit($"@{table:X6} ^{TilesetAnimations.BuiltInTableName}[tileset<> frames<> frameCount:: firstTile:: tileCount. timerShift. phase. padding. name\"\"32]2 ");
+         ViewPort.Edit($"@{table:X6} ^{TilesetAnimations.BuiltInTableName}[tileset<> frames<> frameCount: firstTile: tileCount. timerShift. phase. padding. name\"\"32]2 ");
          var animations = CreateAnimations();
          TilesetAnimationConstants.TryRead(Model, out var constants);
 
