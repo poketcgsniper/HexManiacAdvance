@@ -76,7 +76,7 @@
             </Border>
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Margin="0,4,0,0">
                <Grid HorizontalAlignment="Left" VerticalAlignment="Top">
-                  <hshmwpfc:PixelImage Name="TilesetImage" DataContext="{Binding TilesetImage}" Cursor="Hand" MouseLeftButtonDown="TilesetClicked" MouseMove="TilesetDragged"/>
+                  <hshmwpfc:PixelImage x:Name="TilesetImage" DataContext="{Binding TilesetImage}" Cursor="Hand" MouseLeftButtonDown="TilesetClicked" MouseMove="TilesetDragged"/>
                   <Canvas IsHitTestVisible="False">
                      <Rectangle Canvas.Left="{Binding SelectionX}" Canvas.Top="{Binding SelectionY}" Width="{Binding SelectionWidth}" Height="{Binding SelectionHeight}"
                                 Stroke="{DynamicResource Accent}" StrokeThickness="2" Fill="#40FFFFFF"/>
