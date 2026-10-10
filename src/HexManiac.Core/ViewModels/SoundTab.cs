@@ -504,6 +504,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// </summary>
       public bool InsertWithNewVoicegroup { get => insertWithNewVoicegroup; set => Set(ref insertWithNewVoicegroup, value); }
 
+      /// <summary>The size the ROM may grow to when a song needs more room than the free space has: the size of a GBA cartridge.</summary>
+      public int MaxRomLength { get; set; } = VoicegroupEditor.MaxRomLength;
+
       private int insertMusicPlayer;
       public int InsertMusicPlayer { get => insertMusicPlayer; set => Set(ref insertMusicPlayer, value.LimitToRange(0, 3)); }
 
@@ -702,6 +705,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          if (!result.Success) { error = "Could not assemble the song: " + result.Error; return null; }
 
+         if (asNewSong && !HasRoomForNewEntry(table, result.Bytes.Length, out var roomError)) { error = roomError; return null; }
+
          // second pass: assemble for real at the chosen address
          var token = viewPort.CurrentChange;
          if (!VoicegroupEditor.TryAllocate(model, token, result.Bytes.Length + 4, out var address, out var allocationError)) { error = allocationError; return null; }
@@ -768,6 +773,26 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             Warning = warning,
             TableMovedTo = tableMovedTo,
          };
+      }
+
+      /// <summary>
+      /// Whether a new song of 'songBytes' and one more entry in the song table fit. The table grows where it is when the bytes behind it are free, otherwise it moves
+      /// to free space, and without any it would make the ROM grow: past the size of a cartridge, if the song already used the last room. This is asked before anything is written.
+      /// </summary>
+      private bool HasRoomForNewEntry(ITableRun table, int songBytes, out string error) {
+         error = null;
+         var grownLength = table.Length + table.ElementLength;
+         var tableEnd = table.Start + table.Length;
+         var behind = model.GetNextRun(tableEnd);
+         if (behind.Start == tableEnd && behind.Length == 0) behind = model.GetNextRun(tableEnd + 1);
+         var staysInPlace = tableEnd + table.ElementLength < model.Count && behind.Start >= tableEnd + table.ElementLength;
+         for (int i = tableEnd; staysInPlace && i < tableEnd + table.ElementLength; i++) staysInPlace = model[i] == 0xFF || model[i] == 0x00;
+         if (staysInPlace) return true; // only the song needs room, and allocating it says when there is none
+         if (model.FindFreeSpace(model.FreeSpaceStart, songBytes + 4 + grownLength + 0x80) >= 0) return true;
+         var end = (model.Count + 3) / 4 * 4;
+         if (end + songBytes + 4 + grownLength + 4 <= MaxRomLength) return true; // the ROM can grow for both
+         error = $"There is no room for the song ({songBytes} bytes) and the bigger song table ({grownLength} bytes), and the ROM can't grow past {(MaxRomLength % 0x100000 == 0 ? (MaxRomLength / 0x100000) + "MB" : MaxRomLength + " bytes")}.";
+         return false;
       }
 
       #region Song names

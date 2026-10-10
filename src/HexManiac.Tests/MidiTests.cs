@@ -1363,6 +1363,28 @@ inserted:
          Assert.Equal(1, withProgram.Text.Split("VOICE").Length - 1);
       }
 
+      [Fact]
+      public void Tab_InsertSong_WhenTheSongFitsButTheBiggerSongTableDoesNot_IsRefused_NotAGrownRom() {
+         // a nearly full ROM: room for the song at the very end, and something right behind the song table so that the table has to move
+         Build();
+         for (int i = 0; i < Model.Count; i++) if (Model[i] == 0xFF) Model[i] = 0; // every free byte is used...
+         for (int i = Model.Count - 0x80; i < Model.Count; i++) Model[i] = 0xFF;     // ...but the last 128
+         Model[TableAddress + 2 * 8] = 0x12;
+         var tab = CreateTab();
+         tab.MaxRomLength = Model.Count;
+         tab.InsertAsNewSong = true;
+         var before = Model.RawData.ToArray();
+         FileSystem.OpenFile = (description, options) => Loaded("a.s", Encoding.UTF8.GetBytes(SongSource));
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Single(tabErrors);
+         Assert.Contains("song table", tabErrors[0]);
+         Assert.Equal(before.Length, Model.Count); // the ROM did not grow past the size of a cartridge
+         Assert.Equal(before, Model.RawData);      // and nothing was written
+         Assert.Equal(2, SongCount);
+      }
+
       private void InsertEncodedSongs(byte[][] files) {
          Build();
          var tab = CreateTab();
