@@ -1811,7 +1811,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       /// <summary>
       /// Move the maps one frame along the zoom animation. Returns true while there are more frames to come.
-      /// The view calls this every time the display refreshes while IsZoomAnimating is true. A frame is drawn about every 16.7 ms (60 per second).
+      /// The view calls this every time the display refreshes while IsZoomAnimating is true, and every call draws a frame: there is no limit on the frame rate (60 per second on a 60 Hz display, 144 on a 144 Hz display).
       /// With UseZoomLayer a frame is three numbers for the view to apply to all the maps (ZoomLayer); without it every frame moves every map,
       /// and if the frames can't keep up the zoom skips to its end instead of crawling there.
       /// </summary>

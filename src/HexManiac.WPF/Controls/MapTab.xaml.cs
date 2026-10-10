@@ -1,6 +1,7 @@
 ﻿using HavenSoft.HexManiac.Core;
 using HavenSoft.HexManiac.Core.ViewModels.Map;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -58,13 +59,19 @@ namespace HavenSoft.HexManiac.WPF.Controls {
       #region Zoom Animation
 
       // The view model works out where the maps go in each frame (MapEditorViewModel.AdvanceZoomAnimation). This is only the metronome:
-      // one call per rendered frame while a zoom is gliding. The view model draws a frame about every 16.7 ms (60 per second).
+      // one call per rendered frame while a zoom is gliding. Every frame WPF renders is a frame of the zoom: there is no frame rate limit of our own
+      // (60 per second on a 60 Hz display, 144 on a 144 Hz display), and the position of each frame comes from the clock, so a faster display only gets smaller steps.
       // While a zoom glides the maps themselves stay where they are. The view model keeps one transform for all of them (ZoomLayer: a scale and an offset),
       // and this view applies it to the Canvas that holds the maps. A render transform needs no layout pass and no bindings, so a frame costs the same for 1 map or 35.
       // When the zoom is over the maps are at their final scale and position and the transform is the identity again.
       private bool isZoomFrameHooked;
       private Canvas mapCanvas;
       private readonly MatrixTransform zoomLayerTransform = new MatrixTransform();
+
+      // Every map is drawn through an OpacityMask (the 'show beneath' effect of the Space key: a radial gradient that is fully opaque everywhere unless Space is held).
+      // An opacity mask makes WPF draw the map into a separate surface, draw the mask into another one and blend the two, for every map, on every frame: by far the most expensive thing in the map view.
+      // While a zoom glides the masks are taken off (the picture is the same, because the masks are see-through only while Space is held), and the very same brushes are put back when the zoom is over.
+      private readonly List<(PixelImage image, Brush mask)> suspendedMasks = new List<(PixelImage image, Brush mask)>();
 
       private void MapCanvasLoaded(object sender, RoutedEventArgs e) {
          mapCanvas = (Canvas)sender;
@@ -82,6 +89,7 @@ namespace HavenSoft.HexManiac.WPF.Controls {
          if (isZoomFrameHooked) return;
          isZoomFrameHooked = true;
          MapButtons.Visibility = Visibility.Hidden; // the buttons on the edges of the map are placed when the zoom is done: don't show them where the map used to be
+         SuspendMapMasks();
          CompositionTarget.Rendering += OnZoomFrame;
       }
 
@@ -89,8 +97,41 @@ namespace HavenSoft.HexManiac.WPF.Controls {
          if (!isZoomFrameHooked) return;
          isZoomFrameHooked = false;
          CompositionTarget.Rendering -= OnZoomFrame;
+         ResumeMapMasks();
+         // The maps were just moved to their final scale and position, which invalidated their layout. Bring the layout up to date before the transform goes back to the identity,
+         // so a frame never shows the new transform with the old layout (the picture would jump back to where the zoom started for one frame).
+         mapCanvas?.UpdateLayout();
          zoomLayerTransform.Matrix = Matrix.Identity; // the maps are where they're going now: nothing is transformed any more
          MapButtons.Visibility = Visibility.Visible;
+      }
+
+      private void SuspendMapMasks() {
+         ResumeMapMasks();
+         if (mapCanvas == null) return;
+         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(mapCanvas); i++) {
+            var image = FindMapImage(VisualTreeHelper.GetChild(mapCanvas, i), 3);
+            if (image == null || image.OpacityMask == null) continue;
+            suspendedMasks.Add((image, image.OpacityMask));
+            image.OpacityMask = null;
+         }
+      }
+
+      private void ResumeMapMasks() {
+         foreach (var (image, mask) in suspendedMasks) {
+            if (image.OpacityMask == null) image.OpacityMask = mask;
+         }
+         suspendedMasks.Clear();
+      }
+
+      // each map is a PixelImage inside the container that the ItemsControl made for it (a ContentPresenter)
+      private static PixelImage FindMapImage(DependencyObject element, int depth) {
+         if (element is PixelImage image) return image;
+         if (depth == 0) return null;
+         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(element); i++) {
+            var found = FindMapImage(VisualTreeHelper.GetChild(element, i), depth - 1);
+            if (found != null) return found;
+         }
+         return null;
       }
 
       private void OnZoomFrame(object sender, EventArgs e) {

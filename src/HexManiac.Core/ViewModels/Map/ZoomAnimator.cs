@@ -6,22 +6,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
    /// Tweens the map's zoom from the old scale to the new scale with an ease-out curve (it starts fast and settles gently).
    /// It only does the math. The caller asks for the scale once per frame and moves the maps itself.
    /// The clock is injectable so the animation can be tested without waiting.
+   /// <para>
+   /// There is no limit on how many frames per second the zoom draws: every time the display shows a new frame (every time WPF raises CompositionTarget.Rendering), the zoom moves.
+   /// A 60 Hz display gets 60 frames a second, a 144 Hz display 144, a 240 Hz display 240. (Before, frames closer together than 12 ms were skipped, which held fast displays to about 80.)
+   /// The scale of a frame is worked out from the clock, not from the number of frames, so more frames only means smaller steps, never a faster or slower zoom.
+   /// </para>
    /// </summary>
    public class ZoomAnimator {
       /// <summary>A zoom takes about a quarter of a second.</summary>
       public const double DefaultDurationSeconds = .25;
 
       private static readonly Stopwatch DefaultStopwatch = Stopwatch.StartNew();
-
-      /// <summary>The cadence the zoom aims for: one frame every 16.7 ms, the refresh of a 60 Hz display.</summary>
-      public static readonly TimeSpan FrameInterval = TimeSpan.FromSeconds(1.0 / 60);
-
-      /// <summary>
-      /// Frames closer together than this are skipped, so a display that refreshes faster than that (120, 144, 240 Hz) draws about 60 to 80 frames a second instead of 240.
-      /// This is shorter than FrameInterval on purpose: a 60 Hz display never delivers its frames at exactly 16.7 ms (the render loop wobbles by a few milliseconds),
-      /// and a frame that arrives 15 ms after the last one must still be drawn. If it were held back, the next one would come 32 ms after the last, and the zoom would run at 30 frames a second.
-      /// </summary>
-      public static readonly TimeSpan MinimumFrameInterval = TimeSpan.FromMilliseconds(12);
 
       /// <summary>
       /// If a frame takes longer than this to show up, redrawing the maps is more work than the machine can do smoothly (big maps, zoomed in, a slow display).
@@ -34,7 +29,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private readonly TimeSpan duration;
       private double from, to = 1;
       private TimeSpan startTime, lastFrameTime;
-      private bool isAnimating, hasDrawnFrame;
+      private bool isAnimating;
 
       /// <param name="clock">Says how much time has passed, from any starting point. The default is a real stopwatch.</param>
       /// <param name="durationSeconds">How long a zoom takes. Zero or less turns the animation off: every zoom jumps to its target.</param>
@@ -66,7 +61,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
          (from, to) = (fromScale, toScale);
          startTime = lastFrameTime = clock();
-         hasDrawnFrame = false; // the first frame is due as soon as the display asks for one: the zoom starts moving right away
          isAnimating = true;
       }
 
@@ -88,26 +82,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var now = clock(); // the clock is read once: the frame that finishes the animation must show the exact target
          var elapsed = now - startTime;
          lastFrameTime = now;
-         hasDrawnFrame = true;
          if (elapsed >= duration) isAnimating = false;
          return ScaleAfter(elapsed);
       }
 
       /// <summary>
-      /// True if the next frame should be drawn now: enough time has passed since the last one, or the animation is over and the exact target is due.
-      /// The caller checks this every time the display refreshes, and calls Update only when it is true.
-      /// Frames are paced by the clock and the scale of a frame is worked out from the clock too, so a frame that comes late (the machine was busy)
-      /// never makes the zoom last longer: the next frame just shows where the zoom is by then.
+      /// True if the next frame should be drawn now: any time the zoom is running. The caller checks this every time the display refreshes, and calls Update when it is true.
+      /// Nothing holds a frame back (no frame rate limit): a frame that comes late (the machine was busy) never makes the zoom last longer,
+      /// the next frame just shows where the zoom is by then.
       /// </summary>
-      public bool IsFrameDue {
-         get {
-            if (!isAnimating) return false;
-            var now = clock();
-            if (now - startTime >= duration) return true;
-            if (!hasDrawnFrame) return now > startTime;
-            return now - lastFrameTime >= MinimumFrameInterval;
-         }
-      }
+      public bool IsFrameDue => isAnimating;
 
       /// <summary>
       /// True if the last frame was drawn so long ago that frames can't be drawn smoothly: the caller should stop animating and jump to the target.
