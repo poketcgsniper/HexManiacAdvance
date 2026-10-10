@@ -32,6 +32,7 @@ namespace HavenSoft.HexManiac.WPF.Windows {
 
       [STAThread]
       public static void Main(string[] args) {
+         GraphicsStartup.Prepare(); // before WPF creates anything: no 60 frames per second limit for animations, and the graphics card choice for this program
          if (!Arg_Skip_Splash_Screen.IsAny(args)) {
             new SplashScreen("Resources/Splash.png").Show(true);
          }
@@ -48,6 +49,7 @@ namespace HavenSoft.HexManiac.WPF.Windows {
       }
 
       protected override void OnStartup(StartupEventArgs e) {
+         GraphicsStartup.ApplyRenderMode(); // before the first window: with hardware acceleration switched off, the processor draws everything
          base.OnStartup(e);
 
          // Exceptions on the UI thread are reported by MainWindow.HandleException.
@@ -66,6 +68,7 @@ namespace HavenSoft.HexManiac.WPF.Windows {
 
          var fileSystem = new WindowsFileSystem(Dispatcher);
          var viewModel = GetViewModel(path, address, fileSystem, options);
+         GraphicsStartup.Connect(viewModel);
          SetupServer(viewModel);
 
          DebugLog(viewModel, e.Args);
@@ -77,6 +80,8 @@ namespace HavenSoft.HexManiac.WPF.Windows {
          MainWindow.Resources.Add("PaletteMixer", new PaletteCollection().Fluent(mixer => mixer.SetContents(new short[16])));
          MainWindow.Resources.Add("IsPaletteMixerExpanded", new EditableValue<bool>());
          MainWindow.Show();
+         GraphicsStartup.UpdateStatus(viewModel); // the window exists now, so WPF knows how it is drawing
+         DebugLog(viewModel, $"Graphics: {viewModel.GraphicsStatus} (UseDedicatedGraphics={viewModel.UseDedicatedGraphics}, UseHardwareAcceleration={viewModel.UseHardwareAcceleration})");
          DebugLog(viewModel, "All Started!");
       }
 
