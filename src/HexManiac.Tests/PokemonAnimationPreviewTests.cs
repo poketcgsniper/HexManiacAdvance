@@ -114,16 +114,14 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void Displaying_StartsTheDebounce_AndBuildsOnce() {
+      public void Displaying_WithNothingShownYet_BuildsAtOnce_NotAfterTheDebounce() {
          var timer = new ManualWorkTimer();
          var preview = Create(timer);
 
          preview.IsDisplayed = true;
-         Assert.True(timer.HasScheduledWork);
-         Assert.Equal(0, preview.Created); // not before the debounce fires
 
-         timer.RunWork();
-
+         // an empty preview must never be on screen for a debounce interval, so the first picture is not delayed
+         Assert.False(timer.HasScheduledWork);
          Assert.Equal(1, preview.Created);
          Assert.Equal(1, preview.BuildCount);
          Assert.True(preview.HasAnimation);
@@ -131,16 +129,31 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void Displaying_AnAlreadyBuiltPreview_OnlyChecksAfterTheDebounce() {
+         var timer = new ManualWorkTimer();
+         var preview = Show(Create(timer), timer);
+         preview.IsDisplayed = false;
+
+         preview.IsDisplayed = true;   // the pictures are very likely still right: they stay, and are checked like any other change
+
+         Assert.True(preview.HasAnimation);
+         Assert.True(timer.HasScheduledWork);
+         timer.RunWork();
+         Assert.Equal(1, preview.Created);
+      }
+
+      [Fact]
       public void ManyChanges_AreOneBuild() {
          var timer = new ManualWorkTimer();
-         var preview = Create(timer);
-         preview.IsDisplayed = true;
+         var preview = Show(Create(timer), timer);
+         Assert.Equal(1, preview.Created);
 
          for (int i = 0; i < 20; i++) { preview.Signature = "s" + i; preview.RequestUpdate(); }
+         Assert.Equal(1, preview.Created);
          timer.RunWork();
          timer.RunWork(); // nothing left to run
 
-         Assert.Equal(1, preview.Created);
+         Assert.Equal(2, preview.Created);
       }
 
       [Fact]
@@ -265,21 +278,138 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void ChangingThePokemon_StopsTheOldAnimationAtOnce_AndBuildsTheNewOneAfterTheDebounce() {
+      public void ChangingThePokemon_KeepsTheOldAnimationOnScreen_UntilTheNewOneIsReady() {
          var timer = new ManualWorkTimer();
          var old = Show(Create(timer, species: 1), timer);
-         var replacement = Create(timer, species: 2);
+         var oldPixels = old.Surface.PixelData;
+         var oldStatus = old.Status;
+         var changes = new List<string>();
+         old.PropertyChanged += (sender, e) => changes.Add(e.PropertyName);
+         old.Surface.PropertyChanged += (sender, e) => changes.Add("Surface." + e.PropertyName);
 
-         Assert.True(old.TryCopy(replacement));
+         Assert.True(old.TryCopy(Create(timer, species: 2)));
 
-         Assert.False(old.HasAnimation);   // the old pokemon's pictures would be wrong
-         Assert.False(old.WantsTicks);
+         // what is on screen is still the old pokemon, complete: nothing collapsed, nothing blanked, nothing announced
+         Assert.True(old.HasAnimation);
+         Assert.True(old.WantsTicks);
+         Assert.Same(oldPixels, old.Surface.PixelData);
+         Assert.Equal(oldStatus, old.Status);
          Assert.Equal(1, old.Created);
-         Assert.True(timer.HasScheduledWork);
-         timer.RunWork();
+         Assert.Empty(changes);
+      }
+
+      [Fact]
+      public void ChangingThePokemon_ThenUpdateNow_ReplacesTheAnimationInOneStep() {
+         var timer = new ManualWorkTimer();
+         var old = Show(Create(timer, species: 1), timer);
+         var oldPixels = old.Surface.PixelData;
+         old.Factory = () => MakeTimeline(2);
+         var changes = new List<string>();
+         old.PropertyChanged += (sender, e) => changes.Add(e.PropertyName);
+         old.Surface.PropertyChanged += (sender, e) => changes.Add("Surface." + e.PropertyName);
+         Assert.True(old.TryCopy(Create(timer, species: 2)));
+
+         old.UpdateNow();
+
          Assert.Equal(2, old.Created);
          Assert.True(old.HasAnimation);
          Assert.True(old.WantsTicks);
+         Assert.Equal(2, old.Timeline.Frames.Count);
+         Assert.NotSame(oldPixels, old.Surface.PixelData);
+         Assert.False(timer.HasScheduledWork);   // the debounce of the copy was replaced by the immediate build
+         Assert.DoesNotContain(nameof(PokemonAnimationPreviewViewModel.HasAnimation), changes);   // there never was a moment without an animation
+         Assert.Equal(1, changes.Count(change => change == "Surface." + nameof(IPixelViewModel.PixelData)));
+         Assert.True(changes.Count(change => change == nameof(PokemonAnimationPreviewViewModel.Status)) <= 1);   // at most one announcement, at the same moment as the picture
+      }
+
+      [Fact]
+      public void ChangingThePokemon_WithoutUpdateNow_CatchesUpAfterTheDebounce() {
+         var timer = new ManualWorkTimer();
+         var old = Show(Create(timer, species: 1), timer);
+         Assert.True(old.TryCopy(Create(timer, species: 2)));
+
+         Assert.True(timer.HasScheduledWork);
+         timer.RunWork();
+
+         Assert.Equal(2, old.Created);
+         Assert.True(old.HasAnimation);
+      }
+
+      [Fact]
+      public void ChangingThePokemon_ToOneWithoutAnimation_SaysSo_AtTheSameMoment() {
+         var timer = new ManualWorkTimer();
+         var old = Show(Create(timer, species: 1), timer);
+         old.Factory = () => null;
+         Assert.True(old.TryCopy(Create(timer, species: 2)));
+         Assert.True(old.HasAnimation);   // not before the new pokemon is known
+
+         old.UpdateNow();
+
+         Assert.False(old.HasAnimation);
+         Assert.False(old.WantsTicks);
+         Assert.NotEqual(string.Empty, old.Status);
+      }
+
+      [Fact]
+      public void ChangingThePokemon_WhileNobodyLooks_ForgetsTheOldPictures_AndBuildsWhenShown() {
+         var timer = new ManualWorkTimer();
+         var old = Show(Create(timer, species: 1), timer);
+         old.IsDisplayed = false;
+
+         Assert.True(old.TryCopy(Create(timer, species: 2)));
+
+         Assert.False(old.HasAnimation);   // the old pokemon's pictures must not be what shows up the next time
+         Assert.False(timer.HasScheduledWork);
+         Assert.Equal(1, old.Created);
+         old.IsDisplayed = true;
+         Assert.Equal(2, old.Created);   // nothing is shown first, so it is built at once
+         Assert.True(old.HasAnimation);
+      }
+
+      [Fact]
+      public void UpdateNow_CancelsThePendingDebounce_AndBuildsOnce() {
+         var timer = new ManualWorkTimer();
+         var preview = Show(Create(timer), timer);
+         preview.Signature = "b";
+         preview.RequestUpdate();
+         Assert.True(timer.HasScheduledWork);
+
+         preview.UpdateNow();
+
+         Assert.False(timer.HasScheduledWork);
+         Assert.Equal(2, preview.Created);
+         timer.RunWork();
+         Assert.Equal(2, preview.Created);
+      }
+
+      [Fact]
+      public void UpdateNow_WhileNobodyLooks_BuildsNothing() {
+         var timer = new ManualWorkTimer();
+         var preview = Create(timer);
+
+         preview.UpdateNow();
+
+         Assert.Equal(0, preview.Created);
+         Assert.False(preview.HasAnimation);
+      }
+
+      [Fact]
+      public void CopyingTheCollapsedState_NeverBuildsBeforeTheTableToolSaysItIsDone() {
+         var timer = new ManualWorkTimer();
+         var preview = Show(Create(timer, species: 1), timer);
+         var collapsed = Create(timer, species: 1);
+         collapsed.Visible = false;
+
+         Assert.True(preview.TryCopy(collapsed));
+         Assert.False(preview.Visible);
+         Assert.False(preview.WantsTicks);
+         Assert.False(timer.HasScheduledWork);
+         Assert.Equal(1, preview.Created);
+
+         Assert.True(preview.TryCopy(Create(timer, species: 1)));   // expanded again by the copy: checked after the debounce, not on the spot
+         Assert.True(preview.Visible);
+         Assert.Equal(1, preview.Created);
+         Assert.True(timer.HasScheduledWork);
       }
 
       [Fact]
