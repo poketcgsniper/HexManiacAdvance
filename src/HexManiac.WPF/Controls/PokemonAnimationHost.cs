@@ -18,6 +18,7 @@ namespace HavenSoft.HexManiac.WPF.Controls {
 
       private PokemonAnimationPreviewViewModel viewModel;
       private Window window;
+      private bool attached;
       private DispatcherTimer timer;
       private readonly Stopwatch clock = new Stopwatch();
       private long lastTick;
@@ -30,6 +31,7 @@ namespace HavenSoft.HexManiac.WPF.Controls {
       }
 
       private void Attach() {
+         attached = true;
          if (window == null) {
             window = Window.GetWindow(this);
             if (window != null) {
@@ -43,6 +45,7 @@ namespace HavenSoft.HexManiac.WPF.Controls {
       }
 
       private void Detach() {
+         attached = false;
          if (window != null) {
             window.Activated -= WindowStateChanged;
             window.Deactivated -= WindowStateChanged;
@@ -63,7 +66,7 @@ namespace HavenSoft.HexManiac.WPF.Controls {
             viewModel.PropertyChanged -= ViewModelChanged;
             viewModel.IsDisplayed = false;
          }
-         viewModel = IsLoaded ? newViewModel : null;
+         viewModel = attached ? newViewModel : null;
          if (viewModel != null) viewModel.PropertyChanged += ViewModelChanged;
          Update();
       }
@@ -71,7 +74,8 @@ namespace HavenSoft.HexManiac.WPF.Controls {
       private void WindowStateChanged(object sender, EventArgs e) => Update();
 
       private void ViewModelChanged(object sender, PropertyChangedEventArgs e) {
-         if (e.PropertyName == nameof(PokemonAnimationPreviewViewModel.WantsTicks)) Update();
+         if (e.PropertyName != nameof(PokemonAnimationPreviewViewModel.WantsTicks)) return;
+         if (!Dispatcher.CheckAccess()) Dispatcher.BeginInvoke(new Action(Update)); else Update();
       }
 
       private bool IsShown => IsLoaded && IsVisible && window != null && window.IsActive && window.WindowState != WindowState.Minimized;

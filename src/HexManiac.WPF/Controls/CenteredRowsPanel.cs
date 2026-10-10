@@ -41,6 +41,7 @@ namespace HavenSoft.HexManiac.WPF.Controls {
             if (child == null) continue;
             child.Measure(constraint);
             if (child.Visibility == Visibility.Collapsed) continue;
+            if (child.DesiredSize.Width <= 0 && child.DesiredSize.Height <= 0) continue; // the empty item container of a collapsed button takes no room either
             shown.Add(child);
             widths.Add(child.DesiredSize.Width);
             heights.Add(child.DesiredSize.Height);

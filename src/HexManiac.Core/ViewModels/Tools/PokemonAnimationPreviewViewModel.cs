@@ -140,6 +140,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             dirty = true;
             speciesIndex = that.speciesIndex;
             timeline = null;
+            Status = string.Empty;
+            NotifyPropertyChanged(nameof(HasAnimation));
             UpdateWantsTicks();
          }
          paletteProvider = that.paletteProvider;
@@ -275,7 +277,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          } catch (Exception ex) when (ex is NotImplementedException || ex is InvalidOperationException || ex is ArgumentException || ex is IndexOutOfRangeException) {
             colors = null;
          }
-         var built = CreateTimeline(colors);
+         PokemonAnimationTimeline built;
+         try {
+            built = CreateTimeline(colors);
+         } catch (Exception) {
+            built = null; // decoration: a table entry the engine cannot read just shows no preview
+         }
          BuildCount++;
          SetTimeline(built);
       }

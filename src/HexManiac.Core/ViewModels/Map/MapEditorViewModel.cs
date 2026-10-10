@@ -784,6 +784,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       public void DragMove(double x, double y, bool isMiddleClickMap) {
+         FinishZoomAnimation(); // a wheel-zoom during a drag: pick tiles where the maps are going to be
          deltaX += x - cursorX;
          deltaY += y - cursorY;
          var (intX, intY) = ((int)deltaX, (int)deltaY);
@@ -833,6 +834,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       public void PrimaryMove(double x, double y) {
+         FinishZoomAnimation(); // a wheel-zoom during a drag: pick tiles where the maps are going to be
          if (interactionType == PrimaryInteractionType.Draw) DrawMove(x, y);
          if (interactionType == PrimaryInteractionType.RectangleDraw) RectangleDrawMove(x, y);
          if (interactionType == PrimaryInteractionType.Draw9Grid) Draw9Grid(x, y);
@@ -1207,6 +1209,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       public void SelectMove(double x, double y) {
+         FinishZoomAnimation(); // a wheel-zoom during a drag: pick tiles where the maps are going to be
          var map = MapUnderCursor(x, y);
          if (map != primaryMap) return;
          if (x < map.LeftEdge || x > map.LeftEdge + map.PixelWidth * map.SpriteScale) return;
