@@ -674,7 +674,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public int RangeX {
          get => element.GetValue("range") & 0xF;
          set {
-            element.SetValue("range", (RangeY << 4) | value);
+            element.SetValue("range", (RangeY << 4) | (value & 0xF)); // (each is 4 bits: a bigger number must not spill into the other)
             rangeXY = null;
             NotifyPropertyChanged(nameof(RangeXY));
             RaiseEventVisualUpdated();
@@ -684,7 +684,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public int RangeY {
          get => element.GetValue("range") >> 4;
          set {
-            element.SetValue("range", (value << 4) | RangeX);
+            element.SetValue("range", ((value & 0xF) << 4) | RangeX);
             rangeXY = null;
             NotifyPropertyChanged(nameof(RangeXY));
             RaiseEventVisualUpdated();
@@ -701,7 +701,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             rangeXY = value;
             var parts = value.Split(new[] { ',', ' ', '(', ')' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length != 2) return;
-            if (parts[0].TryParseInt(out int x) && parts[1].TryParseInt(out int y)) element.SetValue("range", (y << 4) | x);
+            if (parts[0].TryParseInt(out int x) && parts[1].TryParseInt(out int y)) element.SetValue("range", ((y & 0xF) << 4) | (x & 0xF));
             NotifyPropertyChanged(nameof(RangeX));
             NotifyPropertyChanged(nameof(RangeY));
             NotifyPropertyChanged();
@@ -1197,7 +1197,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public void ReplaceRematchScript() {
          // TODO replace script with simple trainer script (keep before/during/after battle text if we can)
          var content = EventTemplate.GetRematchTrainerContent(element.Model, parser, this);
-         string before = "<auto>", win = "<auto", after = "<auto>";
+         if (content == null) return; // not a rematch trainer: there is nothing to replace
+         string before = "<auto>", win = "<auto>", after = "<auto>";
          if (content.BeforeTextPointer != Pointer.NULL) before = $"<{content.BeforeTextPointer:X6}>";
          if (content.WinTextPointer != Pointer.NULL) win = $"<{content.WinTextPointer:X6}>";
          if (content.AfterTextPointer != Pointer.NULL) after = $"<{content.AfterTextPointer:X6}>";
@@ -2166,6 +2167,7 @@ show:
 
       public void SetDestinationFormat() {
          if (!ShowPointer) return;
+         if (Pointer < 0 || Pointer >= element.Model.Count) return; // a null (or out of file) pointer has nowhere to format
          var destinationRun = new XSERun(Pointer, SortedSpan<int>.None);
          var existingRun = element.Model.GetNextRun(destinationRun.Start);
          if (existingRun.Start < destinationRun.Start) return; // don't erase existing runs for this
@@ -2175,6 +2177,7 @@ show:
 
       public void ClearDestinationFormat() {
          if (!ShowPointer) return;
+         if (Pointer < 0 || Pointer >= element.Model.Count) return;
          var destination = Pointer;
          var run = element.Model.GetNextRun(Pointer);
          if (run.Start != destination || (run.PointerSources != null && run.PointerSources.Count > 0)) return;

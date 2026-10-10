@@ -717,7 +717,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
       public int PaletteSelection {
          get => drawPalette;
-         set => Set(ref drawPalette, value, arg => UpdateTileRender(drawPalette));
+         set {
+            // a combo box that lost its selection writes -1: there is no palette to draw with then
+            if (palettes != null && (value < 0 || value >= palettes.Length)) return;
+            Set(ref drawPalette, value, arg => UpdateTileRender(drawPalette));
+         }
       }
 
       public ObservableCollection<ReadonlyPaletteCollection> Palettes { get; } = new();

@@ -195,7 +195,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             foreach (var map in VisibleMaps) {
                map.CollisionHighlight = value;
             }
-            if (tilesToDraw != null) {
+            if (tilesToDraw != null && collisionIndex >= 0) { // (-1 means no collision is chosen: shifting it in would turn on every collision bit)
                for (int x = 0; x < tilesToDraw.GetLength(0); x++) {
                   for (int y = 0; y < tilesToDraw.GetLength(1); y++) {
                      tilesToDraw[x, y] &= 0x3FF;
@@ -508,11 +508,29 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          viewPort.Goto.Execute(table.Start + index * table.ElementLength);
       }
 
+      /// <summary>The most recent map in the back list that still exists (the list is cut back to it), or null.</summary>
+      private BlockMapViewModel FindExistingMapInBackStack() {
+         for (int i = backStack.Count - 1; i >= 0; i--) {
+            if (backStack[i] < 0) continue; // the other kind of entry: a jump to another tab
+            var candidate = new BlockMapViewModel(fileSystem, Tutorials, viewPort, format, templates, backStack[i] / 1000, backStack[i] % 1000) {
+               IncludeBorders = primaryMap?.IncludeBorders ?? true,
+               SpriteScale = primaryMap?.SpriteScale ?? .5,
+            };
+            if (!candidate.IsValidMap) continue;
+            backStack.RemoveRange(i, backStack.Count - i);
+            if (backStack.Count == 0) backCommand?.RaiseCanExecuteChanged();
+            VisibleMaps.Clear();
+            return candidate;
+         }
+         return null;
+      }
+
       private void UpdatePrimaryMap(BlockMapViewModel map) {
          FinishZoomAnimation(); // the neighbors are placed relative to the maps, so the maps have to be where they're going
          if (!map.IsValidMap) {
             if (primaryMap != null && primaryMap.IsValidMap) return;
             map = VisibleMaps.FirstOrDefault(vis => vis.IsValidMap);
+            map ??= FindExistingMapInBackStack(); // an undo can remove the map on screen (it was created a moment ago): go back to the one before it
             if (map == null) {
                OnError.Raise(this, "Couldn't find a valid visible map.");
                Close.Execute();
@@ -859,6 +877,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             primaryMap.PrepareFor9GridDraw(tilesToDraw);
          }
          var map = MapUnderCursor(x, y);
+         map?.StartNewStroke();
          if ((click & PrimaryInteractionStart.DoubleClick) != 0) {
             if (drawBlockIndex < 0 && collisionIndex < 0) {
                // nothing to paint
@@ -1276,7 +1295,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          DrawMultipleTiles = false;
          BlockEditorVisible = true;
          if (tilesToDraw == null) tilesToDraw = new int[1, 1];
-         tilesToDraw[0, 0] = drawBlockIndex | (collisionIndex << 10);
+         tilesToDraw[0, 0] = drawBlockIndex | (Math.Max(collisionIndex, 0) << 10); // (-1 means no collision is chosen: shifting it in would turn on every collision bit)
          FillMultiTileRender();
          AnimateBlockSelection();
       }
@@ -1287,6 +1306,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var localCopy = tilesToDraw;
          if (IsValid9GridSelection && use9Grid) singletons.WorkDispatcher.DispatchWork(() => PrimaryMap.DiscoverCornersFor9Grid(localCopy));
          var localRenders = primaryMap.BlockRenders;
+         if (localRenders.Count == 0) return; // the map has no pictures to draw with (for example, undo just removed the map it was showing)
          var (width, height) = (localCopy.GetLength(0), localCopy.GetLength(1));
          var scale = (width < 4 && height < 4) ? 2 : 1;
          var canvas = new CanvasPixelViewModel(width * 16, height * 16) { SpriteScale = scale };
@@ -2559,7 +2579,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var totalOptions = Probabilities.Sum(cp => cp.Count);
          var selection = rnd.Next(totalOptions);
          var index = 0;
-         while (selection > Probabilities[index].Count) {
+         while (selection >= Probabilities[index].Count) {
             selection -= Probabilities[index].Count;
             index += 1;
          }

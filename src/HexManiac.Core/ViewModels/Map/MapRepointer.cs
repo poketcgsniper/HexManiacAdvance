@@ -412,7 +412,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
          var blockStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.Blocks);
          var attributeStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.BlockAttributes);
-         var attributeSize = model.IsFRLG() ? 2 : 1;
+         var attributeSize = model.IsFRLG() ? 4 : 2; // bytes per block attribute (the same as BlocksetModel.BytesPerAttribute)
 
          var exportData = new byte[(16 + attributeSize) * blockCount];
          Array.Copy(model.RawData, blockStart, exportData, 0, blockCount * 16);
@@ -426,7 +426,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
          var blockStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.Blocks);
          var attributeStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.BlockAttributes);
-         var attributeSize = model.IsFRLG() ? 2 : 1;
+         var attributeSize = model.IsFRLG() ? 4 : 2; // bytes per block attribute (the same as BlocksetModel.BytesPerAttribute)
 
          var file = fileSystem.OpenFile("Byte File", "bin");
          if (file == null) return;
@@ -783,7 +783,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var mapBanks = new ModelTable(model, model.GetTable(HardcodeTablesModel.MapBankTable).Start, tokenFactory);
          var options = mapBanks.Count.Range(i => i.ToString()).ToList();
          options.Add("Create New Bank");
-         var enumViewModel = new EnumViewModel(options.ToArray()) { Choice = format.RecentBank.LimitToRange(0, options.Count) };
+         var enumViewModel = new EnumViewModel(options.ToArray()) { Choice = format.RecentBank.LimitToRange(0, mapBanks.Count - 1) }; // (an existing bank: the last entry, 'Create New Bank', has to be asked for)
          var option = fileSystem.ShowOptions(
             "Pick a bank",
             prompt,
