@@ -609,6 +609,12 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
             }
             streamInfo.Clear();
 
+            // Decompile writes ".raw XX" for bytes that are not a command: read them back as the same byte
+            if (TryParseRawByte(line, out var rawByte)) {
+               result.Add(rawByte);
+               continue;
+            }
+
             var command = FirstMatch(line);
             if (command != null) {
                var currentSize = result.Count;
@@ -738,10 +744,18 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                labels[line.Substring(0, line.Length - 1)] = start + length;
                continue;
             }
+            if (TryParseRawByte(line, out var _)) { length += 1; continue; }
             var command = FirstMatch(line);
             if (command != null) length += command.CompiledByteLength(model, line);
          }
          return new LabelLibrary(model, labels) { RequireCompleteAddresses = RequireCompleteAddresses };
+      }
+
+      private static bool TryParseRawByte(string line, out byte value) {
+         value = 0;
+         if (!line.StartsWith(".raw ", StringComparison.Ordinal)) return false;
+         var text = line.Substring(5).Trim();
+         return text.Length == 2 && byte.TryParse(text, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out value);
       }
 
       public static IEnumerable<T> SortOptions<T>(IEnumerable<T> options, string token, Func<T, string> compare) {

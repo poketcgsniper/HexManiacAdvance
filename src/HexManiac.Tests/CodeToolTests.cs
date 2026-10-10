@@ -536,6 +536,30 @@ callback    : <000200>
       }
 
       [Fact]
+      public void ScriptWithRawByte_Compile_RawByteIsWritten() {
+         // decompiling bytes that are not a command writes ".raw XX": the compiler has to read that back
+         EventScript = "nop;.raw FE;end";
+
+         Assert.Equal(0x00, Model[0]);
+         Assert.Equal(0xFE, Model[1]);
+         Assert.Equal(0x02, Model[2]);
+         Assert.Equal(0xFF, Model[3]);
+      }
+
+      [Fact]
+      public void ScriptWithRawByte_LabelAfterIt_GotoUsesTheRightAddress() {
+         // goto is 5 bytes, then 2 raw bytes: the label is at 7
+         EventScript = "goto <routine>;.raw FE;.raw FE;routine:;end";
+
+         Assert.Equal(0x05, Model[0]);
+         Assert.Equal(0x07, Model[1]);
+         Assert.Equal(0x08, Model[4]);
+         Assert.Equal(0xFE, Model[5]);
+         Assert.Equal(0xFE, Model[6]);
+         Assert.Equal(0x02, Model[7]);
+      }
+
+      [Fact]
       public void Mart_Decompile_Auto() {
          ViewPort.Edit($"^some.script`xse` 86 <006> 02 01 00 02 00 03 00 00 00 @006 ^[item:{HardcodeTablesModel.ItemsTableName}]!0000");
 
