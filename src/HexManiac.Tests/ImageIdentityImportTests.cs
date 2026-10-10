@@ -70,10 +70,10 @@ namespace HavenSoft.HexManiac.Tests {
       /// spriteCount sprites (2x2 tiles, 4 bits per pixel, LZ compressed by a tool better than HexManiac's) in a table next to the palette they share.
       /// Only palette colors 1-6 are used by the sprites, 0 and 7-15 are not used by anything but still hold colors.
       /// </summary>
-      private void Setup(int spriteCount) {
+      private void Setup(int spriteCount, bool useLastColor = false) {
          data = 0x1000.Range().Select(i => (byte)0xFF).ToArray();
          rawA = Repeating(128, 0x12, 0x34, 0x56);
-         rawB = Repeating(128, 0x21, 0x43, 0x65);
+         rawB = useLastColor ? Repeating(128, 0x2F, 0x43, 0xF5) : Repeating(128, 0x21, 0x43, 0x65);
          var compressedA = NaiveLz(rawA);
          var compressedB = NaiveLz(rawB);
          Array.Copy(compressedA, 0, data, SpriteA, compressedA.Length);
@@ -226,6 +226,42 @@ namespace HavenSoft.HexManiac.Tests {
 
          Assert.Equal(SpriteB, viewPort.Tools.SpriteTool.SpriteAddress);
          Assert.Equal(before, model.RawData);
+      }
+
+      [Theory]
+      [InlineData(0)]
+      [InlineData(1)]
+      [InlineData(2)]
+      public void SharedPalette_SpriteUsesLastPaletteColor_ImportOwnIndexedExport_NothingMovesOrChanges(int importChoice) {
+         Setup(2, useLastColor: true);
+         var before = model.RawData.ToArray();
+
+         ExportThenImport(SpriteB, asIndexed: true, importChoice);
+
+         Assert.Equal(SpriteB, viewPort.Tools.SpriteTool.SpriteAddress);
+         Assert.Equal(before, model.RawData);
+      }
+
+      [Theory]
+      [InlineData(0)]
+      [InlineData(2)]
+      public void SharedPalette_ImportIndexedPictureThatUsesTheLastPaletteColor_ColorSurvives(int importChoice) {
+         Setup(2);
+         var tool = viewPort.Tools.SpriteTool;
+         viewPort.Tools.SelectedTool = tool;
+         tool.SpriteAddress = SpriteB;
+         var palette = 16.Range().Select(i => Shown(i)).ToArray();
+         var indexed = new int[tool.PixelWidth, tool.PixelHeight];
+         for (int y = 0; y < tool.PixelHeight; y++) for (int x = 0; x < tool.PixelWidth; x++) indexed[x, y] = 1 + (x + y) % 6;
+         indexed[3, 4] = 15; // the last color of the palette
+         var fs = new StubFileSystem {
+            TryLoadIndexImage = (ref string name, out int[,] image, out IReadOnlyList<short> pal) => { name = "image.png"; (image, pal) = (indexed, palette); return true; },
+            ShowOptions = (title, prompt, details, options) => importChoice,
+         };
+
+         tool.ImportPair.Execute(fs);
+
+         Assert.Equal(Shown(15), tool.PixelData[4 * tool.PixelWidth + 3]);
       }
 
       [Fact]

@@ -783,7 +783,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var image = new short[width * height];
          for (var y = 0; y < height; y++) {
             for (var x = 0; x < width; x++) {
-               if (pixels[x, y].InRange(0, palette.Count - 1)) {
+               if (pixels[x, y].InRange(0, palette.Count)) { // InRange excludes the upper bound: the last color of the palette is a valid color
                   image[y * width + x] = palette[pixels[x, y]];
                }
             }
