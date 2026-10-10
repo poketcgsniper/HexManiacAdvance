@@ -6,6 +6,7 @@ using HavenSoft.HexManiac.Core.ViewModels.DataFormats;
 using HavenSoft.HexManiac.Core.ViewModels.Tools;
 using HexManiac.Core.Models.Runs.Sprites;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Windows.Input;
@@ -605,6 +606,42 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
       }
 
+      /// <summary>
+      /// A compressed tileset is stored as LZ data, so that is what a tileset file has to hold (it is what the Export command writes).
+      /// A file of plain tile data (a whole number of 32-byte tiles) is compressed for the user.
+      /// Anything else would replace the tileset with garbage, so it is refused.
+      /// </summary>
+      public static bool TryReadTilesetFile(byte[] file, int maxTiles, out byte[] lzData, out string error) {
+         lzData = null;
+         error = null;
+         if (file == null || file.Length == 0) {
+            error = "The file is empty, so the tileset was left as it is.";
+            return false;
+         }
+         var maxBytes = maxTiles * 0x20;
+         if (LZRun.IsCompressedLzData(file, 0) > 0) {
+            var decompressed = LZRun.Decompress(file, 0);
+            if (decompressed != null) {
+               if (decompressed.Length > maxBytes) {
+                  error = $"The tileset in that file has {decompressed.Length / 0x20} tiles, but this map can only use {maxTiles}. The tileset was left as it is.";
+                  return false;
+               }
+               lzData = file;
+               return true;
+            }
+         }
+         if (file.Length % 0x20 == 0) {
+            if (file.Length > maxBytes) {
+               error = $"The file has {file.Length / 0x20} tiles, but this map can only use {maxTiles}. The tileset was left as it is.";
+               return false;
+            }
+            lzData = LZRun.Compress(file, 0, file.Length).ToArray();
+            return true;
+         }
+         error = "Expected a tileset file with LZ-compressed tiles (the kind the Export command writes), or plain tile data with a multiple of 32 bytes. The tileset was left as it is.";
+         return false;
+      }
+
       private void ImportTileset(bool primary) {
          var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
          var layout = GetLayout();
@@ -615,9 +652,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          if (isCompressed) {
             var file = fileSystem.OpenFile("Byte File", "bin");
             if (file == null) return;
+            if (!TryReadTilesetFile(file.Contents, maxTiles, out var contents, out var error)) {
+               viewPort.RaiseError(error);
+               return;
+            }
             var existingRun = model.GetNextRun(start);
-            var newRun = model.RelocateForExpansion(history.CurrentChange, model.GetNextRun(start), file.Contents.Length);
-            history.CurrentChange.ChangeData(model, newRun.Start, file.Contents);
+            var newRun = model.RelocateForExpansion(history.CurrentChange, model.GetNextRun(start), contents.Length);
+            history.CurrentChange.ChangeData(model, newRun.Start, contents);
             if (newRun is LzTilesetRun tsRun) {
                tsRun = new LzTilesetRun(tsRun.TilesetFormat, model, tsRun.Start, tsRun.PointerSources);
                model.ObserveRunWritten(history.CurrentChange, tsRun);
@@ -627,7 +668,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             } else {
                DataMoved.Raise(this, null);
             }
-            for (int i = file.Contents.Length; i < existingRun.Length; i++) {
+            for (int i = contents.Length; i < existingRun.Length; i++) {
                history.CurrentChange.ChangeData(model, newRun.Start + i, 0xFF);
             }
          } else {
@@ -718,19 +759,28 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private void ImportPal(string folder, int nameIndex, int start) {
          var file = fileSystem.LoadFile(folder + "/" + nameIndex.ToString("X2") + ".pal");
          if (file == null) return;
-         var lines = Encoding.ASCII.GetString(file.Contents).SplitLines();
-         foreach (var line in lines) {
+         foreach (var color in ReadPaletteFile(Encoding.ASCII.GetString(file.Contents))) {
+            PaletteRun.WriteStoredColor(model, history.CurrentChange, start, color); // keeps bit 15 of the stored color
+            start += 2;
+         }
+      }
+
+      /// <summary>
+      /// The colors of a JASC-PAL file ("r g b" lines), as HexManiac palettes hold them.
+      /// A palette holds 16 colors: a bigger file (many programs write 256) must not spill into the data after the palette, so only its first 16 colors are used.
+      /// </summary>
+      public static IReadOnlyList<short> ReadPaletteFile(string text, int maxColors = 16) {
+         var result = new List<short>();
+         foreach (var line in text.SplitLines()) {
+            if (result.Count >= maxColors) break;
             var parts = line.Split(' ');
             if (parts.Length != 3) continue;
             if (!parts[0].TryParseInt(out var r)) continue;
             if (!parts[1].TryParseInt(out var g)) continue;
             if (!parts[2].TryParseInt(out var b)) continue;
-            r /= 8;
-            g /= 8;
-            b /= 8;
-            PaletteRun.WriteStoredColor(model, history.CurrentChange, start, UncompressedPaletteColor.Pack(r, g, b)); // keeps bit 15 of the stored color
-            start += 2;
+            result.Add(UncompressedPaletteColor.Pack(r / 8, g / 8, b / 8));
          }
+         return result;
       }
 
       #endregion
