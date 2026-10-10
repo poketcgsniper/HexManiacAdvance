@@ -696,6 +696,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       // if it returns content: display that as the new hover tip
       private static readonly object[] EmptyTooltip = new object[0];
       public object Hover(double x, double y) {
+         if (ZoomLayer.IsActive) return null; // the maps are in the middle of a zoom: keep showing whatever is there until they have settled
          var map = MapUnderCursor(x, y);
          (hoverMap, hoverX, hoverY) = (map, x, y);
          if (map == null) return EmptyTooltip;
@@ -764,6 +765,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       public void DragDown(double x, double y) {
+         FinishZoomAnimation(); // the click is aimed at the maps where they are going to be
          if (primaryMap.BlockEditor != null) PrimaryMap.BlockEditor.ShowTiles = false;
          PrimaryMap.BorderEditor.ShowBorderPanel = false;
          (cursorX, cursorY) = (x, y);
@@ -791,6 +793,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       private PrimaryInteractionType interactionType;
       public void PrimaryDown(double x, double y, PrimaryInteractionStart click) {
+         FinishZoomAnimation(); // the click is aimed at the maps where they are going to be
          PrimaryMap.BlockEditor.ShowTiles = false;
          PrimaryMap.BorderEditor.ShowBorderPanel = false;
          var map = MapUnderCursor(x, y);
@@ -1168,6 +1171,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       public SelectionInteractionResult SelectDown(double x, double y) {
+         FinishZoomAnimation(); // the click is aimed at the maps where they are going to be
          PrimaryMap.BlockEditor.ShowTiles = false;
          PrimaryMap.BorderEditor.ShowBorderPanel = false;
          var map = MapUnderCursor(x, y);
@@ -1664,6 +1668,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       /// <summary>True while the maps are gliding to a new zoom. The view calls AdvanceZoomAnimation once per frame until this is false again.</summary>
       public bool IsZoomAnimating => ZoomAnimator.IsAnimating;
 
+      /// <summary>
+      /// The view sets this when it can draw all the maps through one shared transform (ZoomLayer). Then a zoom doesn't move the maps frame by frame:
+      /// they stay where they are, the view applies ZoomLayer to all of them (three numbers per frame, however many maps are on screen),
+      /// and the maps jump to their final scale and position in the last frame. When this is false (headless, or a view that can't do it) every frame moves every map.
+      /// </summary>
+      public bool UseZoomLayer { get; set; }
+
+      /// <summary>The transform the view applies to all the maps while a zoom animates (only while ZoomLayer.IsActive; otherwise it is the identity).</summary>
+      public ZoomLayer ZoomLayer { get; } = new ZoomLayer();
+
       // Where every map was when the current zoom started and which point stays still, so each frame can be worked out from the start.
       private class ZoomPlacement {
          public BlockMapViewModel Map;
@@ -1673,6 +1687,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private readonly List<ZoomPlacement> zoomPlacements = new();
       private BlockMapViewModel zoomMap; // the map under the cursor: it becomes the primary map when the zoom is done
       private double zoomAnchorX, zoomAnchorY;
+      private bool zoomHidHighlight; // the square around the block under the cursor is hidden while the maps are drawn through the zoom layer (it would stay behind at the old size)
 
       /// <summary>
       /// Zoom one step in or out around the point (x, y) of the map view.
@@ -1703,6 +1718,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       private void BeginZoom(BlockMapViewModel map, double x, double y, double target) {
+         // maps with different scales can't share one transform (they all have the same scale unless something is badly wrong)
+         if (ZoomLayer.IsActive || (UseZoomLayer && VisibleMaps.All(visible => visible.SpriteScale == map.SpriteScale))) {
+            BeginLayeredZoom(map, x, y, target);
+            return;
+         }
+
          // remember where the maps are right now (this includes any zoom that's still going): the frames are worked out from here
          var previous = zoomPlacements.ToDictionary(placement => placement.Map);
          zoomPlacements.Clear();
@@ -1734,21 +1755,63 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
       }
 
+      // Same as BeginZoom, but the maps stay where they are and ZoomLayer says where everything is drawn. Positions are worked out the same way
+      // (the start of the current leg of the zoom, the anchor, the scale), so the maps end up in the same place as when they are moved frame by frame.
+      private void BeginLayeredZoom(BlockMapViewModel map, double x, double y, double target) {
+         var isAnimating = ZoomAnimator.IsAnimating;
+         var includeBorders = target <= 3; // the borders around the maps are only shown when zoomed out
+         if (ShowHighlightCursor) {
+            ShowHighlightCursor = false;
+            zoomHidHighlight = true;
+         }
+         foreach (var visible in VisibleMaps) {
+            if (visible.IncludeBorders == includeBorders) continue;
+            // the borders appear or disappear as soon as the zoom heads for the other side of that line. The picture grows or shrinks around its center.
+            var (width, height) = (visible.PixelWidth, visible.PixelHeight);
+            var (left, top) = ((double)visible.LeftEdge, (double)visible.TopEdge);
+            visible.IncludeBorders = includeBorders;
+            left -= (visible.PixelWidth - width) / 2.0 * visible.SpriteScale;
+            top -= (visible.PixelHeight - height) / 2.0 * visible.SpriteScale;
+            (visible.LeftEdge, visible.TopEdge) = ((int)Math.Round(left), (int)Math.Round(top));
+         }
+
+         // a zoom that is still going continues from the scale on screen right now
+         ZoomLayer.Begin(map.SpriteScale, isAnimating ? ZoomAnimator.Current : map.SpriteScale, x, y);
+         zoomPlacements.Clear();
+         foreach (var visible in VisibleMaps) {
+            var (left, top) = ZoomLayer.LegStartPosition(visible.LeftEdge, visible.TopEdge);
+            zoomPlacements.Add(new ZoomPlacement { Map = visible, StartScale = ZoomLayer.LegStartScale, StartLeft = left, StartTop = top, Left = left, Top = top });
+         }
+         (zoomMap, zoomAnchorX, zoomAnchorY) = (map, x, y);
+
+         if (isAnimating) ZoomAnimator.Retarget(target);
+         else ZoomAnimator.Start(map.SpriteScale, target);
+         UpdateZoomLevel(target);
+
+         if (ZoomAnimator.IsAnimating) {
+            NotifyPropertyChanged(nameof(IsZoomAnimating));
+         } else {
+            FinishZoom(target); // animation is turned off
+         }
+      }
+
       /// <summary>
       /// Move the maps one frame along the zoom animation. Returns true while there are more frames to come.
-      /// The view calls this every time the display refreshes while IsZoomAnimating is true. Only about 30 of those calls a second move the maps
-      /// (every frame redraws every map on screen), and if the frames can't keep up the zoom skips to its end instead of crawling there.
+      /// The view calls this every time the display refreshes while IsZoomAnimating is true. A frame is drawn about every 16.7 ms (60 per second).
+      /// With UseZoomLayer a frame is three numbers for the view to apply to all the maps (ZoomLayer); without it every frame moves every map,
+      /// and if the frames can't keep up the zoom skips to its end instead of crawling there.
       /// </summary>
       public bool AdvanceZoomAnimation() {
          if (!ZoomAnimator.IsAnimating) return false;
-         if (ZoomAnimator.IsFallingBehind) {
+         if (!ZoomLayer.IsActive && ZoomAnimator.IsFallingBehind) {
             FinishZoomAnimation();
             return false;
          }
          if (!ZoomAnimator.IsFrameDue) return true;
          var scale = ZoomAnimator.Update();
          if (ZoomAnimator.IsAnimating) {
-            PlaceMapsForZoom(scale);
+            if (ZoomLayer.IsActive) ZoomLayer.Update(scale);
+            else PlaceMapsForZoom(scale);
             return true;
          }
          FinishZoom(scale);
@@ -1772,6 +1835,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       private void FinishZoom(double scale) {
          PlaceMapsForZoom(scale);
+         ZoomLayer.Reset(); // the maps are where they're going: the view stops transforming them
          var map = zoomMap;
          zoomPlacements.Clear();
          zoomMap = null;
@@ -1781,6 +1845,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             UpdateZoomLevel(map.SpriteScale);
          }
          NotifyPropertyChanged(nameof(IsZoomAnimating));
+         if (zoomHidHighlight) {
+            // the zoom is around the cursor, so the cursor is still over the point the zoom was aimed at: show the square around the block that's there now
+            zoomHidHighlight = false;
+            Hover(zoomAnchorX, zoomAnchorY);
+         }
       }
 
       private void UpdateZoomLevel(double scale) {
@@ -1873,6 +1942,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       private BlockMapViewModel MapUnderCursor(double x, double y) {
+         (x, y) = ZoomLayer.ToCommitted(x, y); // while a zoom animates the maps are drawn through the zoom layer: (x, y) is where the cursor is on screen
          BlockMapViewModel closestMap = null;
          double closestDistance = int.MaxValue;
          foreach (var map in VisibleMaps) {
@@ -2014,6 +2084,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private MapSlider shiftButton;
 
       public void ShiftDown(double x, double y) {
+         FinishZoomAnimation();
          (cursorX, cursorY) = (x, y);
          (deltaX, deltaY) = (0, 0);
          shiftButton = ButtonUnderCursor(x, y);

@@ -1468,7 +1468,7 @@
          </ItemsControl.RenderTransform>
          <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
-               <Canvas HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="False" SnapsToDevicePixels="True"/>
+               <Canvas HorizontalAlignment="Center" VerticalAlignment="Center" ClipToBounds="False" SnapsToDevicePixels="True" Loaded="MapCanvasLoaded"/>
             </ItemsPanelTemplate>
          </ItemsControl.ItemsPanel>
          <ItemsControl.ItemContainerStyle>

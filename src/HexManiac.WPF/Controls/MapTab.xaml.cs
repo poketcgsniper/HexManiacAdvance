@@ -36,12 +36,14 @@ namespace HavenSoft.HexManiac.WPF.Controls {
             oldContext.AutoscrollTiles -= AutoscrollTiles;
             StopZoomFrames();
             oldContext.FinishZoomAnimation(); // nothing will draw the rest of a zoom that's still going: put the maps where it was heading
+            oldContext.UseZoomLayer = false;  // and without this view nobody applies the zoom layer
          }
          var newContext = e.NewValue as MapEditorViewModel;
          if (newContext != null) {
             newContext.PropertyChanged += HandleContextPropertyChanged;
             newContext.AutoscrollBlocks += AutoscrollBlocks;
             newContext.AutoscrollTiles += AutoscrollTiles;
+            newContext.UseZoomLayer = mapCanvas != null;
             if (newContext.IsZoomAnimating) StartZoomFrames();
          }
       }
@@ -56,8 +58,25 @@ namespace HavenSoft.HexManiac.WPF.Controls {
       #region Zoom Animation
 
       // The view model works out where the maps go in each frame (MapEditorViewModel.AdvanceZoomAnimation). This is only the metronome:
-      // one call per rendered frame while a zoom is gliding.
+      // one call per rendered frame while a zoom is gliding. The view model draws a frame about every 16.7 ms (60 per second).
+      // While a zoom glides the maps themselves stay where they are. The view model keeps one transform for all of them (ZoomLayer: a scale and an offset),
+      // and this view applies it to the Canvas that holds the maps. A render transform needs no layout pass and no bindings, so a frame costs the same for 1 map or 35.
+      // When the zoom is over the maps are at their final scale and position and the transform is the identity again.
       private bool isZoomFrameHooked;
+      private Canvas mapCanvas;
+      private readonly MatrixTransform zoomLayerTransform = new MatrixTransform();
+
+      private void MapCanvasLoaded(object sender, RoutedEventArgs e) {
+         mapCanvas = (Canvas)sender;
+         mapCanvas.RenderTransform = zoomLayerTransform;
+         if (DataContext is MapEditorViewModel vm) vm.UseZoomLayer = true;
+      }
+
+      private void ApplyZoomLayer(MapEditorViewModel vm) {
+         if (mapCanvas == null) return;
+         var layer = vm.ZoomLayer;
+         zoomLayerTransform.Matrix = new Matrix(layer.Scale, 0, 0, layer.Scale, layer.X, layer.Y);
+      }
 
       private void StartZoomFrames() {
          if (isZoomFrameHooked) return;
@@ -70,12 +89,17 @@ namespace HavenSoft.HexManiac.WPF.Controls {
          if (!isZoomFrameHooked) return;
          isZoomFrameHooked = false;
          CompositionTarget.Rendering -= OnZoomFrame;
+         zoomLayerTransform.Matrix = Matrix.Identity; // the maps are where they're going now: nothing is transformed any more
          MapButtons.Visibility = Visibility.Visible;
       }
 
       private void OnZoomFrame(object sender, EventArgs e) {
          var vm = DataContext as MapEditorViewModel;
-         if (vm == null || !vm.AdvanceZoomAnimation()) StopZoomFrames();
+         if (vm == null || !vm.AdvanceZoomAnimation()) {
+            StopZoomFrames();
+            return;
+         }
+         ApplyZoomLayer(vm);
       }
 
       #endregion
