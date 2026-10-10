@@ -195,8 +195,7 @@
                   </StackPanel>
                   <TextBlock Text="Preview" Style="{StaticResource SectionTitle}" VerticalAlignment="Center"/>
                </DockPanel>
-               <TextBlock Style="{StaticResource Hint}" MaxWidth="780" HorizontalAlignment="Left"
-                          Text="The selected skin tone and clothes colour on the boy and the girl, painted the way the game paints them: walking around, on the trainer picture and from behind."/>
+               <TextBlock Style="{StaticResource Hint}" MaxWidth="780" HorizontalAlignment="Left" Text="{Binding PreviewHint}"/>
                <ItemsControl ItemsSource="{Binding Panels}" IsTabStop="False">
                   <ItemsControl.ItemTemplate>
                      <DataTemplate>
@@ -249,8 +248,7 @@
                   <CheckBox DockPanel.Dock="Right" Content="Show all" IsChecked="{Binding ShowAllPreviews}" VerticalAlignment="Center" ToolTip="Show every skin tone and every clothes colour at once"/>
                   <TextBlock Text="Everything at a glance" Style="{StaticResource SectionTitle}" VerticalAlignment="Center"/>
                </DockPanel>
-               <TextBlock Style="{StaticResource Hint}" MaxWidth="780" HorizontalAlignment="Left"
-                          Text="Every skin tone with the selected clothes colour, and every clothes colour with the selected skin tone (the boy, then the girl). Click one to select it."/>
+               <TextBlock Style="{StaticResource Hint}" MaxWidth="780" HorizontalAlignment="Left" Text="{Binding GlanceHint}"/>
                <TextBlock Text="Skin tones" FontWeight="Bold" Margin="0,6,0,2"/>
                <ItemsControl ItemsSource="{Binding SkinGrid}" ItemTemplate="{StaticResource GridTile}" IsTabStop="False">
                   <ItemsControl.ItemsPanel>
@@ -267,6 +265,16 @@
                      </ItemsPanelTemplate>
                   </ItemsControl.ItemsPanel>
                </ItemsControl>
+               <StackPanel Visibility="{Binding HasSecondary, Converter={StaticResource BoolToVisible}}">
+                  <TextBlock Text="Secondary colours (the red parts)" FontWeight="Bold" Margin="0,6,0,2"/>
+                  <ItemsControl ItemsSource="{Binding SecondaryGrid}" ItemTemplate="{StaticResource GridTile}" IsTabStop="False">
+                     <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                           <WrapPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                     </ItemsControl.ItemsPanel>
+                  </ItemsControl>
+               </StackPanel>
             </StackPanel>
          </Border>
 
@@ -304,6 +312,8 @@
                <WrapPanel Margin="0,6,0,0">
                   <Button Content="Open skin table" Command="{Binding OpenSkinTable}" Style="{StaticResource ToolButton}" ToolTip="Show the skin tone table in the main tab"/>
                   <Button Content="Open clothes table" Command="{Binding OpenClothesTable}" Style="{StaticResource ToolButton}" ToolTip="Show the clothes colour table in the main tab"/>
+                  <Button Content="Open secondary table" Command="{Binding OpenSecondaryTable}" Style="{StaticResource ToolButton}" ToolTip="Show the secondary colour table (the red parts) in the main tab"
+                          Visibility="{Binding HasSecondary, Converter={StaticResource BoolToVisible}}"/>
                   <Button Content="Open roles table" Command="{Binding OpenRolesTable}" Style="{StaticResource ToolButton}" ToolTip="Show the table that says which palette slots get painted"/>
                </WrapPanel>
             </StackPanel>

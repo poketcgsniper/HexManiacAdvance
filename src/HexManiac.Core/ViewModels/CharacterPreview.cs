@@ -299,20 +299,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          return new ReadonlyPixelViewModel(pixels.GetLength(0), pixels.GetLength(1), data, colors[0]);
       }
 
-      private static IReadOnlyList<short> Painted(IReadOnlyList<short> palette, CharacterRole role, CharacterColorRow skin, CharacterColorRow clothes) {
+      private static IReadOnlyList<short> Painted(IReadOnlyList<short> palette, CharacterRole role, CharacterColorRow skin, CharacterColorRow clothes, CharacterColorRow secondary) {
          if (palette == null || role == null) return palette;
-         return role.Apply(palette, skin, clothes);
+         return role.Apply(palette, skin, clothes, secondary);
       }
 
-      /// <summary>One overworld frame (0 = standing, 1 and 2 = walking) with the skin tone and clothes colour painted on, as the game does when it loads the palette.</summary>
-      public IPixelViewModel DrawOverworld(int frame, CharacterRole role, CharacterColorRow skin, CharacterColorRow clothes) {
+      /// <summary>One overworld frame (0 = standing, 1 and 2 = walking) with the skin tone, clothes colour and secondary colour painted on, as the game does when it loads the palette.</summary>
+      public IPixelViewModel DrawOverworld(int frame, CharacterRole role, CharacterColorRow skin, CharacterColorRow clothes, CharacterColorRow secondary = null) {
          if (!HasOverworld || frame < 0 || frame >= OverworldFrames.Count) return null;
-         return Draw(OverworldFrames[frame], Painted(OverworldPalette, role, skin, clothes));
+         return Draw(OverworldFrames[frame], Painted(OverworldPalette, role, skin, clothes, secondary));
       }
 
-      public IPixelViewModel DrawFront(CharacterRole role, CharacterColorRow skin, CharacterColorRow clothes) => HasFront ? Draw(Front, Painted(FrontPalette, role, skin, clothes)) : null;
+      public IPixelViewModel DrawFront(CharacterRole role, CharacterColorRow skin, CharacterColorRow clothes, CharacterColorRow secondary = null) => HasFront ? Draw(Front, Painted(FrontPalette, role, skin, clothes, secondary)) : null;
 
-      public IPixelViewModel DrawBack(CharacterRole role, CharacterColorRow skin, CharacterColorRow clothes) => HasBack ? Draw(Back, Painted(BackPalette, role, skin, clothes)) : null;
+      public IPixelViewModel DrawBack(CharacterRole role, CharacterColorRow skin, CharacterColorRow clothes, CharacterColorRow secondary = null) => HasBack ? Draw(Back, Painted(BackPalette, role, skin, clothes, secondary)) : null;
 
       #endregion
    }

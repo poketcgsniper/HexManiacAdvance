@@ -49,6 +49,15 @@ namespace HavenSoft.HexManiac.Core.Models {
          int Lighter(int channel) => (int)Math.Round(channel + (MaxChannel - channel) * 0.45);
          return (Pack(Darker(red), Darker(green), Darker(blue)), Pack(Lighter(red), Lighter(green), Lighter(blue)));
       }
+
+      /// <summary>
+      /// The same starting point for the secondary colour (the red parts), made the way the ROM's own rows were made: the shadow is 68% red, 70% green and 72% blue of the main colour,
+      /// and the highlight is the main colour itself (the sprites only have two shades of red, so there is nothing lighter to show).
+      /// </summary>
+      public static (ushort shadow, ushort highlight) DeriveSecondaryShades(ushort main) {
+         var (red, green, blue) = Unpack(main);
+         return (Pack((int)Math.Round(red * 0.68), (int)Math.Round(green * 0.70), (int)Math.Round(blue * 0.72)), main);
+      }
    }
 
    /// <summary>One row of the skin tone or clothes colour table: a name and three colours (main, shadow, highlight).</summary>
@@ -70,14 +79,14 @@ namespace HavenSoft.HexManiac.Core.Models {
    }
 
    /// <summary>
-   /// Which palette slots (0 to 15) of one kind of picture receive the colours of the chosen skin tone and clothes colour.
+   /// Which palette slots (0 to 15) of one kind of picture receive the colours of the chosen skin tone, clothes colour and secondary colour.
    /// A slot of -1 is not used by that colour. The skin has four slots: main, shadow, highlight and the outline the game makes from the shadow.
-   /// The clothes have three: main, shadow and highlight.
+   /// The clothes and the secondary colour (the red parts of Brendan and May) have three: main, shadow and highlight.
    /// </summary>
    public class CharacterRole {
       public const int Male = 0, Female = 1;
       public const int OverworldContext = 0, TrainerPicContext = 1, ReflectionContext = 2;
-      public const int SkinSlots = 4, ClothesSlots = 3;
+      public const int SkinSlots = 4, ClothesSlots = 3, SecondarySlots = 3;
 
       public int Gender { get; }
       public int Context { get; }
@@ -85,11 +94,14 @@ namespace HavenSoft.HexManiac.Core.Models {
       public IReadOnlyList<int> Skin { get; }
       /// <summary>Main, shadow, highlight.</summary>
       public IReadOnlyList<int> Clothes { get; }
+      /// <summary>Main, shadow, highlight (all -1 for a ROM that has no secondary colour table).</summary>
+      public IReadOnlyList<int> Secondary { get; }
 
-      public CharacterRole(int gender, int context, IReadOnlyList<int> skin, IReadOnlyList<int> clothes) {
+      public CharacterRole(int gender, int context, IReadOnlyList<int> skin, IReadOnlyList<int> clothes, IReadOnlyList<int> secondary = null) {
          (Gender, Context) = (gender, context);
          Skin = Pad(skin, SkinSlots);
          Clothes = Pad(clothes, ClothesSlots);
+         Secondary = Pad(secondary, SecondarySlots);
       }
 
       private static int[] Pad(IReadOnlyList<int> slots, int length) {
@@ -119,13 +131,20 @@ namespace HavenSoft.HexManiac.Core.Models {
       /// The palette the picture is drawn with after the skin tone and the clothes colour were applied.
       /// Row 0 of either table is the original look: the game does not recolour then, so neither does this.
       /// </summary>
-      public short[] Apply(IReadOnlyList<short> palette, CharacterColorRow skin, CharacterColorRow clothes) {
+      public short[] Apply(IReadOnlyList<short> palette, CharacterColorRow skin, CharacterColorRow clothes) => Apply(palette, skin, clothes, null);
+
+      /// <summary>
+      /// The palette the picture is drawn with after the skin tone, the clothes colour and the secondary colour (the red parts) were applied.
+      /// Row 0 of any table is the original look: the game does not recolour then, so neither does this. A null row is the same as row 0.
+      /// </summary>
+      public short[] Apply(IReadOnlyList<short> palette, CharacterColorRow skin, CharacterColorRow clothes, CharacterColorRow secondary) {
          var result = palette.ToArray();
          if (skin != null && skin.Index != 0) {
             var colors = new[] { skin.Colors[0], skin.Colors[1], skin.Colors[2], OutlineFromShadow(skin.Colors[1]) };
             Paint(result, Skin, colors);
          }
          if (clothes != null && clothes.Index != 0) Paint(result, Clothes, clothes.Colors);
+         if (secondary != null && secondary.Index != 0) Paint(result, Secondary, secondary.Colors);
          return result;
       }
 
@@ -150,17 +169,23 @@ namespace HavenSoft.HexManiac.Core.Models {
          return string.Join(", ", parts);
       }
 
-      /// <summary>"palette slots 1-4 are painted with the skin tone, slots 10-11 with the clothes colour"</summary>
+      /// <summary>"palette slots 1-4 are painted with the skin tone, slots 10-11 with the clothes colour, slots 12-13 with the secondary colour"</summary>
       public string Describe() {
+         var parts = new List<(string slots, string what)>();
          var skin = FormatSlots(Skin);
          var clothes = FormatSlots(Clothes);
-         if (skin.Length == 0 && clothes.Length == 0) return "no palette slots are painted";
-         if (skin.Length == 0) return $"{Slots(clothes, "palette ")} {Verb(clothes)} painted with the clothes colour";
-         if (clothes.Length == 0) return $"{Slots(skin, "palette ")} {Verb(skin)} painted with the skin tone";
-         return $"{Slots(skin, "palette ")} {Verb(skin)} painted with the skin tone, {Slots(clothes, "")} with the clothes colour";
+         var secondary = FormatSlots(Secondary);
+         if (skin.Length > 0) parts.Add((skin, "the skin tone"));
+         if (clothes.Length > 0) parts.Add((clothes, "the clothes colour"));
+         if (secondary.Length > 0) parts.Add((secondary, "the secondary colour"));
+         if (parts.Count == 0) return "no palette slots are painted";
+         // the first part says "palette slots", the later ones only "slots"
+         var texts = new List<string>();
+         for (int i = 0; i < parts.Count; i++) texts.Add(i == 0 ? $"{Slots(parts[i].slots, "palette ")} {Verb(parts[i].slots)} painted with {parts[i].what}" : $"{Slots(parts[i].slots, "")} with {parts[i].what}");
+         return string.Join(", ", texts);
       }
 
-      /// <summary>"Skin: main slot 2, shadow slot 3, highlight slot 1, outline slot 4 (made from the shadow). Clothes: main slot 10, shadow slot 11." Only the slots that are used.</summary>
+      /// <summary>"Skin: main slot 2, shadow slot 3, highlight slot 1, outline slot 4 (made from the shadow). Clothes: main slot 10, shadow slot 11. Secondary: main slot 12, shadow slot 13." Only the slots that are used.</summary>
       public string DescribeSlots() {
          string List(IReadOnlyList<int> slots, string[] names) {
             var parts = new List<string>();
@@ -169,9 +194,11 @@ namespace HavenSoft.HexManiac.Core.Models {
          }
          var skin = List(Skin, new[] { "main", "shadow", "highlight", "outline" });
          var clothes = List(Clothes, new[] { "main", "shadow", "highlight" });
+         var secondary = List(Secondary, new[] { "main", "shadow", "highlight" });
          var sentences = new List<string>();
          if (skin.Length > 0) sentences.Add($"Skin: {skin}.");
          if (clothes.Length > 0) sentences.Add($"Clothes: {clothes}.");
+         if (secondary.Length > 0) sentences.Add($"Secondary: {secondary}.");
          return sentences.Count == 0 ? "No palette slot is painted." : string.Join(" ", sentences);
       }
 
@@ -180,7 +207,7 @@ namespace HavenSoft.HexManiac.Core.Models {
       private static string Verb(string slots) => IsMany(slots) ? "are" : "is";
    }
 
-   public enum CharacterColorKind { SkinTone, Clothes }
+   public enum CharacterColorKind { SkinTone, Clothes, Secondary }
 
    /// <summary>The outcome of changing a table: what to tell the person, and for adding, which row it became.</summary>
    public class CharacterEditResult {
@@ -193,7 +220,7 @@ namespace HavenSoft.HexManiac.Core.Models {
    }
 
    /// <summary>
-   /// One of the two colour tables of the character customization: the skin tones or the clothes colours.
+   /// One of the colour tables of the character customization: the skin tones, the clothes colours or the secondary colours (the red parts of Brendan and May).
    /// A row is a 16-byte game-text name and three GBA colours (main, shadow, highlight). Row 0 is "Original": the game does not recolour then.
    /// The game takes the number of rows from a counter byte of its own, so every change that adds or removes a row updates the counter too.
    /// Everything is found through the metadata's anchor names, never through addresses: the tables move when they grow.
@@ -208,21 +235,23 @@ namespace HavenSoft.HexManiac.Core.Models {
       public string TableName { get; }
       public string CountName { get; }
 
-      public CharacterColorTable(IDataModel model, Func<ModelDelta> tokenFactory, CharacterColorKind kind) {
+      public CharacterColorTable(IDataModel model, Func<ModelDelta> tokenFactory, CharacterColorKind kind) : this(model, tokenFactory, kind, CharacterAnchorNames.For(model)) { }
+
+      public CharacterColorTable(IDataModel model, Func<ModelDelta> tokenFactory, CharacterColorKind kind, CharacterAnchorNames names) {
          this.model = model;
          this.tokenFactory = tokenFactory;
          Kind = kind;
-         TableName = kind == CharacterColorKind.SkinTone ? CharacterCustomization.SkinTonesAnchor : CharacterCustomization.ClothesAnchor;
-         CountName = kind == CharacterColorKind.SkinTone ? CharacterCustomization.SkinToneCountAnchor : CharacterCustomization.ClothesCountAnchor;
+         TableName = kind switch { CharacterColorKind.SkinTone => names.SkinTones, CharacterColorKind.Clothes => names.Clothes, _ => names.Secondary };
+         CountName = kind switch { CharacterColorKind.SkinTone => names.SkinToneCount, CharacterColorKind.Clothes => names.ClothesCount, _ => names.SecondaryCount };
       }
 
-      public string Noun => Kind == CharacterColorKind.SkinTone ? "skin tone" : "clothes colour";
-      public string NounPlural => Kind == CharacterColorKind.SkinTone ? "skin tones" : "clothes colours";
+      public string Noun => Kind switch { CharacterColorKind.SkinTone => "skin tone", CharacterColorKind.Clothes => "clothes colour", _ => "secondary colour" };
+      public string NounPlural => Kind switch { CharacterColorKind.SkinTone => "skin tones", CharacterColorKind.Clothes => "clothes colours", _ => "secondary colours" };
 
       #region Finding the data
 
-      public int TableAddress => model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, TableName);
-      public int CountAddress => model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, CountName);
+      public int TableAddress => TableName == null ? -1 : model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, TableName);
+      public int CountAddress => CountName == null ? -1 : model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, CountName);
 
       /// <summary>The table as the metadata describes it right now (null if the ROM has none). It has to be asked for again after every change: it moves when it grows.</summary>
       public ITableRun Run {
@@ -348,7 +377,7 @@ namespace HavenSoft.HexManiac.Core.Models {
       public CharacterEditResult DeriveShades(int index) {
          if (index < 0 || index >= VisibleRows) return CharacterEditResult.Fail("That row doesn't exist.");
          var row = ReadRow(index);
-         var (shadow, highlight) = GbaColor.DeriveShades(row.Colors[0]);
+         var (shadow, highlight) = Kind == CharacterColorKind.Secondary ? GbaColor.DeriveSecondaryShades(row.Colors[0]) : GbaColor.DeriveShades(row.Colors[0]);
          return SetColors(index, new[] { row.Colors[0], shadow, highlight });
       }
 
@@ -396,11 +425,14 @@ namespace HavenSoft.HexManiac.Core.Models {
          return Add(UniqueName(row.Name), row.Colors);
       }
 
+      /// <summary>The name a new row starts with.</summary>
+      public string DefaultName => Kind == CharacterColorKind.SkinTone ? "New skin tone" : "New colour";
+
       /// <summary>The name with " 2", " 3"... added until no row has it, cut short if needed so it still fits.</summary>
       public string UniqueName(string baseName) {
          var existing = new HashSet<string>(ReadRows().Select(row => row.Name));
          baseName = (baseName ?? string.Empty).Trim();
-         if (baseName.Length == 0) baseName = Kind == CharacterColorKind.SkinTone ? "New skin tone" : "New colour";
+         if (baseName.Length == 0) baseName = DefaultName;
          if (baseName.Length > MaxNameLength) baseName = baseName.Substring(0, MaxNameLength).TrimEnd();
          if (!existing.Contains(baseName)) return baseName;
          for (int n = 2; n < 100; n++) {
@@ -480,40 +512,92 @@ namespace HavenSoft.HexManiac.Core.Models {
    }
 
    /// <summary>
-   /// Character customization: the player can choose a skin tone and a clothes colour, and the game paints them over chosen slots of the
-   /// boy's and the girl's palettes. The ROM keeps two tables of colours, a table that says which palette slots get painted, and a counter for each.
-   /// See the "characterCustomization.*" anchors.
+   /// The names of the anchors that describe the character customization tables of a ROM.
+   /// Version 2 of the ROM's tables (with the secondary colour) lives under "graphics.characterCustomization.*".
+   /// The first release (no secondary colour) used "characterCustomization.*"; ROMs and metadata from then are still understood, without the secondary colour.
+   /// </summary>
+   public record CharacterAnchorNames(string SkinTones, string Clothes, string Secondary, string Roles, string SkinToneCount, string ClothesCount, string SecondaryCount, string RoleCount) {
+      public const string CurrentPrefix = "graphics.characterCustomization.";
+      public const string LegacyPrefix = "characterCustomization.";
+
+      public static readonly CharacterAnchorNames Current = new(
+         CurrentPrefix + "skinTones", CurrentPrefix + "clothes", CurrentPrefix + "secondary", CurrentPrefix + "roles",
+         CurrentPrefix + "skinToneCount", CurrentPrefix + "clothesCount", CurrentPrefix + "secondaryCount", CurrentPrefix + "roleCount");
+
+      /// <summary>The names of the first release: no secondary colour (those two names are null).</summary>
+      public static readonly CharacterAnchorNames Legacy = new(
+         LegacyPrefix + "skinTones", LegacyPrefix + "clothes", null, LegacyPrefix + "roles",
+         LegacyPrefix + "skinToneCount", LegacyPrefix + "clothesCount", null, LegacyPrefix + "roleCount");
+
+      public bool HasSecondaryNames => Secondary != null && SecondaryCount != null;
+
+      private static bool Has(IDataModel model, string name) {
+         if (name == null) return false;
+         var address = model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, name);
+         return address >= 0 && address < model.Count;
+      }
+
+      private bool AnyExist(IDataModel model) => Has(model, SkinTones) || Has(model, Clothes) || Has(model, Roles) || Has(model, SkinToneCount) || Has(model, ClothesCount) || Has(model, RoleCount);
+
+      /// <summary>The names this ROM uses: the current ones, unless only the old ones exist (a ROM made before the secondary colour). A ROM with neither gets the current names.</summary>
+      public static CharacterAnchorNames For(IDataModel model) {
+         if (model == null || Current.AnyExist(model)) return Current;
+         return Legacy.AnyExist(model) ? Legacy : Current;
+      }
+   }
+
+   /// <summary>
+   /// Character customization: the player can choose a skin tone, a clothes colour and a secondary colour (the red parts), and the game paints them over chosen slots of the
+   /// boy's and the girl's palettes. The ROM keeps three tables of colours (the secondary one is missing in the first release), a table that says which palette slots get painted, and a counter for each.
+   /// See the "graphics.characterCustomization.*" anchors.
    /// </summary>
    public class CharacterCustomization {
-      public const string SkinTonesAnchor = "characterCustomization.skinTones";
-      public const string ClothesAnchor = "characterCustomization.clothes";
-      public const string RolesAnchor = "characterCustomization.roles";
-      public const string SkinToneCountAnchor = "characterCustomization.skinToneCount";
-      public const string ClothesCountAnchor = "characterCustomization.clothesCount";
-      public const string RoleCountAnchor = "characterCustomization.roleCount";
+      public const string SkinTonesAnchor = CharacterAnchorNames.CurrentPrefix + "skinTones";
+      public const string ClothesAnchor = CharacterAnchorNames.CurrentPrefix + "clothes";
+      public const string SecondaryAnchor = CharacterAnchorNames.CurrentPrefix + "secondary";
+      public const string RolesAnchor = CharacterAnchorNames.CurrentPrefix + "roles";
+      public const string SkinToneCountAnchor = CharacterAnchorNames.CurrentPrefix + "skinToneCount";
+      public const string ClothesCountAnchor = CharacterAnchorNames.CurrentPrefix + "clothesCount";
+      public const string SecondaryCountAnchor = CharacterAnchorNames.CurrentPrefix + "secondaryCount";
+      public const string RoleCountAnchor = CharacterAnchorNames.CurrentPrefix + "roleCount";
 
-      /// <summary>A role is 9 bytes: gender, context, four skin slots (main, shadow, highlight, outline), three clothes slots (0xFF = not used).</summary>
-      public const int RoleLength = 9;
+      /// <summary>
+      /// A role is 12 bytes: gender, context, four skin slots (main, shadow, highlight, outline), three clothes slots and three secondary slots (0xFF = not used).
+      /// The first release's roles had only 9 bytes of content (the last three bytes were padding): they are read without secondary slots.
+      /// </summary>
+      public const int RoleLength = 12, LegacyRoleLength = 9;
 
       private readonly IDataModel model;
+      private readonly CharacterAnchorNames names;
 
       public CharacterColorTable SkinTones { get; }
       public CharacterColorTable Clothes { get; }
+      /// <summary>The secondary colours (the red parts of the sprites). Check <see cref="HasSecondary"/>: a ROM from before the secondary colour has no such table.</summary>
+      public CharacterColorTable Secondary { get; }
 
       public CharacterCustomization(IDataModel model, Func<ModelDelta> tokenFactory) {
          this.model = model;
-         SkinTones = new CharacterColorTable(model, tokenFactory, CharacterColorKind.SkinTone);
-         Clothes = new CharacterColorTable(model, tokenFactory, CharacterColorKind.Clothes);
+         names = CharacterAnchorNames.For(model);
+         SkinTones = new CharacterColorTable(model, tokenFactory, CharacterColorKind.SkinTone, names);
+         Clothes = new CharacterColorTable(model, tokenFactory, CharacterColorKind.Clothes, names);
+         Secondary = new CharacterColorTable(model, tokenFactory, CharacterColorKind.Secondary, names);
       }
 
-      /// <summary>True if the metadata describes both colour tables, the roles and the counters.</summary>
+      /// <summary>The anchors this ROM's customization is described with.</summary>
+      public CharacterAnchorNames Names => names;
+
+      /// <summary>True if the ROM has the secondary colour table and its counter (and the roles name the slots of the red parts).</summary>
+      public bool HasSecondary => names.HasSecondaryNames && Secondary.Exists;
+
+      /// <summary>True if the metadata describes both colour tables, the roles and the counters (the first release's anchor names count too). The secondary colour is optional.</summary>
       public static bool IsSupported(IDataModel model) {
          if (model == null) return false;
-         foreach (var name in new[] { SkinToneCountAnchor, ClothesCountAnchor, RoleCountAnchor }) {
+         var names = CharacterAnchorNames.For(model);
+         foreach (var name in new[] { names.SkinToneCount, names.ClothesCount, names.RoleCount }) {
             var address = model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, name);
             if (address < 0 || address >= model.Count) return false;
          }
-         foreach (var name in new[] { SkinTonesAnchor, ClothesAnchor, RolesAnchor }) {
+         foreach (var name in new[] { names.SkinTones, names.Clothes, names.Roles }) {
             var address = model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, name);
             if (address < 0 || address >= model.Count) return false;
             if (model.GetNextRun(address) is not ITableRun run || run.Start != address) return false;
@@ -523,7 +607,7 @@ namespace HavenSoft.HexManiac.Core.Models {
 
       public ITableRun RoleRun {
          get {
-            var address = model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, RolesAnchor);
+            var address = model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, names.Roles);
             if (address < 0 || address >= model.Count) return null;
             var run = model.GetNextRun(address) as ITableRun;
             return run != null && run.Start == address ? run : null;
@@ -534,13 +618,15 @@ namespace HavenSoft.HexManiac.Core.Models {
       public IReadOnlyList<CharacterRole> ReadRoles() {
          var roles = new List<CharacterRole>();
          var run = RoleRun;
-         var countAddress = model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, RoleCountAnchor);
-         if (run == null || run.ElementLength < RoleLength || countAddress < 0 || countAddress >= model.Count) return roles;
+         var countAddress = model.GetAddressFromAnchor(new NoDataChangeDeltaModel(), -1, names.RoleCount);
+         if (run == null || run.ElementLength < LegacyRoleLength || countAddress < 0 || countAddress >= model.Count) return roles;
          var count = Math.Min(model[countAddress], run.ElementCount);
+         var hasSecondarySlots = HasSecondary && run.ElementLength >= RoleLength;
          for (int i = 0; i < count; i++) {
             var start = run.Start + run.ElementLength * i;
             int Slot(int offset) => model[start + offset] < 16 ? model[start + offset] : -1;
-            roles.Add(new CharacterRole(model[start], model[start + 1], new[] { Slot(2), Slot(3), Slot(4), Slot(5) }, new[] { Slot(6), Slot(7), Slot(8) }));
+            var secondary = hasSecondarySlots ? new[] { Slot(9), Slot(10), Slot(11) } : null;
+            roles.Add(new CharacterRole(model[start], model[start + 1], new[] { Slot(2), Slot(3), Slot(4), Slot(5) }, new[] { Slot(6), Slot(7), Slot(8) }, secondary));
          }
          return roles;
       }

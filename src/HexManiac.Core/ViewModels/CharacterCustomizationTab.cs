@@ -9,7 +9,7 @@ using System.Linq;
 using System.Windows.Input;
 
 namespace HavenSoft.HexManiac.Core.ViewModels {
-   /// <summary>One row of the skin tone list or the clothes colour list: its number, its name and its three colours.</summary>
+   /// <summary>One row of the skin tone list, the clothes colour list or the secondary colour list: its number, its name and its three colours.</summary>
    public class CharacterColorRowItem : ViewModelCore {
       private readonly CharacterColorList list;
 
@@ -55,7 +55,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public bool Rename(string text) => list.Rename(this, text);
    }
 
-   /// <summary>One tile of the "everything at a glance" grids: the boy and the girl wearing one skin tone or clothes colour.</summary>
+   /// <summary>One tile of the "everything at a glance" grids: the boy and the girl wearing one skin tone, clothes colour or secondary colour.</summary>
    public class CharacterGridItem : ViewModelCore {
       public int Index { get; }
 
@@ -133,21 +133,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          foreach (var preview in new[] { Standing, WalkingA, WalkingB, Front, Back }) preview.SpriteScale = scale;
       }
 
-      public void Redraw(CharacterRole overworld, CharacterRole trainer, CharacterColorRow skin, CharacterColorRow clothes) {
+      public void Redraw(CharacterRole overworld, CharacterRole trainer, CharacterColorRow skin, CharacterColorRow clothes, CharacterColorRow secondary = null) {
          if (sprites == null) return;
-         Standing.Replace(sprites.DrawOverworld(0, overworld, skin, clothes));
-         WalkingA.Replace(sprites.DrawOverworld(1, overworld, skin, clothes));
-         WalkingB.Replace(sprites.DrawOverworld(2, overworld, skin, clothes));
-         Front.Replace(sprites.DrawFront(trainer, skin, clothes));
-         Back.Replace(sprites.DrawBack(trainer, skin, clothes));
+         Standing.Replace(sprites.DrawOverworld(0, overworld, skin, clothes, secondary));
+         WalkingA.Replace(sprites.DrawOverworld(1, overworld, skin, clothes, secondary));
+         WalkingB.Replace(sprites.DrawOverworld(2, overworld, skin, clothes, secondary));
+         Front.Replace(sprites.DrawFront(trainer, skin, clothes, secondary));
+         Back.Replace(sprites.DrawBack(trainer, skin, clothes, secondary));
       }
 
       /// <summary>The standing picture for the grids, or null if the ROM doesn't have the sprite.</summary>
-      public IPixelViewModel DrawStanding(CharacterRole overworld, CharacterColorRow skin, CharacterColorRow clothes) => sprites?.DrawOverworld(0, overworld, skin, clothes);
+      public IPixelViewModel DrawStanding(CharacterRole overworld, CharacterColorRow skin, CharacterColorRow clothes, CharacterColorRow secondary = null) => sprites?.DrawOverworld(0, overworld, skin, clothes, secondary);
    }
 
    /// <summary>
-   /// One of the two lists, skin tones or clothes colours: the rows, the colours of the selected row (edited with the same colour picker as any palette),
+   /// One of the lists, skin tones, clothes colours or secondary colours: the rows, the colours of the selected row (edited with the same colour picker as any palette),
    /// and the buttons that add, copy, remove and move rows. Everything is written to the ROM the moment it changes, and can be undone.
    /// </summary>
    public class CharacterColorList : ViewModelCore {
@@ -156,14 +156,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       public CharacterColorTable Table { get; }
       public CharacterColorKind Kind => Table.Kind;
-      public string Title => Kind == CharacterColorKind.SkinTone ? "Skin tones" : "Clothes colours";
+      public string Title => Kind switch { CharacterColorKind.SkinTone => "Skin tones", CharacterColorKind.Clothes => "Clothes colours", _ => "Secondary colours (the red parts)" };
 
       public ObservableCollection<CharacterColorRowItem> Rows { get; } = new();
 
       /// <summary>What is in the ROM, row by row (kept in step with <see cref="Rows"/>).</summary>
       public List<CharacterColorRow> Data { get; } = new();
 
-      /// <summary>The colours of the selected row, edited with the palette editor (the skin or clothes colours are its three colours).</summary>
+      /// <summary>The colours of the selected row, edited with the palette editor (the skin, clothes or secondary colours are its three colours).</summary>
       public PaletteCollection Palette { get; }
 
       private int selectedIndex = -1;
@@ -324,12 +324,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private void AddRow() {
          // a new row starts as a copy of the selected colours (or a neutral colour next to the original look) so there is something to see and edit
          var colors = CanEditSelected ? SelectedData.Colors : DefaultColors();
-         tab.RunEdit(this, () => Table.Add(Table.UniqueName(Kind == CharacterColorKind.SkinTone ? "New skin tone" : "New colour"), colors));
+         tab.RunEdit(this, () => Table.Add(Table.UniqueName(Table.DefaultName), colors));
       }
 
       private IReadOnlyList<ushort> DefaultColors() {
          var main = Kind == CharacterColorKind.SkinTone ? GbaColor.Pack(25, 18, 13) : GbaColor.Pack(26, 6, 6);
-         var (shadow, highlight) = GbaColor.DeriveShades(main);
+         var (shadow, highlight) = Kind == CharacterColorKind.Secondary ? GbaColor.DeriveSecondaryShades(main) : GbaColor.DeriveShades(main);
          return new[] { main, shadow, highlight };
       }
 
@@ -356,9 +356,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
    }
 
    /// <summary>
-   /// The "Character Customization" editor. After choosing the boy or the girl the player picks a skin tone and a clothes colour; the game paints those colours over
-   /// chosen slots of the character's palettes wherever the character is drawn. This tab edits the two lists of colours (rename, recolour, add, copy, remove, move),
+   /// The "Character Customization" editor. After choosing the boy or the girl the player picks a skin tone, a clothes colour and a secondary colour (the red parts); the game paints those colours over
+   /// chosen slots of the character's palettes wherever the character is drawn. This tab edits the lists of colours (rename, recolour, add, copy, remove, move),
    /// shows the boy and the girl wearing the selected colours, and opens the character's pictures in the image editor.
+   /// A ROM from before the secondary colour has only two lists: the secondary list, its grid and its buttons are hidden then.
    /// </summary>
    public class CharacterCustomizationTab : ViewModelCore, ITabContent, IRaiseMessageTab {
       private readonly ViewPort viewPort;
@@ -417,21 +418,42 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       #endregion
 
-      /// <summary>True if the ROM's metadata has the skin tone and clothes colour tables, their counters and the roles table.</summary>
+      /// <summary>True if the ROM's metadata has the skin tone and clothes colour tables, their counters and the roles table (the secondary colour table is optional).</summary>
       public static bool IsSupported(IDataModel model) => CharacterCustomization.IsSupported(model);
 
-      public const string UnsupportedMessage = "This ROM has no character customization tables (the characterCustomization.* anchors in its metadata), so there is nothing to edit here. The CUBE ROM has them.";
+      public const string UnsupportedMessage = "This ROM has no character customization tables (the graphics.characterCustomization.* anchors in its metadata), so there is nothing to edit here. The CUBE ROM has them.";
 
-      public const string Intro = "Choose what the player can look like. After picking the boy or the girl in the new game intro, the player picks a skin tone and a clothes colour from these two lists, "
+      public const string Intro = "Choose what the player can look like. After picking the boy or the girl in the new game intro, the player picks a skin tone, a clothes colour and a secondary colour (the red parts of the clothes) from these three lists, "
+         + "and the game paints them over the character's sprites everywhere: walking around, in battles, on the trainer card. "
+         + "Click a row to edit it, press Add for a new one, and watch the previews. Row 0 of each list is the original look and always stays.";
+
+      /// <summary>What the top of the tab says for a ROM that has no secondary colour (it was made before that existed).</summary>
+      public const string IntroWithoutSecondary = "Choose what the player can look like. After picking the boy or the girl in the new game intro, the player picks a skin tone and a clothes colour from these two lists, "
          + "and the game paints them over the character's sprites everywhere: walking around, in battles, on the trainer card. "
          + "Click a row to edit it, press Add for a new one, and watch the previews. Row 0 of each list is the original look and always stays.";
 
       /// <summary>The sentence at the top of the tab (a property, so the view can bind to it).</summary>
-      public string Introduction => Intro;
+      public string Introduction => HasSecondary ? Intro : IntroWithoutSecondary;
+
+      /// <summary>The sentence above the previews.</summary>
+      public string PreviewHint => HasSecondary
+         ? "The selected skin tone, clothes colour and secondary colour on the boy and the girl, painted the way the game paints them: walking around, on the trainer picture and from behind."
+         : "The selected skin tone and clothes colour on the boy and the girl, painted the way the game paints them: walking around, on the trainer picture and from behind.";
+
+      /// <summary>The sentence above the 'everything at a glance' grids.</summary>
+      public string GlanceHint => HasSecondary
+         ? "Every skin tone, every clothes colour and every secondary colour, each one wearing the selected other two (the boy, then the girl). Click one to select it."
+         : "Every skin tone with the selected clothes colour, and every clothes colour with the selected skin tone (the boy, then the girl). Click one to select it.";
 
       public CharacterColorList SkinTones { get; }
       public CharacterColorList Clothes { get; }
+      /// <summary>The secondary colours (the red parts of the clothes). Only part of <see cref="Lists"/> if <see cref="HasSecondary"/>.</summary>
+      public CharacterColorList Secondary { get; }
+      /// <summary>The lists the view shows: skin tones, clothes colours and, if the ROM has them, secondary colours.</summary>
       public IReadOnlyList<CharacterColorList> Lists { get; }
+
+      /// <summary>True if the ROM has the secondary colour table. If not, nothing about it is shown.</summary>
+      public bool HasSecondary => customization.HasSecondary;
 
       public CharacterPreviewPanel Boy { get; }
       public CharacterPreviewPanel Girl { get; }
@@ -440,19 +462,22 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <summary>Every skin tone with the selected clothes colour (the boy and the girl standing).</summary>
       public ObservableCollection<CharacterGridItem> SkinGrid { get; } = new();
 
-      /// <summary>Every clothes colour with the selected skin tone.</summary>
+      /// <summary>Every clothes colour with the selected skin tone and secondary colour.</summary>
       public ObservableCollection<CharacterGridItem> ClothesGrid { get; } = new();
 
+      /// <summary>Every secondary colour with the selected skin tone and clothes colour (empty if the ROM has no secondary colours).</summary>
+      public ObservableCollection<CharacterGridItem> SecondaryGrid { get; } = new();
+
       private IReadOnlyList<string> roleLines = Array.Empty<string>();
-      /// <summary>One line per kind of picture the game paints: which of the palette's 16 slots get the skin and the clothes colours. Read from the ROM's roles table.</summary>
+      /// <summary>One line per kind of picture the game paints: which of the palette's 16 slots get the skin, clothes and secondary colours. Read from the ROM's roles table.</summary>
       public IReadOnlyList<string> RoleLines { get => roleLines; private set { roleLines = value; NotifyPropertyChanged(); } }
 
       private string pictureHint = string.Empty;
-      /// <summary>A sentence for the image editor buttons: which palette slots to draw skin and clothes with.</summary>
+      /// <summary>A sentence for the image editor buttons: which palette slots to draw skin, clothes and the red parts with.</summary>
       public string PictureHint { get => pictureHint; private set => Set(ref pictureHint, value); }
 
       private string highlightNote = string.Empty;
-      /// <summary>Says when no picture uses the clothes highlight colour (the sprites only have two shades of clothes).</summary>
+      /// <summary>Says when no picture uses the highlight colour of the clothes or the secondary colour (the sprites only have two shades of each).</summary>
       public string HighlightNote { get => highlightNote; private set => Set(ref highlightNote, value); }
 
       private double zoom = 3;
@@ -484,7 +509,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          customization = new CharacterCustomization(model, () => viewPort.CurrentChange);
          SkinTones = new CharacterColorList(this, customization.SkinTones, viewPort.ChangeHistory);
          Clothes = new CharacterColorList(this, customization.Clothes, viewPort.ChangeHistory);
-         Lists = new[] { SkinTones, Clothes };
+         Secondary = new CharacterColorList(this, customization.Secondary, viewPort.ChangeHistory);
+         Lists = customization.HasSecondary ? new[] { SkinTones, Clothes, Secondary } : new[] { SkinTones, Clothes };
          Boy = new CharacterPreviewPanel(this, CharacterRole.Male);
          Girl = new CharacterPreviewPanel(this, CharacterRole.Female);
          Panels = new[] { Boy, Girl };
@@ -504,10 +530,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          return wrapper;
       }
 
-      private StubCommand refresh, openSkin, openClothes, openRoles;
+      private StubCommand refresh, openSkin, openClothes, openSecondary, openRoles;
       public ICommand Refresh => StubCommand(ref refresh, Reload, () => true);
       public ICommand OpenSkinTable => StubCommand(ref openSkin, () => OpenTable(SkinTones.Table), () => SkinTones.Table.Run != null);
       public ICommand OpenClothesTable => StubCommand(ref openClothes, () => OpenTable(Clothes.Table), () => Clothes.Table.Run != null);
+      public ICommand OpenSecondaryTable => StubCommand(ref openSecondary, () => OpenTable(Secondary.Table), () => HasSecondary && Secondary.Table.Run != null);
       public ICommand OpenRolesTable => StubCommand(ref openRoles, OpenRoles, () => customization.RoleRun != null);
 
       #region Reading everything
@@ -516,6 +543,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          roles = customization.ReadRoles();
          SkinTones.Reload();
          Clothes.Reload();
+         if (HasSecondary) Secondary.Reload();
          foreach (var panel in Panels) panel.LoadSprites(model);
          DescribeRoles();
          RedrawPreviews();
@@ -534,9 +562,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var sample = overworld.Count > 0 ? overworld[0] : roles.FirstOrDefault();
          PictureHint = sample == null
             ? "This ROM's roles table has no rows, so the game doesn't paint any slot."
-            : $"The game paints these slots of the palette: {sample.DescribeSlots()} Draw skin and clothes with those slots; the other slots (hair, eyes, outlines...) keep their own colours.";
-         HighlightNote = roles.Count > 0 && roles.All(role => role.Clothes[2] < 0)
-            ? "The sprites only have two shades of clothes, so the clothes highlight is saved but not used yet."
+            : $"The game paints these slots of the palette: {sample.DescribeSlots()} Draw {(sample.Secondary.Any(slot => slot >= 0) ? "skin, clothes and the red parts" : "skin and clothes")} with those slots; the other slots (hair, eyes, outlines...) keep their own colours.";
+         var clothesHighlightUnused = roles.Count > 0 && roles.All(role => role.Clothes[2] < 0);
+         var secondaryHighlightUnused = HasSecondary && roles.Count > 0 && roles.All(role => role.Secondary[2] < 0);
+         HighlightNote = clothesHighlightUnused && secondaryHighlightUnused ? "The sprites only have two shades of clothes and of the red parts, so the highlight colours of the clothes and of the secondary colours are saved but not used yet."
+            : clothesHighlightUnused ? "The sprites only have two shades of clothes, so the clothes highlight is saved but not used yet."
+            : secondaryHighlightUnused ? "The sprites only have two shades of the red parts, so the secondary highlight is saved but not used yet."
             : string.Empty;
       }
 
@@ -553,22 +584,29 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       #region Previews
 
+      /// <summary>The selected secondary colour, or null if the ROM has no secondary colours (the pictures then keep the sprites' own red).</summary>
+      private CharacterColorRow SelectedSecondary => HasSecondary ? Secondary.SelectedData : null;
+
       public void RedrawPreviews() {
          var skin = SkinTones.SelectedData;
          var clothes = Clothes.SelectedData;
-         foreach (var panel in Panels) panel.Redraw(FindRole(panel.Gender, CharacterRole.OverworldContext), FindRole(panel.Gender, CharacterRole.TrainerPicContext), skin, clothes);
+         var secondary = SelectedSecondary;
+         foreach (var panel in Panels) panel.Redraw(FindRole(panel.Gender, CharacterRole.OverworldContext), FindRole(panel.Gender, CharacterRole.TrainerPicContext), skin, clothes, secondary);
          RedrawGrids();
       }
 
       private void RedrawGrids() {
-         if (!showAllPreviews) { SkinGrid.Clear(); ClothesGrid.Clear(); return; }
+         if (!showAllPreviews) { SkinGrid.Clear(); ClothesGrid.Clear(); SecondaryGrid.Clear(); return; }
          var skin = SkinTones.SelectedData;
          var clothes = Clothes.SelectedData;
-         SyncGrid(SkinGrid, SkinTones, row => (row, clothes), SkinTones.SelectedIndex);
-         SyncGrid(ClothesGrid, Clothes, row => (skin, row), Clothes.SelectedIndex);
+         var secondary = SelectedSecondary;
+         SyncGrid(SkinGrid, SkinTones, row => (row, clothes, secondary), SkinTones.SelectedIndex);
+         SyncGrid(ClothesGrid, Clothes, row => (skin, row, secondary), Clothes.SelectedIndex);
+         if (HasSecondary) SyncGrid(SecondaryGrid, Secondary, row => (skin, clothes, row), Secondary.SelectedIndex);
+         else SecondaryGrid.Clear();
       }
 
-      private void SyncGrid(ObservableCollection<CharacterGridItem> grid, CharacterColorList list, Func<CharacterColorRow, (CharacterColorRow skin, CharacterColorRow clothes)> look, int selected) {
+      private void SyncGrid(ObservableCollection<CharacterGridItem> grid, CharacterColorList list, Func<CharacterColorRow, (CharacterColorRow skin, CharacterColorRow clothes, CharacterColorRow secondary)> look, int selected) {
          for (int i = 0; i < list.Data.Count; i++) {
             if (i >= grid.Count) grid.Add(new CharacterGridItem(i, index => list.Select(index)));
             DrawGridItem(grid[i], list.Data[i], look(list.Data[i]), i == selected);
@@ -576,11 +614,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          while (grid.Count > list.Data.Count) grid.RemoveAt(grid.Count - 1);
       }
 
-      private void DrawGridItem(CharacterGridItem item, CharacterColorRow row, (CharacterColorRow skin, CharacterColorRow clothes) look, bool selected) {
+      private void DrawGridItem(CharacterGridItem item, CharacterColorRow row, (CharacterColorRow skin, CharacterColorRow clothes, CharacterColorRow secondary) look, bool selected) {
          item.Name = row.Name;
          item.Selected = selected;
-         item.Boy.Replace(Boy.DrawStanding(FindRole(CharacterRole.Male, CharacterRole.OverworldContext), look.skin, look.clothes));
-         item.Girl.Replace(Girl.DrawStanding(FindRole(CharacterRole.Female, CharacterRole.OverworldContext), look.skin, look.clothes));
+         item.Boy.Replace(Boy.DrawStanding(FindRole(CharacterRole.Male, CharacterRole.OverworldContext), look.skin, look.clothes, look.secondary));
+         item.Girl.Replace(Girl.DrawStanding(FindRole(CharacterRole.Female, CharacterRole.OverworldContext), look.skin, look.clothes, look.secondary));
       }
 
       /// <summary>A colour of a row was edited: show it in the previews and in its tile.</summary>
