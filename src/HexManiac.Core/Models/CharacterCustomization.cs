@@ -160,6 +160,21 @@ namespace HavenSoft.HexManiac.Core.Models {
          return $"{Slots(skin, "palette ")} {Verb(skin)} painted with the skin tone, {Slots(clothes, "")} with the clothes colour";
       }
 
+      /// <summary>"Skin: main slot 2, shadow slot 3, highlight slot 1, outline slot 4 (made from the shadow). Clothes: main slot 10, shadow slot 11." Only the slots that are used.</summary>
+      public string DescribeSlots() {
+         string List(IReadOnlyList<int> slots, string[] names) {
+            var parts = new List<string>();
+            for (int i = 0; i < slots.Count && i < names.Length; i++) if (slots[i] >= 0) parts.Add($"{names[i]} slot {slots[i]}");
+            return string.Join(", ", parts);
+         }
+         var skin = List(Skin, new[] { "main", "shadow", "highlight", "outline (made from the shadow)" });
+         var clothes = List(Clothes, new[] { "main", "shadow", "highlight" });
+         var sentences = new List<string>();
+         if (skin.Length > 0) sentences.Add($"Skin: {skin}.");
+         if (clothes.Length > 0) sentences.Add($"Clothes: {clothes}.");
+         return sentences.Count == 0 ? "No palette slot is painted." : string.Join(" ", sentences);
+      }
+
       private static bool IsMany(string slots) => slots.Contains('-') || slots.Contains(',');
       private static string Slots(string slots, string prefix) => prefix + (IsMany(slots) ? "slots " : "slot ") + slots;
       private static string Verb(string slots) => IsMany(slots) ? "are" : "is";
@@ -317,7 +332,7 @@ namespace HavenSoft.HexManiac.Core.Models {
          if (index < 0 || index >= VisibleRows) return CharacterEditResult.Fail("That row doesn't exist.");
          if (index == 0) return CharacterEditResult.Fail("Row 0 is the original look: the game does not recolour it, so its colours can't be edited.");
          if (slot < 0 || slot >= ColorsPerRow) return CharacterEditResult.Fail("A row has three colours: main, shadow and highlight.");
-         model.WriteMultiByteValue(RowAddress(index) + ColorOffset + 2 * slot, 2, tokenFactory(), color & 0x7FFF);
+         model.WriteMultiByteValue(RowAddress(index) + ColorOffset + 2 * slot, 2, tokenFactory, color & 0x7FFF); // only asks for a change if the colour really differs
          return CharacterEditResult.Ok(index);
       }
 

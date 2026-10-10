@@ -2568,7 +2568,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       /// <summary>
-      /// Goto targets starting with this prefix open an editor tab instead of navigating to data: 'editor:sound', 'editor:sprites'.
+      /// Goto targets starting with this prefix open an editor tab instead of navigating to data: 'editor:sound', 'editor:sprites', 'editor:customization'.
       /// </summary>
       public const string EditorGotoPrefix = "editor:";
 
@@ -2579,9 +2579,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             OpenSpriteGalleryTab();
          } else if (editor.Equals("animations", StringComparison.OrdinalIgnoreCase) || editor.Equals("tiles", StringComparison.OrdinalIgnoreCase)) {
             OpenTilesetAnimationTab(TilesetAnimationTab.DefaultGroup, TilesetAnimationTab.DefaultMap, false);
+         } else if (editor.Equals("customization", StringComparison.OrdinalIgnoreCase) || editor.Equals("character", StringComparison.OrdinalIgnoreCase)) {
+            OpenCharacterCustomizationTab();
          } else {
-            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites' or 'editor:animations'.");
+            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites', 'editor:animations' or 'editor:customization'.");
          }
+      }
+
+      public void OpenCharacterCustomizationTab() {
+         if (!CharacterCustomizationTab.IsSupported(Model)) { RaiseError(CharacterCustomizationTab.UnsupportedMessage); return; }
+         var newTab = new CharacterCustomizationTab(this);
+         newTab.OnError += (sender, e) => RaiseError(e);
+         newTab.OnMessage += (sender, e) => RaiseMessage(e);
+         var args = new TabChangeRequestedEventArgs(newTab);
+         RequestTabChange(this, args);
+         if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);
       }
 
       public void OpenTilesetAnimationTab(int group, int map, bool secondary) {

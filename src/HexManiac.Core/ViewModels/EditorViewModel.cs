@@ -552,6 +552,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             new OpenSpriteGallery(),
             new OpenSoundEditor(),
             new OpenAnimatedTiles(),
+            new OpenCharacterCustomization(),
          };
 
          tabs = new List<ITabContent>();
@@ -1382,7 +1383,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       /// <summary>
-      /// Top-level shortcuts for the Sound editor and the Animated Tiles editor (they use the 'editor:' goto prefix, which ViewPort.Goto turns into opening the matching tab),
+      /// Top-level shortcuts for the Sound editor, the Animated Tiles editor and the Character Customization editor (they use the 'editor:' goto prefix, which ViewPort.Goto turns into opening the matching tab),
       /// plus 'OW Sprites', which jumps straight to the overworld sprite table (its sprite gallery is shown inside the table).
       /// </summary>
       private static void AddEditorShortcuts(GotoControlViewModel gotoViewModel, IEditableViewPort viewPort, List<GotoShortcutViewModel> results) {
@@ -1396,7 +1397,38 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
             results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Wailmer Pail", "Pail", "Watering") ?? DrawIcon(FilmIcon), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles"));
          }
+         if (CharacterCustomizationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Character Customization")) {
+            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindCharacterIcon(model) ?? DrawIcon(PersonIcon), ViewPort.EditorGotoPrefix + "customization", "Character\nCustomization"));
+         }
       }
+
+      /// <summary>The boy standing in the overworld, as the picture of the Character Customization shortcut (null if the ROM doesn't have him).</summary>
+      private static IPixelViewModel FindCharacterIcon(IDataModel model) {
+         try {
+            return CharacterSprites.Load(model, CharacterRole.Male).DrawOverworld(0, null, null, null);
+         } catch (Exception) {
+            return null; // icons are decoration: never fail the shortcut list because of them
+         }
+      }
+
+      private static readonly string[] PersonIcon = {
+         "................",
+         "......####......",
+         ".....######.....",
+         ".....######.....",
+         ".....######.....",
+         "......####......",
+         "................",
+         "....########....",
+         "...##########...",
+         "..###.####.###..",
+         "..###.####.###..",
+         "..###.####.###..",
+         "......####......",
+         "......#..#......",
+         "......#..#......",
+         ".....###.###....",
+      };
 
       private static readonly string[] NoteIcon = {
          "................",

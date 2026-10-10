@@ -28,13 +28,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          spriteScale = scale;
       }
 
+      /// <summary>Swap the picture. The size is only announced if it changed: every announcement makes the view build the picture again.</summary>
       public void Replace(IPixelViewModel newImage) {
+         var sizeChanged = PixelWidth != (newImage?.PixelWidth ?? 0) || PixelHeight != (newImage?.PixelHeight ?? 0);
          image = newImage;
-         NotifyPropertyChanged(nameof(PixelWidth));
-         NotifyPropertyChanged(nameof(PixelHeight));
-         NotifyPropertyChanged(nameof(PixelData));
+         if (sizeChanged) {
+            NotifyPropertyChanged(nameof(PixelWidth));
+            NotifyPropertyChanged(nameof(PixelHeight));
+         }
          NotifyPropertyChanged(nameof(Transparent));
          NotifyPropertyChanged(nameof(HasImage));
+         NotifyPropertyChanged(nameof(PixelData));
       }
    }
 
