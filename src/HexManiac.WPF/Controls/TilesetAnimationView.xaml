@@ -34,7 +34,7 @@
          <DockPanel Grid.Column="0">
             <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" MaxWidth="560" HorizontalAlignment="Left"
                        Text="Both tilesets of the map are shown. Outlined tiles are animated (the animated ones move here too): click one to see its animation on the right. Click any tile to start a new animation there."/>
-            <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Backlight}" BorderThickness="1" Padding="6" Margin="0,6,0,0">
+            <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Backlight}" BorderThickness="1" Padding="6" Margin="0,6,0,0" MaxWidth="560" HorizontalAlignment="Left">
                <StackPanel>
                   <TextBlock Text="{Binding NewAnimationTitle}" FontSize="14" Margin="0,0,0,4"/>
                   <TextBlock Style="{StaticResource Hint}" Text="1. Click the first tile in a tileset above.  2. Say how many tiles (in a row) animate together and how many frames you want.  3. Add it, then draw or import the frames on the right."/>
