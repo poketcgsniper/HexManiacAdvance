@@ -1387,7 +1387,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var matchingPage = 0; // a sprite that has one page and shares a palette with several pages is matched against the first page
          if (spriteRun.Pages == 1 && palettes != null && palettes.Length > 1) matchPalettes = palettes.Take(1).ToArray();
          var reorderAllowed = ReferenceEquals(matchPalettes, palettes) || usablePalPages.Contains(matchingPage);
-         var problemPixel = reorderAllowed ? TryReorderPalettesFromMatchingSprite(matchPalettes, image, spriteRun.GetPixels(model, spritePage, -1)) : new Point(-1, -1);
+         var currentPixels = spriteRun.GetPixels(model, spritePage, -1);
+         // the reordering only changes the first page: it can't describe a picture (like a tilemap) whose tiles use the other pages of the palette
+         if (!ReferenceEquals(matchPalettes, palettes) && !UsesOnlyFirstPalettePage(currentPixels, paletteRun?.PaletteFormat.InitialBlankPages ?? 0)) reorderAllowed = false;
+         var problemPixel = reorderAllowed ? TryReorderPalettesFromMatchingSprite(matchPalettes, image, currentPixels) : new Point(-1, -1);
          if (problemPixel.X == PixelWidth && problemPixel.Y == PixelHeight) {
             // palette is reordered, everything matches up with the original data. No need to write sprite data.
             needWriteSpriteData = false;
@@ -1709,6 +1712,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          }
 
          return result;
+      }
+
+      /// <summary>True if every pixel is an index into the first page of the palette (tiles that are mapped to no palette count as the first page too).</summary>
+      private static bool UsesOnlyFirstPalettePage(int[,] pixels, int initialBlankPages) {
+         foreach (var pixel in pixels) {
+            var page = pixel >> 4;
+            if (page != 0 && page != initialBlankPages) return false;
+         }
+         return true;
       }
 
       /// <summary>

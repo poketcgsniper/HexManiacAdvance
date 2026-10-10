@@ -416,5 +416,62 @@ namespace HavenSoft.HexManiac.Tests {
 
          for (int i = 0; i < 64; i++) Assert.Equal(i % 32, indexed[i % 8, i / 8]);
       }
+
+      private static short Stored48(int i) => (short)((i & 31) | ((i / 32 * 10 + 5) << 5) | (((i * 3) & 31) << 10));
+      private static short Shown48(int i) => (short)(((i & 31) << 10) | ((i / 32 * 10 + 5) << 5) | ((i * 3) & 31));
+
+      /// <summary>
+      /// A 4x4 tile picture (tilemap, tileset and a palette with three pages) that only uses the second palette page:
+      /// the left half is color 12 of that page, the right half is color 13 of that page.
+      /// </summary>
+      private void SetupTilemapOnSecondPaletteBank() {
+         data = 0x1000.Range().Select(i => (byte)0xFF).ToArray();
+         var tileset = NaiveLz(32.Range().Select(i => (byte)0).Concat(32.Range().Select(i => (byte)0xCC)).Concat(32.Range().Select(i => (byte)0xDD)).ToArray()); // tile 0 is blank, tile 1 is color 12, tile 2 is color 13
+         var entries = new List<byte>();
+         for (int y = 0; y < 4; y++) {
+            for (int x = 0; x < 4; x++) {
+               var entry = (x < 2 ? 1 : 2) | (1 << 12); // palette bank 1
+               entries.Add((byte)entry);
+               entries.Add((byte)(entry >> 8));
+            }
+         }
+         var tilemap = NaiveLz(entries.ToArray());
+         Array.Copy(tileset, 0, data, 0x200, tileset.Length);
+         Array.Copy(tilemap, 0, data, 0x300, tilemap.Length);
+         for (int i = 0; i < 48; i++) {
+            data[Palette + i * 2] = (byte)Stored48(i);
+            data[Palette + i * 2 + 1] = (byte)(Stored48(i) >> 8);
+         }
+         model = new PokemonModel(data, null, BaseViewModelTestClass.Singletons);
+         viewPort = new ViewPort(string.Empty, model, InstantDispatch.Instance, BaseViewModelTestClass.Singletons) { Width = 16, Height = 16 };
+         viewPort.Edit($"@{Palette:X} ^pal`ucp4:012` ");
+         viewPort.Edit("@200 ^tileset`lzt4|pal` ");
+         viewPort.Edit("@300 ^tilemap`lzm4x4x4|tileset` ");
+      }
+
+      [Theory]
+      [InlineData(0)]
+      [InlineData(1)]
+      [InlineData(2)]
+      public void Tilemap_ImportNewColorsOnPaletteWithSeveralPagesWhenThePictureUsesTheSecondPage_ShownPictureMatchesTheImport(int importChoice) {
+         SetupTilemapOnSecondPaletteBank();
+         var tool = viewPort.Tools.SpriteTool;
+         viewPort.Tools.SelectedTool = tool;
+         tool.SpriteAddress = 0x300;
+         Assert.Equal(Shown48(16 + 12), tool.PixelData[0]);
+         Assert.Equal(Shown48(16 + 13), tool.PixelData[31]);
+         var image = tool.PixelData.Select((c, i) => (i % 32) < 16 ? Shown(3) : Shown(9)).ToArray(); // two colors that the palette does not have in that arrangement
+         var fs = new StubFileSystem {
+            LoadImage = name => (image, 32),
+            TryLoadIndexImage = (ref string name, out int[,] indexed, out IReadOnlyList<short> pal) => { name = "image.png"; (indexed, pal) = (null, null); return false; },
+            ShowOptions = (title, prompt, details, options) => importChoice,
+         };
+
+         tool.ImportPair.Execute(fs);
+
+         tool.SpriteAddress = tool.SpriteAddress;
+         if (importChoice == 2) return; // Cautious only picks the closest of the colors it has
+         for (int i = 0; i < image.Length; i++) Assert.True((image[i] & 0x7FFF) == (tool.PixelData[i] & 0x7FFF), $"pixel {i % 32},{i / 32} shows {tool.PixelData[i]:X4}, the import has {image[i]:X4}");
+      }
    }
 }
