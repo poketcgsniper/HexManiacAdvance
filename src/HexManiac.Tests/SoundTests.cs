@@ -57,6 +57,79 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(samples, GbaSample.Quantize(read));
       }
 
+      #region WAV files from other programs
+
+      private static byte[] Le(long value, int bytes) => Enumerable.Range(0, bytes).Select(i => (byte)(value >> (8 * i))).ToArray();
+
+      private static byte[] Chunk(string id, byte[] body, long declaredSize = -1)
+         => System.Text.Encoding.ASCII.GetBytes(id).Concat(Le(declaredSize >= 0 ? declaredSize : body.Length, 4)).Concat(body).Concat(body.Length % 2 == 1 && declaredSize < 0 ? new byte[1] : new byte[0]).ToArray();
+
+      private static byte[] Riff(params byte[][] chunks) {
+         var content = chunks.SelectMany(chunk => chunk).ToArray();
+         return System.Text.Encoding.ASCII.GetBytes("RIFF").Concat(Le(content.Length + 4, 4)).Concat(System.Text.Encoding.ASCII.GetBytes("WAVE")).Concat(content).ToArray();
+      }
+
+      private static byte[] Fmt(int tag, int channels, int rate, int bits)
+         => Le(tag, 2).Concat(Le(channels, 2)).Concat(Le(rate, 4)).Concat(Le((long)rate * channels * bits / 8, 4)).Concat(Le(channels * bits / 8, 2)).Concat(Le(bits, 2)).ToArray();
+
+      /// <summary>The 40 byte format chunk of WAVE_FORMAT_EXTENSIBLE: Audacity, Reaper and Windows write 24 bit and 32 bit float files this way. 'subTag' is the first two bytes of the sub format GUID.</summary>
+      private static byte[] ExtensibleFmt(int subTag, int channels, int rate, int bits)
+         => Fmt(0xFFFE, channels, rate, bits).Concat(Le(22, 2)).Concat(Le(bits, 2)).Concat(Le(0, 4))
+            .Concat(Le(subTag, 2)).Concat(new byte[] { 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71 }).ToArray();
+
+      [Fact]
+      public void Wav_Extensible24Bit_IsRead() {
+         var data = Le(0x400000, 3).Concat(Le(-0x400000, 3)).Concat(Le(0, 3)).ToArray();
+         var wav = Riff(Chunk("fmt ", ExtensibleFmt(1, 1, 22050, 24)), Chunk("data", data));
+
+         Assert.True(GbaSample.TryReadWav(wav, out var samples, out var rate, out var error), error);
+
+         Assert.Equal(22050, rate);
+         Assert.Equal(new[] { 0.5, -0.5, 0.0 }, samples);
+      }
+
+      [Fact]
+      public void Wav_ExtensibleFloat_IsRead() {
+         var data = BitConverter.GetBytes(0.25f).Concat(BitConverter.GetBytes(-0.5f)).ToArray();
+         var wav = Riff(Chunk("fmt ", ExtensibleFmt(3, 1, 32000, 32)), Chunk("data", data));
+
+         Assert.True(GbaSample.TryReadWav(wav, out var samples, out var rate, out var error), error);
+
+         Assert.Equal(new[] { 0.25, -0.5 }, samples);
+      }
+
+      [Fact]
+      public void Wav_CutOffInsideTheFormatChunk_IsRefused_NotAnException() {
+         var wav = Riff(Chunk("fmt ", Fmt(1, 1, 13379, 16))).Take(30).ToArray();
+
+         Assert.False(GbaSample.TryReadWav(wav, out _, out _, out var error));
+         Assert.False(string.IsNullOrEmpty(error));
+      }
+
+      [Fact]
+      public void Wav_ChunkSizeThatPointsBackwards_DoesNotHang() {
+         // a chunk size is unsigned: 0xFFFFFFF8 read as a signed number moved the reader back to the start of the same chunk, forever
+         var wav = Riff(Chunk("fmt ", Fmt(1, 1, 13379, 16)), Chunk("junk", new byte[4], 0xFFFFFFF8L), Chunk("data", new byte[8]));
+
+         var task = System.Threading.Tasks.Task.Run(() => GbaSample.TryReadWav(wav, out _, out _, out _));
+
+         Assert.True(task.Wait(5000), "TryReadWav does not return");
+      }
+
+      [Fact]
+      public void Wav_DataSizeOfAStreamingWriter_ReadsToTheEndOfTheFile() {
+         // ffmpeg writing to a pipe cannot know the length, and leaves 0xFFFFFFFF in the data chunk
+         var data = Le(1000, 2).Concat(Le(2000, 2)).Concat(Le(-3000, 2)).Concat(Le(4000, 2)).ToArray();
+         var wav = Riff(Chunk("fmt ", Fmt(1, 1, 13379, 16)), Chunk("data", data, 0xFFFFFFFFL));
+
+         Assert.True(GbaSample.TryReadWav(wav, out var samples, out var rate, out var error), error);
+
+         Assert.Equal(4, samples.Length);
+         Assert.Equal(-3000 / 32768.0, samples[2], 6);
+      }
+
+      #endregion
+
       [Fact]
       public void Resample_HalvesLength() {
          var samples = Enumerable.Range(0, 100).Select(i => i / 100.0).ToArray();
