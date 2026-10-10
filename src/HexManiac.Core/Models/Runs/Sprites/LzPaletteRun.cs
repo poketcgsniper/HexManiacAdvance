@@ -80,7 +80,9 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
          var colorCount = (int)Math.Pow(2, PaletteFormat.Bits);
          var pageLength = colorCount * 2;
          page %= Pages;
+         var dataBefore = (byte[])data.Clone();
          PaletteRun.SetPalette(data, page * pageLength, colors);
+         if (data.SequenceEqual(dataBefore)) return this; // the same colors: don't recompress (see LzSpriteRun.SetPixels)
 
          var newModelData = Compress(data, 0, data.Length);
          var newRun = (IPaletteRun)model.RelocateForExpansion(token, this, newModelData.Count);

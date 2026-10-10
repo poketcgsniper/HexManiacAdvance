@@ -811,6 +811,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var relatedPalettes = spriteRun.FindRelatedPalettes(model);
          var relatedImageCount = relatedSprites.Count * relatedPalettes.Count;
          if (pixels.GetLength(0) == PixelWidth && pixels.GetLength(1) == PixelHeight) {
+            if (IsShowingImage(Unindex(pixels, palette).image)) return; // the picture is already there: there is nothing to import
             ImportSinglePageSpriteAndPalette(fileSystem, pixels, palette, spriteRun, paletteRun, importType);
             viewPort.Refresh(); // need to refresh in case the model resized during the import
          } else {
@@ -827,6 +828,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var relatedPalettes = spriteRun.FindRelatedPalettes(model);
          var relatedImageCount = relatedSprites.Count * relatedPalettes.Count;
          if (width == PixelWidth && height == PixelHeight) {
+            if (IsShowingImage(image)) return; // the picture is already there: there is nothing to import
             ImportSinglePageSpriteAndPalette(fileSystem, image, spriteRun, paletteRun, importType);
          } else if (width == PixelWidth * spritePages && height == PixelHeight) {
             ImportWideSpriteAndPalette(fileSystem, image, spriteRun, paletteRun, importType);
@@ -866,6 +868,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             viewPort.RaiseError($"The imported width/height ({width}/{height}) doesn't match the image ({displayWidth}/{displayHeight})!");
          }
          viewPort.Refresh(); // need to refresh in case the model resized during the import
+      }
+
+      /// <summary>
+      /// Importing the picture that the tool already shows must not touch the ROM.
+      /// Otherwise the sprite is recompressed (and moved if HexManiac's compressor does worse than the tool that made it),
+      /// colors that this sprite doesn't use are blacked out, and every other sprite that shares the palette is re-indexed.
+      /// The GBA only has 15 bits of color, so bit 15 is ignored.
+      /// </summary>
+      private bool IsShowingImage(short[] image) {
+         if (image == null || PixelData == null || image.Length == 0 || image.Length != PixelData.Length) return false;
+         for (var i = 0; i < image.Length; i++) {
+            if ((image[i] & 0x7FFF) != (PixelData[i] & 0x7FFF)) return false;
+         }
+         return true;
       }
 
       private short[][] SplitHorizontally(short[] image, int width, int count) {

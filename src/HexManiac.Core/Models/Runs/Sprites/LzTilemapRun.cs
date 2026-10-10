@@ -252,6 +252,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
 
       /// <param name="newRawData">Uncompressed data that we want to compress and insert.</param>
       public ITilemapRun ReplaceData(byte[] newRawData, ModelDelta token) {
+         var dataBefore = Decompress(Model, Start, allowLengthErrors: true);
+         if (dataBefore != null && dataBefore.SequenceEqual(newRawData)) return this; // the same data: don't recompress (see LzSpriteRun.SetPixels)
          var newModelData = Compress(newRawData, 0, newRawData.Length);
          var newRun = Model.RelocateForExpansion(token, this, newModelData.Count);
          for (int i = 0; i < newModelData.Count; i++) token.ChangeData(Model, newRun.Start + i, newModelData[i]);

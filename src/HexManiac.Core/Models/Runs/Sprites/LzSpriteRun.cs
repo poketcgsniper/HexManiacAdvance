@@ -92,7 +92,11 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
             var (width, height) = (pixels.GetLength(0), pixels.GetLength(1));
             for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) pixels[x, y] &= 0xF;
          }
+         var dataBefore = (byte[])data.Clone();
          SpriteRun.SetPixels(data, page * pageLength, pixels, SpriteFormat.BitsPerPixel);
+         // Writing the pixels that are already there changes nothing: don't recompress.
+         // HexManiac's compressor is not as good as the one most tools use, so recompressing would make the data bigger, move it, and leave the old copy behind.
+         if (data.SequenceEqual(dataBefore)) return this;
 
          var newModelData = Compress(data, 0, data.Length);
          var newRun = (ISpriteRun)model.RelocateForExpansion(token, this, newModelData.Count);
