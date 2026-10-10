@@ -243,7 +243,7 @@
                         <CheckBox Content="exact note lengths" IsChecked="{Binding MidiExactGateTime}" VerticalAlignment="Center"
                                   ToolTip="Keep the length of every note exactly, like the songs of the original games do. Off rounds notes to the lengths the sound engine has a command for, which makes the song a bit smaller."/>
                      </WrapPanel>
-                     <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Hint}" Text="A .s file from mid2agb names its voicegroup with a symbol (for example voicegroup000). That symbol is set to the voicegroup chosen here, so the instruments come from this ROM. With 'a new voicegroup of its own', the song gets a private copy of it, which can then hold any instrument of the game. A MIDI file is converted with the settings above and put in the same way; the voicegroup chosen here is the one whose instruments it plays (All Instruments, if this ROM has it, was chosen for you)."/>
+                     <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Hint}" Text="A .s file from mid2agb names its voicegroup with a symbol (for example voicegroup000). That symbol is set to the voicegroup chosen here, so the instruments come from this ROM. With 'a new voicegroup of its own', the song gets a private copy of it, which can then hold any instrument of the game. A MIDI file is converted with the settings above and put in the same way. It plays the instruments of the All Instruments voicegroup if this ROM has one, unless you pick another voicegroup here or tick 'always use this one'."/>
                   </Grid>
                </Grid>
                <Grid>

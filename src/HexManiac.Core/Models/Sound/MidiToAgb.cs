@@ -250,9 +250,13 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          var slash = Math.Max(name.LastIndexOf('/'), name.LastIndexOf('\\'));
          if (slash >= 0) name = name.Substring(slash + 1);
          var dot = name.LastIndexOf('.');
-         if (dot > 0) name = name.Substring(0, dot);
+         if (dot >= 0) name = name.Substring(0, dot);
          var sb = new StringBuilder();
-         foreach (var c in name) sb.Append(c < 128 && (char.IsLetterOrDigit(c) || c == '_') ? c : '_');
+         foreach (var c in name) {
+            var keep = c < 128 && (char.IsLetterOrDigit(c) || c == '_');
+            if (keep) sb.Append(c);
+            else if (sb.Length > 0 && sb[sb.Length - 1] != '_') sb.Append('_');
+         }
          var label = sb.ToString().Trim('_');
          if (label.Length == 0) label = "song";
          if (char.IsDigit(label[0])) label = "_" + label;

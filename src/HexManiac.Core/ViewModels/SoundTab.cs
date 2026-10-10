@@ -464,7 +464,25 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public string SongText { get => songText; private set => Set(ref songText, value); }
 
       private VoicegroupItem selectedVoicegroup;
-      public VoicegroupItem SelectedVoicegroup { get => selectedVoicegroup; set { selectedVoicegroup = value; NotifyPropertyChanged(); } }
+      private bool voicegroupPickedByUser;
+      /// <summary>
+      /// The voicegroup songs are inserted with. Selecting a song and reading the lists choose it too (the song's own voicegroup, or All Instruments at first);
+      /// a MIDI file only follows that automatic choice when the ROM has no All Instruments voicegroup (see ChooseVoicegroupForMidi).
+      /// </summary>
+      public VoicegroupItem SelectedVoicegroup {
+         get => selectedVoicegroup;
+         set {
+            if (value != null && !ReferenceEquals(value, selectedVoicegroup)) voicegroupPickedByUser = true;
+            selectedVoicegroup = value;
+            NotifyPropertyChanged();
+         }
+      }
+
+      /// <summary>Chooses the voicegroup without it counting as a choice of the user.</summary>
+      private void SelectVoicegroupAutomatically(VoicegroupItem item) {
+         selectedVoicegroup = item;
+         NotifyPropertyChanged(nameof(SelectedVoicegroup));
+      }
 
       private bool overrideVoicegroup;
       /// <summary>When set, inserted songs always use the selected voicegroup, even if the .s file names one.</summary>
@@ -527,7 +545,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public ICommand GotoSong => StubCommand(ref gotoSong, ExecuteGotoSong, () => selectedSong != null);
 
       private void LoadSongs() {
-         var keepInsertVoicegroup = selectedVoicegroup?.Address;
+         var keepInsertVoicegroup = voicegroupPickedByUser ? selectedVoicegroup?.Address : null; // a voicegroup chosen by the song selection or by default is chosen again below
          Songs.Clear();
          Voicegroups.Clear();
          var table = model.GetTable(SongTable);
@@ -546,9 +564,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          foreach (var info in VoicegroupCatalog.Scan(model, usages)) Voicegroups.Add(new VoicegroupItem(model, info));
          foreach (var item in Songs) item.MatchToFilter(songFilter);
-         // the voicegroup chosen for inserting songs stays chosen when the lists are read again
-         // (at first it is the All Instruments voicegroup if the ROM has one: songs made from MIDI files are meant for it)
-         SelectedVoicegroup = (keepInsertVoicegroup == null ? null : FindVoicegroupItem(keepInsertVoicegroup.Value)) ?? FindAllInstrumentsVoicegroup() ?? Voicegroups.FirstOrDefault();
+         // a voicegroup the user picked for inserting songs stays picked when the lists are read again; otherwise it is the All Instruments voicegroup
+         // if the ROM has one (songs made from MIDI files are meant for it), or the first one
+         SelectVoicegroupAutomatically((keepInsertVoicegroup == null ? null : FindVoicegroupItem(keepInsertVoicegroup.Value)) ?? FindAllInstrumentsVoicegroup() ?? Voicegroups.FirstOrDefault());
          // the selected song belongs to the old list: drop it (callers that want a selection pick one again)
          if (selectedSong != null && !Songs.Contains(selectedSong)) SelectedSong = null;
       }
@@ -575,7 +593,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             var name = string.IsNullOrEmpty(selectedSong.Name) ? $"song_{selectedSong.Index}" : selectedSong.Name.ToLower();
             SongText = new SongDisassembler(model).Disassemble(header, name);
             var match = Voicegroups.FirstOrDefault(group => group.Address == header.Voicegroup);
-            if (match != null) SelectedVoicegroup = match;
+            if (match != null) SelectVoicegroupAutomatically(match);
          } catch (Exception e) {
             SongText = "Could not disassemble this song: " + e.Message;
          }
@@ -612,15 +630,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          /// <summary>The name the song has in the song name list now, or null if it was not named.</summary>
          public string Name { get; init; }
          public string VoicegroupMessage { get; init; } = string.Empty;
+         /// <summary>The title of the voicegroup a song made from a MIDI file was made for (null for songs from text).</summary>
+         public string PlayedWith { get; set; }
+         /// <summary>The new address of the song table if inserting the song made it move (to get room for the new entry), otherwise -1.</summary>
+         public int TableMovedTo { get; init; } = -1;
          /// <summary>A problem that did not stop the insertion (the song is in, but something extra could not be done), or null.</summary>
          public string Warning { get; init; }
       }
 
       private void InsertSongFromFile(LoadedFile file) {
          var asNew = InsertAsNewSong;
-         var song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), asNew, true, null, out var error);
+         var song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), asNew, true, null, null, out var error);
          if (song == null) { OnError?.Invoke(this, error); return; }
          if (song.Warning != null) OnError?.Invoke(this, song.Warning);
+         if (song.TableMovedTo >= 0) OnMessage?.Invoke(this, $"The song table was moved to {song.TableMovedTo:X6} to make room.");
          Status = $"Inserted {file.Name} ({song.AssembledName}, {song.Size} bytes) at {song.Address:X6} as song {song.Index}.{song.VoicegroupMessage}";
          OnMessage?.Invoke(this, Status + (asNew ? $" Play it with 'playbgm {song.Index}' / 'playse {song.Index}'." : string.Empty));
       }
@@ -632,9 +655,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <param name="songName">The name a new song gets in the song name list (null: none). Replaced songs keep their name.</param>
       /// <param name="finish">Complete the change (one undo step) and read the lists again. A batch passes false until the last file.</param>
       /// <param name="knownSymbols">Symbols the text uses that are already known (a MIDI conversion knows its voicegroup), or null.</param>
+      /// <param name="voicegroup">The voicegroup the song is inserted with, or null for the selected one.</param>
       /// <returns>The inserted song, or null with the reason in 'error'; the ROM is not changed when null is returned for a reason found before the data is written.</returns>
-      private InsertedSong InsertSongFromText(string text, string songName, bool asNewSong, bool finish, IReadOnlyDictionary<string, int> knownSymbols, out string error) {
+      private InsertedSong InsertSongFromText(string text, string songName, bool asNewSong, bool finish, IReadOnlyDictionary<string, int> knownSymbols, VoicegroupItem voicegroup, out string error) {
          error = null;
+         voicegroup ??= selectedVoicegroup;
          var table = model.GetTable(SongTable);
          if (table == null) { error = $"This ROM has no {SongTable} table."; return null; }
          if (!asNewSong && selectedSong == null) { error = "Select a song to replace, or choose 'add as new song'."; return null; }
@@ -644,11 +669,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (knownSymbols != null) foreach (var pair in knownSymbols) externals[pair.Key] = pair.Value;
          var result = SongAssembler.Assemble(text, 0, externals);
          if (!result.Success && result.UndefinedSymbols.Count > 0) {
-            if (selectedVoicegroup == null) { error = $"The song needs these symbols, but no voicegroup is selected: {string.Join(", ", result.UndefinedSymbols)}"; return null; }
+            if (voicegroup == null) { error = $"The song needs these symbols, but no voicegroup is selected: {string.Join(", ", result.UndefinedSymbols)}"; return null; }
             var unresolved = new List<string>();
             foreach (var symbol in result.UndefinedSymbols) {
                if (symbol.Contains("grp", StringComparison.OrdinalIgnoreCase) || symbol.Contains("voice", StringComparison.OrdinalIgnoreCase) || result.UndefinedSymbols.Count == 1) {
-                  externals[symbol] = selectedVoicegroup.Address + BaseModel.PointerOffset;
+                  externals[symbol] = voicegroup.Address + BaseModel.PointerOffset;
                } else {
                   unresolved.Add(symbol);
                }
@@ -665,8 +690,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          result = SongAssembler.Assemble(text, address + BaseModel.PointerOffset, externals);
          if (!result.Success) { error = "Could not assemble the song: " + result.Error; return null; }
          var bytes = result.Bytes;
-         if (OverrideVoicegroup && selectedVoicegroup != null) {
-            var pointer = selectedVoicegroup.Address + BaseModel.PointerOffset;
+         if (OverrideVoicegroup && voicegroup != null) {
+            var pointer = voicegroup.Address + BaseModel.PointerOffset;
             for (int i = 0; i < 4; i++) bytes[result.HeaderOffset + 4 + i] = (byte)(pointer >> (8 * i));
          }
          token.ChangeData(model, address, bytes);
@@ -677,7 +702,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          string warning = null;
          if (InsertWithNewVoicegroup) {
             SongHeader.TryRead(model, headerAddress, out var insertedHeader);
-            var sourceAddress = insertedHeader?.Voicegroup ?? selectedVoicegroup?.Address ?? -1;
+            var sourceAddress = insertedHeader?.Voicegroup ?? voicegroup?.Address ?? -1;
             var source = FindVoicegroupItem(sourceAddress)?.Info ?? VoicegroupCatalog.Inspect(model, sourceAddress);
             var voicegroupSongName = !string.IsNullOrEmpty(result.SongName) ? result.SongName : selectedSong?.Name;
             if (VoicegroupEditor.TryCreateCopy(model, token, source, voicegroupSongName, out var voicegroupAddress, out var voicegroupAnchor, out var voicegroupError)) {
@@ -689,13 +714,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
 
          int index;
+         var tableMovedTo = -1;
          if (asNewSong) {
             var originalStart = table.Start;
             table = model.RelocateForExpansion(token, table, table.Length + table.ElementLength);
             table = table.Append(token, 1);
             model.ObserveRunWritten(token, table);
             index = table.ElementCount - 1;
-            if (table.Start != originalStart) OnMessage?.Invoke(this, $"The song table was moved to {table.Start:X6} to make room.");
+            if (table.Start != originalStart) tableMovedTo = table.Start;
          } else {
             index = selectedSong.Index;
          }
@@ -721,6 +747,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             Name = givenName,
             VoicegroupMessage = voicegroupMessage,
             Warning = warning,
+            TableMovedTo = tableMovedTo,
          };
       }
 
@@ -803,9 +830,19 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          => Voicegroups.FirstOrDefault(group => string.Equals(group.Info.AnchorName, AllInstrumentsAnchor, StringComparison.OrdinalIgnoreCase) && !group.Info.IsCustom)
          ?? Voicegroups.FirstOrDefault(group => string.Equals(group.Info.Name, "all_instruments", StringComparison.OrdinalIgnoreCase) && !group.Info.IsCustom);
 
-      /// <summary>The options of the conversion, from the settings of the tab. The voicegroup is the one selected for inserting songs.</summary>
-      private MidiToAgbOptions BuildMidiOptions(string fileName) {
-         var voicegroupName = selectedVoicegroup?.Info.Name;
+      /// <summary>
+      /// The voicegroup a MIDI file is played with. The instruments of a MIDI file are General MIDI programs, which the All Instruments voicegroup is laid out for,
+      /// but selecting a song selects the voicegroup of that song. So the All Instruments voicegroup (if the ROM has one) is used,
+      /// unless the user picked another voicegroup, or ticked 'always use this one'.
+      /// </summary>
+      private VoicegroupItem ChooseVoicegroupForMidi() {
+         if (voicegroupPickedByUser || OverrideVoicegroup) return selectedVoicegroup;
+         return FindAllInstrumentsVoicegroup() ?? selectedVoicegroup;
+      }
+
+      /// <summary>The options of the conversion, from the settings of the tab and the voicegroup the song is made for.</summary>
+      private MidiToAgbOptions BuildMidiOptions(string fileName, VoicegroupItem voicegroup) {
+         var voicegroupName = voicegroup?.Info.Name;
          var symbolName = string.IsNullOrEmpty(voicegroupName) ? "000" : "_" + new string(voicegroupName.Select(c => c < 128 && (char.IsLetterOrDigit(c) || c == '_') ? c : '_').ToArray());
          return new MidiToAgbOptions {
             Label = MidiToAgb.LabelFromFileName(fileName),
@@ -822,15 +859,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var song = ConvertAndInsertMidi(file, asNew, true, out var error);
          if (song == null) { OnError?.Invoke(this, error); return; }
          if (song.Warning != null) OnError?.Invoke(this, song.Warning);
-         Status = $"Converted {file.Name}: {song.Tracks} track{(song.Tracks == 1 ? string.Empty : "s")}, {ToneData.FormatSize(song.Size)}; inserted as song {song.Index}{(string.IsNullOrEmpty(song.Name) ? string.Empty : " (" + song.Name + ")")} at {song.Address:X6}.{song.VoicegroupMessage}";
+         if (song.TableMovedTo >= 0) OnMessage?.Invoke(this, $"The song table was moved to {song.TableMovedTo:X6} to make room.");
+         Status = $"Converted {file.Name}: {song.Tracks} track{(song.Tracks == 1 ? string.Empty : "s")}, {ToneData.FormatSize(song.Size)}; inserted as song {song.Index}{(string.IsNullOrEmpty(song.Name) ? string.Empty : " (" + song.Name + ")")} at {song.Address:X6}, instruments from {song.PlayedWith}.{song.VoicegroupMessage}";
          OnMessage?.Invoke(this, Status + (asNew ? $" Play it with 'playbgm {song.Index}' / 'playse {song.Index}'." : string.Empty));
       }
 
       /// <summary>Converts a MIDI file to song text with the settings of the tab and puts the song in the ROM, like a .s file.</summary>
       private InsertedSong ConvertAndInsertMidi(LoadedFile file, bool asNewSong, bool finish, out string error) {
          error = null;
-         if (selectedVoicegroup == null) { error = "There is no voicegroup to play the MIDI file with. Pick one under 'Insert with voicegroup'."; return null; }
-         var options = BuildMidiOptions(file.Name);
+         var voicegroup = ChooseVoicegroupForMidi();
+         if (voicegroup == null) { error = "There is no voicegroup to play the MIDI file with. Pick one under 'Insert with voicegroup'."; return null; }
+         var options = BuildMidiOptions(file.Name, voicegroup);
          MidiConversionResult conversion;
          try {
             conversion = MidiToAgb.Convert(file.Contents, options);
@@ -843,9 +882,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             error = $"{file.Name} plays notes on {conversion.TrackCount} channels, but a GBA song can have at most {MaxSongTracks} tracks. Remove or merge some of its tracks in a MIDI editor and try again.";
             return null;
          }
-         var symbols = new Dictionary<string, int> { ["voicegroup" + options.VoiceGroup] = selectedVoicegroup.Address + BaseModel.PointerOffset };
-         var song = InsertSongFromText(conversion.Text, SongNameFromFileName(file.Name), asNewSong, finish, symbols, out var insertError);
+         var symbols = new Dictionary<string, int> { ["voicegroup" + options.VoiceGroup] = voicegroup.Address + BaseModel.PointerOffset };
+         var song = InsertSongFromText(conversion.Text, SongNameFromFileName(file.Name), asNewSong, finish, symbols, voicegroup, out var insertError);
          if (song == null) error = $"Could not insert {file.Name}: {insertError}";
+         else song.PlayedWith = voicegroup.Title;
          return song;
       }
 
@@ -854,6 +894,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <summary>Inserts several songs (.mid and .s files) at once, every one as a new song at the end of the song table. A file that can't be inserted is skipped and named in the result.</summary>
       private void InsertSongFiles(IReadOnlyList<LoadedFile> files) {
          if (model.GetTable(SongTable) == null) { OnError?.Invoke(this, $"This ROM has no {SongTable} table."); return; }
+         var tableStart = model.GetTable(SongTable).Start;
          var failures = new List<string>();
          var inserted = new List<InsertedSong>();
          var warnings = new List<string>();
@@ -863,7 +904,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             InsertedSong song;
             string error;
             if (IsMidiFile(file.Name)) song = ConvertAndInsertMidi(file, true, false, out error);
-            else song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), true, false, null, out error);
+            else song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), true, false, null, null, out error);
             if (song == null) failures.Add($"{file.Name}: {error}");
             else {
                inserted.Add(song);
@@ -881,6 +922,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             : $"Inserted {inserted.Count} of {files.Count} songs as songs {inserted.Min(song => song.Index)} to {inserted.Max(song => song.Index)} ({ToneData.FormatSize(size)} in all).{(failures.Count > 0 ? $" {failures.Count} could not be inserted." : string.Empty)}";
          var problems = failures.Concat(warnings).ToList();
          if (problems.Count > 0) OnError?.Invoke(this, string.Join(Environment.NewLine, problems.Take(6)) + (problems.Count > 6 ? $"{Environment.NewLine}... and {problems.Count - 6} more." : string.Empty));
+         var tableEnd = model.GetTable(SongTable).Start;
+         if (tableEnd != tableStart) OnMessage?.Invoke(this, $"The song table was moved to {tableEnd:X6} to make room.");
          if (inserted.Count > 0) OnMessage?.Invoke(this, Status + " Undo (Ctrl+Z) takes them all back.");
       }
 
