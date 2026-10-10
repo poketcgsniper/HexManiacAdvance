@@ -670,7 +670,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
       public ArrayRunColorSegment(string name) : base(name, ElementContentType.Integer, 2) { }
 
       public override string ToText(IDataModel rawData, int offset, int depth = 0) {
-         var color = (short)rawData.ReadMultiByteValue(offset, Length);
+         // the game stores colors as blue-green-red, the text shows them as red:green:blue
+         var color = PaletteRun.FlipColorChannels((short)rawData.ReadMultiByteValue(offset, Length));
          var colorText = UncompressedPaletteColor.Convert(color);
          return colorText;
       }

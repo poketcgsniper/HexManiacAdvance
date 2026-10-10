@@ -69,7 +69,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
                var value = data.ReadMultiByteValue(offsets.SegmentStart, currentSegment.Length);
                return new IntegerHex(offsets.SegmentStart, position, value, currentSegment.Length) { IsUnused = currentSegment.IsUnused() };
             } else if (currentSegment is ArrayRunColorSegment) {
-               var color = (short)data.ReadMultiByteValue(offsets.SegmentStart, currentSegment.Length);
+               // the game stores colors as blue-green-red, the grid shows them as red:green:blue
+               var color = PaletteRun.FlipColorChannels((short)data.ReadMultiByteValue(offsets.SegmentStart, currentSegment.Length));
                return new UncompressedPaletteColor(offsets.SegmentStart, position, color);
             } else if (currentSegment is ArrayRunSignedSegment signed) {
                var signedValue = signed.ReadValue(data, offsets.SegmentStart);
