@@ -216,7 +216,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
             var movedRuns = new List<ISpriteRun>();
             for (int i = 0; i < ElementCount; i++) {
                var spriteStart = model.ReadPointer(Start + ElementLength * i);
-               var sprite = model.GetNextRun(spriteStart) as ISpriteRun;
+               var sprite = GetPageSprite(model, i);
                if (sprite is LzSpriteRun) continue; // compressed relative-frame image: can't be resized in place
                if (!movedRuns.Contains(sprite) && sprite != null) {
                   sprite = Resize(model, token, sprite, newTileWidth, newTileHeight);
@@ -287,12 +287,24 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          return spriteRun;
       }
 
+      /// <summary>
+      /// The sprite that entry 'page' of the list points to, or null if the entry does not point at a sprite.
+      /// An entry that is not a pointer reads as a negative address (not always -1), and the 'next run' from a negative address is the first run of the file: possibly some unrelated sprite (which would be drawn, or resized), or this very list.
+      /// A list never holds a list either: a pointer back at a list (also at itself) would be followed forever.
+      /// </summary>
+      private ISpriteRun GetPageSprite(IDataModel model, int page) {
+         var spriteStart = model.ReadPointer(Start + ElementLength * page);
+         if (spriteStart < 0 || spriteStart >= model.Count) return null;
+         var run = model.GetNextRun(spriteStart);
+         if (run is OverworldSpriteListRun) return null;
+         return run as ISpriteRun;
+      }
+
       public byte[] GetData() {
          var pageSize = SpriteFormat.TileWidth * SpriteFormat.TileHeight * 32;
          var result = new byte[pageSize * Pages];
          for (int i = 0; i < Pages; i++) {
-            var start = model.ReadPointer(Start + ElementLength * i);
-            var page = model.GetNextRun(start) is ISpriteRun spriteRun ? spriteRun.GetData() : new byte[pageSize];
+            var page = GetPageSprite(model, i)?.GetData() ?? new byte[pageSize];
             Array.Copy(page, 0, result, pageSize * i, pageSize);
          }
          return result;
@@ -302,8 +314,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
       public int[,] GetPixels(IDataModel model, int page, int arrayIndex) {
          var width = SpriteFormat.TileWidth * 8;
          var height = SpriteFormat.TileHeight * 8;
-         var spriteStart = model.ReadPointer(Start + ElementLength * page);
-         if (!(model.GetNextRun(spriteStart) is ISpriteRun spriteRun)) return new int[width, height];
+         var spriteRun = GetPageSprite(model, page);
+         if (spriteRun == null) return new int[width, height];
          var spritePixels = spriteRun.GetPixels(model, page: 0, tableIndex: -1);
          if (spritePixels.GetLength(0) < width || spritePixels.GetLength(1) < height) return new int[width, height];
          return spritePixels;
@@ -317,8 +329,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          var overallPixels = new int[width * ElementCount, height];
 
          for (int i = 0; i < ElementCount; i++) {
-            var spriteStart = model.ReadPointer(Start + ElementLength * i);
-            if (!(model.GetNextRun(spriteStart) is ISpriteRun spriteRun)) continue;
+            var spriteRun = GetPageSprite(model, i);
+            if (spriteRun == null) continue;
             var spritePixels = spriteRun.GetPixels(model, page: 0, tableIndex: -1);
             if (spritePixels.GetLength(0) < width || spritePixels.GetLength(1) < height) continue;
             int offset = width * i;
@@ -333,8 +345,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
       }
 
       public ISpriteRun SetPixels(IDataModel model, ModelDelta token, int page, int[,] pixels) {
-         var spriteStart = model.ReadPointer(Start + ElementLength * page);
-         if (!(model.GetNextRun(spriteStart) is ISpriteRun spriteRun)) return this;
+         var spriteRun = GetPageSprite(model, page);
+         if (spriteRun == null) return this;
 
          spriteRun.SetPixels(model, token, 0, pixels);
          return this; // moving a page will never move the list

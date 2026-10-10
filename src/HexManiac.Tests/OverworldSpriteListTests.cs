@@ -66,5 +66,24 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(Pal2Start, ViewPort.Tools.SpriteTool.PaletteAddress);
       }
    }
+
+   public class OverworldSpriteListBadEntryTests : BaseViewModelTestClass {
+      [Fact]
+      public void OverworldSpriteList_AtTheStartOfTheFile_EntryIsNotAPointer_PixelsAreBlankInsteadOfFollowingTheListForever() {
+         // the list found itself as its sprite: an entry that is not a pointer reads as a negative address, and the 'next run' from a negative address is the first run of the file
+         ViewPort.Edit("@00 85 00 00 EA "); // the first instruction of a rom: not a pointer, but it reads as one with a negative address
+         ViewPort.Edit("@40 FF FF 00 00 40 00 08 00 08 00 <000> ");
+         ViewPort.Edit("@40 ^parent[starterbytes:|h paletteid:|h length: width: height: sprites<`osl`>]1 ");
+
+         var run = Assert.IsType<OverworldSpriteListRun>(Model.GetNextRun(0));
+         var pixels = run.GetPixels(Model, 0, 0);
+         var data = run.GetData();
+
+         Assert.Equal(run.SpriteFormat.TileWidth * 8, pixels.GetLength(0));
+         Assert.Equal(run.SpriteFormat.TileHeight * 8, pixels.GetLength(1));
+         Assert.All(pixels.Cast<int>(), pixel => Assert.Equal(0, pixel));
+         Assert.All(data, value => Assert.Equal(0, value));
+      }
+   }
 }
 

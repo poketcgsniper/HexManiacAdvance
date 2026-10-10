@@ -133,6 +133,14 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void ButtonWithoutAWidth_CountsAsZeroWide_RowStillHasAnOffset() {
+         var widths = new double[] { 100, double.NaN, 100 };
+         Assert.Equal(200, ShortcutRows.RowWidth(widths, 0, 3));
+         Assert.Equal(new[] { 3 }, ShortcutRows.Break(widths, 5, 250));
+         Assert.Equal(300, ShortcutRows.CentreOffset(800, ShortcutRows.RowWidth(widths, 0, 3)));
+      }
+
+      [Fact]
       public void ARowIsCentred_AndOneThatIsTooWideStartsAtTheLeftEdge() {
          Assert.Equal(100, ShortcutRows.CentreOffset(800, 600));
          Assert.Equal(160, ShortcutRows.CentreOffset(800, 480)); // the short last row of 4 under a row of 5
