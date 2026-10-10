@@ -446,7 +446,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
          }
       }
 
-      private record StreamInfo(ExpectedPointerType PointerType, int Source, int Destination);
+      private record StreamInfo(ExpectedPointerType PointerType, int Source, int Destination, DeferredStreamToken Deferred = null);
 
       public static int InsertMissingClosers(ref string script, int caret) {
          int caretMove = 0;
@@ -484,6 +484,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   text.Insert(i + 1, '\r');
                   text.Insert(i + 2, '\n');
                }
+               while (text.Count < i + 3) text.Add(' '); // the text ends right after the open brace
                text.Insert(i + 3, '}');
                close = i + 3;
                if (i == caret) caretMove -= 3;
@@ -588,8 +589,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   var info = streamInfo[0];
                   streamTypes.Add(info.PointerType);
                   if (info.Destination == DeferredStreamToken.AutoSentinel + Pointer.NULL) {
-                     var deferred = deferredContent[deferredContent.Count - streamInfo.Count];
-                     deferred.UpdateContent(model, info.PointerType, stream);
+                     info.Deferred.UpdateContent(model, info.PointerType, stream);
                   } else if (model.GetNextRun(info.Destination) is IStreamRun streamRun && streamRun.Start == info.Destination) {
                      var newStreamRun = streamRun.DeserializeRun(stream, token, out var _, out var _); // we don't notify parents/children based on script-stream changes: we know they never have parents/children.
                      // alter script content and compiled byte location based on stream move
@@ -681,7 +681,6 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   if (arg.Type == ArgType.Pointer && arg.PointerType != ExpectedPointerType.Unknown) {
                      var destination = result.ReadMultiByteValue(currentSize + pointerOffset, 4) + Pointer.NULL;
                      if (destination == DeferredStreamToken.AutoSentinel + Pointer.NULL) {
-                        streamInfo.Add(new(arg.PointerType, start + currentSize + pointerOffset, destination));
                         (string format, byte[] defaultContent, int alignment) = arg.PointerType switch {
                            ExpectedPointerType.Text => ("\"\"", new byte[] { 0xFF }, 1),
                            ExpectedPointerType.Mart => ($"[item:{HardcodeTablesModel.ItemsTableName}]!0000", new byte[] { 0, 0 }, 4),
@@ -689,7 +688,9 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                            ExpectedPointerType.Movement => ($"[move.movementtypes]!FE", new byte[] { 0xFE }, 1),
                            _ => ("^", new byte[0], 1)
                         };
-                        deferredContent.Add(new(currentSize + pointerOffset, format, defaultContent, alignment));
+                        var deferredToken = new DeferredStreamToken(currentSize + pointerOffset, format, defaultContent, alignment);
+                        deferredContent.Add(deferredToken);
+                        streamInfo.Add(new(arg.PointerType, start + currentSize + pointerOffset, destination, deferredToken));
                      } else if (destination >= 0 && arg.PointerType != ExpectedPointerType.Script) {
                         streamInfo.Add(new(arg.PointerType, start + currentSize + pointerOffset, destination));
                         if (arg.PointerType == ExpectedPointerType.Text) {

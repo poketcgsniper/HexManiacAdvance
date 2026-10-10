@@ -913,6 +913,34 @@ label2:;goto <000050>;end";
          Assert.Equal("Defeat", defeat.Trim('"'));
       }
 
+      [Fact]
+      public void TrainerScript_AutoThenFixedTextPointer_BothStreamsCompile() {
+         // one command with two stream pointers, the first <auto> and the second a plain address:
+         // the compiler looked up the deferred stream with an index that assumed both were <auto> (ArgumentOutOfRangeException)
+         SetFullModel(0xFF);
+
+         EventScript = "trainerbattle 0 0 0 <auto> <100>;{;Start;};{;Win;};end";
+
+         var start = Model.TextConverter.Convert(Model, Model.ReadPointer(6), 10);
+         Assert.Equal("Start", start.Trim('"'));
+         Assert.Equal("\"Win\"", Model.TextConverter.Convert(Model, 0x100, 0x20));
+      }
+
+      [Theory]
+      [InlineData("msgbox.default <100>\r\n{")]
+      [InlineData("msgbox.default <100>\r\n{\r")]
+      [InlineData("msgbox.default <100>\r\n{x")]
+      [InlineData("x{")]
+      [InlineData("nop\r\n  {")]
+      public void InsertMissingClosers_OpenBraceAtTheEndOfTheText_CaretElsewhere_DoesNotThrow(string script) {
+         // a script that ends right after "{" (a truncated paste, or a caret at the start) used to insert the "}" past the end of the text
+         var result = script;
+
+         ScriptParser.InsertMissingClosers(ref result, 0);
+
+         Assert.Contains("}", result);
+      }
+
       [Theory]
       [InlineData("<", 0)]
       [InlineData("=", 1)]
