@@ -1199,6 +1199,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
          // figure out the new palettes, using only the usable palettes. Leave the other palettes alone.
          var palettes = paletteRun.Pages.Range().Select(i => paletteRun.GetPalette(model, i)).ToArray();
+         if (spriteRun.Pages != paletteRun.Pages && EveryTileFitsAPalette(allTiles, palettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel)) {
+            // (a sprite with one palette per page, like Castform, is arranged differently by the code below)
+            // nothing to balance: the new pictures only use colors that the palette already has, so the palette and everything else that uses it can stay exactly as they are.
+            WriteSpritesWithoutPalette(spriteRun, paletteRun, images, usablePalPages);
+            return;
+         }
          var initialBlankPages = paletteRun.PaletteFormat.InitialBlankPages;
          var bits = paletteRun.PaletteFormat.Bits;
 
@@ -1459,6 +1465,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             palettes = new[] { palettes[palPage] };
             usablePalPages = new List<int> { 0 };
          }
+         if (EveryTileFitsAPalette(tiles, palettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel)) {
+            // nothing to balance: the new picture only uses colors that the palette already has, so the palette and everything else that uses it can stay exactly as they are.
+            WriteSpriteWithoutPalette(spriteRun, paletteRun, image, usablePalPages);
+            return;
+         }
          var initialBlankPages = paletteRun.PaletteFormat.InitialBlankPages;
          var bits = paletteRun.PaletteFormat.Bits;
 
@@ -1553,6 +1564,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          ExplainMoves(spriteRun, currentSpriteRun, paletteRun, newPalette);
       }
 
+      /// <summary>
+      /// True if each tile can be drawn with the colors of one of the usable palettes without any difference.
+      /// Uses the same choice of palette (and the same combining of the pages of a 256 color sprite) as <see cref="Index(short[], IReadOnlyList{short}[], IReadOnlyList{int}, int, int, int, bool)"/>.
+      /// </summary>
+      private static bool EveryTileFitsAPalette(short[][] tiles, IReadOnlyList<short>[] palettes, IReadOnlyList<int> usablePalPages, int bitness) {
+         if (bitness < 4 || palettes == null || palettes.Length == 0 || usablePalPages == null) return false;
+         if (bitness == 8 && usablePalPages.Count == palettes.Length) {
+            palettes = new[] { (IReadOnlyList<short>)palettes.SelectMany(pal => pal).ToList() };
+            usablePalPages = new[] { 0 };
+         }
+         var usable = usablePalPages.Where(i => i >= 0 && i < palettes.Length).Distinct().ToList();
+         if (usable.Count == 0) return false;
+         return tiles.All(tile => usable.Any(i => WeightedPalette.CostToUse(tile, palettes[i]) == 0));
+      }
+
       private static IReadOnlyList<short>[] DiscoverPalettes(short[][] tiles, int bitness, int paletteCount, IReadOnlyList<short>[] existingPalettes) {
          if (bitness == 1) return new[] { TileViewModel.CreateDefaultPalette(2) };
          if (bitness == 2) return new[] { TileViewModel.CreateDefaultPalette(4) };
@@ -1596,7 +1622,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       public static int[,] Index(short[] tile, IReadOnlyList<short>[] palettes, IReadOnlyList<int> usablePalPages, int bitness, int initialPageIndex, int palettePage, bool palettePerSprite = false) {
          var cheapestIndex = palettePage;
-         if (bitness == 8 && usablePalPages.Count == palettes.Length) {
+         if (bitness == 8 && (usablePalPages == null || usablePalPages.Count == palettes.Length)) { // no restriction (null) means every page may be used
             palettes = new[] { palettes.SelectMany(pal => pal).ToList() };
             usablePalPages = new[] { 0 };
          } else if (bitness < 4) {

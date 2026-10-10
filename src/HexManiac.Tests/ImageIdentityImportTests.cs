@@ -323,5 +323,98 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(otherBefore, LZRun.Decompress(model, SpriteA));
          Assert.Equal(Shown(5), tool.PixelData[0]);
       }
+
+      [Theory]
+      [InlineData(0)]
+      [InlineData(2)]
+      public void SharedPalette_ImportPictureThatOnlyUsesColorsTheSpritesAlreadyHave_OtherSpriteAndPaletteStayTheSame(int importChoice) {
+         Setup(2);
+         var tool = viewPort.Tools.SpriteTool;
+         viewPort.Tools.SelectedTool = tool;
+         tool.SpriteAddress = SpriteB;
+         var otherBefore = LZRun.Decompress(model, SpriteA);
+         var paletteBefore = model.RawData.Skip(Palette).Take(32).ToArray();
+         var changed = tool.PixelData.ToArray();
+         for (int i = 0; i < changed.Length; i += 7) changed[i] = Shown(1 + (i / 7) % 6); // colors the palette already has, in places they are not now
+         var fs = new StubFileSystem {
+            LoadImage = name => (changed, tool.PixelWidth),
+            TryLoadIndexImage = (ref string name, out int[,] image, out IReadOnlyList<short> pal) => { name = "image.png"; (image, pal) = (null, null); return false; },
+            ShowOptions = (title, prompt, details, options) => importChoice,
+         };
+
+         tool.ImportPair.Execute(fs);
+
+         Assert.Equal(otherBefore, LZRun.Decompress(model, SpriteA));
+         Assert.Equal(paletteBefore, model.RawData.Skip(Palette).Take(32).ToArray());
+         tool.SpriteAddress = SpriteB;
+         for (int i = 0; i < changed.Length; i++) Assert.True((changed[i] & 0x7FFF) == (tool.PixelData[i] & 0x7FFF), $"pixel {i % tool.PixelWidth},{i / tool.PixelWidth} shows {tool.PixelData[i]:X4}, the import has {changed[i]:X4}");
+      }
+
+      /// <summary>Palette color i (0-31) the way the ROM stores it.</summary>
+      private static short Stored32(int i) => (short)(i | ((31 - i) << 5) | (((i * 7) & 31) << 10));
+
+      /// <summary>Palette color i (0-31) the way the editor shows it.</summary>
+      private static short Shown32(int i) => (short)((i << 10) | ((31 - i) << 5) | ((i * 7) & 31));
+
+      /// <summary>
+      /// A 256 color sprite (uses all 32 colors of a palette with two pages) and a 16 color sprite (uses colors 1-3 of the first page) share one palette.
+      /// </summary>
+      private void SetupEightBitAndFourBitSpritesOnOnePalette() {
+         data = 0x1000.Range().Select(i => (byte)0xFF).ToArray();
+         for (int i = 0; i < 256; i++) data[SpriteA + i] = (byte)(1 + (i * 5 + i / 64) % 31);
+         for (int i = 0; i < 128; i++) data[SpriteB + i] = (byte)(i % 3 == 0 ? 0x21 : i % 3 == 1 ? 0x32 : 0x13);
+         for (int i = 0; i < 32; i++) {
+            data[Palette + i * 2] = (byte)Stored32(i);
+            data[Palette + i * 2 + 1] = (byte)(Stored32(i) >> 8);
+         }
+         model = new PokemonModel(data, null, BaseViewModelTestClass.Singletons);
+         var delta = new ModelDelta();
+         model.WritePointer(delta, 0x00, SpriteA);
+         model.WritePointer(delta, 0x04, Palette);
+         model.WritePointer(delta, 0x10, SpriteB);
+         model.WritePointer(delta, 0x14, Palette);
+         using (ModelCacheScope.CreateScope(model)) {
+            PokemonModel.ApplyAnchor(model, new ModelDelta(), 0, "^table1[sprite<`ucs8x2x2`> pal<`ucp4:01`>]1");
+            PokemonModel.ApplyAnchor(model, new ModelDelta(), 0x10, "^table2[sprite<`ucs4x2x2`> pal<`ucp4:01`>]1");
+         }
+         viewPort = new ViewPort(string.Empty, model, InstantDispatch.Instance, BaseViewModelTestClass.Singletons) { Width = 16, Height = 16 };
+      }
+
+      [Theory]
+      [InlineData(0)]
+      [InlineData(2)]
+      public void SharedPalette_EightBitSpriteGetsRearrangedPictureOfItsOwnColors_PaletteAndOtherSpriteStayTheSame(int importChoice) {
+         SetupEightBitAndFourBitSpritesOnOnePalette();
+         var tool = viewPort.Tools.SpriteTool;
+         viewPort.Tools.SelectedTool = tool;
+         tool.SpriteAddress = SpriteA;
+         var paletteBefore = model.RawData.Skip(Palette).Take(64).ToArray();
+         var otherBefore = model.RawData.Skip(SpriteB).Take(128).ToArray();
+         var changed = tool.PixelData.ToArray();
+         for (int i = 0; i < changed.Length; i += 3) changed[i] = Shown32(1 + (i / 3) % 31); // colors the palette already has, in places they are not now
+         var fs = new StubFileSystem {
+            LoadImage = name => (changed, tool.PixelWidth),
+            TryLoadIndexImage = (ref string name, out int[,] image, out IReadOnlyList<short> pal) => { name = "image.png"; (image, pal) = (null, null); return false; },
+            ShowOptions = (title, prompt, details, options) => importChoice,
+         };
+
+         tool.ImportPair.Execute(fs);
+
+         Assert.Equal(paletteBefore, model.RawData.Skip(Palette).Take(64).ToArray());
+         Assert.Equal(otherBefore, model.RawData.Skip(SpriteB).Take(128).ToArray());
+         tool.SpriteAddress = SpriteA;
+         for (int i = 0; i < changed.Length; i++) Assert.True((changed[i] & 0x7FFF) == (tool.PixelData[i] & 0x7FFF), $"pixel {i % tool.PixelWidth},{i / tool.PixelWidth} shows {tool.PixelData[i]:X4}, the import has {changed[i]:X4}");
+      }
+
+      [Fact]
+      public void Index_EightBitTileWithNoLimitOnPalettePages_UsesColorsOfEveryPage() {
+         // this is how a 256 color tilemap is redrawn when the palette it shares is rearranged by someone else's import: no page is ruled out
+         var palettes = new IReadOnlyList<short>[] { 16.Range().Select(i => Shown32(i)).ToArray(), 16.Range().Select(i => Shown32(16 + i)).ToArray() };
+         var tile = 64.Range().Select(i => Shown32(i % 32)).ToArray();
+
+         var indexed = SpriteTool.Index(tile, palettes, null, 8, 0, 0);
+
+         for (int i = 0; i < 64; i++) Assert.Equal(i % 32, indexed[i % 8, i / 8]);
+      }
    }
 }
