@@ -82,7 +82,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
       }
 
-      private void RefreshFromEventChange(object sender, EventArgs e) => RedrawEvents();
+      private void RefreshFromEventChange(object sender, EventArgs e) {
+         if (movingEvent) return; // an event that moves looks the same: the pictures of the events stay, and the map is drawn again by whoever moved it
+         RedrawEvents();
+      }
+      private bool movingEvent;
 
       private void CycleActiveEvent(object sender, EventCycleDirection direction) {
          // organize events into categories
@@ -1509,8 +1513,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          if (xx < 0 || yy < 0) return;
          var (width, height) = (layout.GetValue("width"), layout.GetValue("height"));
          if (xx >= width || yy >= height) return;
-         ev.X = xx;
-         ev.Y = yy;
+         // Dragging an event over the map moves it a tile at a time. Where it is doesn't change how it looks, so the pictures of the events (each one is looked up in the ROM,
+         // and a sprite with dynamic graphics even reads the map's scripts) are kept, instead of being made again for every tile.
+         movingEvent = true;
+         try {
+            ev.X = xx;
+            ev.Y = yy;
+         } finally {
+            movingEvent = false;
+         }
          SelectedEvent = ev;
          ClearPixelCache();
       }

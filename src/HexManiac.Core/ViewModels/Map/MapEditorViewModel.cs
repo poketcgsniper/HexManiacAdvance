@@ -994,10 +994,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private void EventMove(double x, double y) {
          var map = MapUnderCursor(x, y);
          if (map == primaryMap) {
-            CreateEventForCreationInteraction(eventCreationType);
-            if (selectedEvent != null) {
-               map.UpdateEventLocation(selectedEvent, x, y);
-               Tutorials.Complete(Tutorial.DragEvent_MoveEvent);
+            // Making an event from a template changes a dozen properties of the event and the map (each announces that the picture of the map is out of date),
+            // and so does moving an event (its x, its y, the picture). The map shows a picture that is drawn when it is asked for, so tell it once, when the move is done:
+            // otherwise it is drawn once per announcement, and the first move after taking a template from the toolbar draws it ten times before the new event shows up.
+            using (map.DeferPropertyNotifications()) {
+               CreateEventForCreationInteraction(eventCreationType);
+               if (selectedEvent != null) {
+                  map.UpdateEventLocation(selectedEvent, x, y);
+                  Tutorials.Complete(Tutorial.DragEvent_MoveEvent);
+               }
             }
          }
          Hover(x, y);
