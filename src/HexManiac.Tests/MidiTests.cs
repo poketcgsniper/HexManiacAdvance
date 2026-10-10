@@ -1406,6 +1406,54 @@ inserted:
          }
       }
 
+      [Fact]
+      public void Tab_InsertSong_WithAHeaderPointerThatPointsOutsideTheRom_IsRefused_NotInsertedAsASongThatCannotPlay() {
+         // a track pointer or voicegroup that is a number, not a label, is written as it is: -1, 0 and 0xFFFFFFFF are no address of this ROM
+         foreach (var (find, replace, expectedWord) in new[] {
+            ("\t.word\tt_1\n", "\t.word\t-1\n", "track 1"),
+            ("\t.word\tt_1\n", "\t.word\t0xFFFFFFFF\n", "track 1"),
+            ("\t.word\tt_1\n", "\t.word\t0\n", "track 1"),
+            ("t_grp, voicegroup000", "t_grp, 0", "voicegroup"),
+            ("t_grp, voicegroup000", "t_grp, 0x7FFFFFFF", "voicegroup"),
+         }) {
+            Build();
+            var tab = CreateTab();
+            tab.InsertAsNewSong = true;
+            var before = Model.RawData.ToArray();
+            tabErrors.Clear();
+            var source = SongSource.Replace(find, replace);
+            Assert.NotEqual(SongSource, source);
+            FileSystem.OpenFile = (description, options) => Loaded("broken.s", Encoding.UTF8.GetBytes(source));
+
+            tab.InsertSong.Execute(null);
+
+            Assert.Single(tabErrors);
+            Assert.Contains(expectedWord, tabErrors[0]);
+            Assert.Equal(2, SongCount);
+            Assert.Equal(before, Model.RawData);
+         }
+      }
+
+      [Fact]
+      public void Tab_InsertSong_WithHeaderPointersIntoTheRom_IsInserted() {
+         // a number is fine when it is an address of the ROM
+         foreach (var (find, replace) in new[] {
+            ("t_grp, voicegroup000", "t_grp, 0x08000400"),
+            ("\t.word\tt_1\n", "\t.word\t0x08000800\n"),
+         }) {
+            Build();
+            var tab = CreateTab();
+            tab.InsertAsNewSong = true;
+            tabErrors.Clear();
+            FileSystem.OpenFile = (description, options) => Loaded("fine.s", Encoding.UTF8.GetBytes(SongSource.Replace(find, replace)));
+
+            tab.InsertSong.Execute(null);
+
+            Assert.Empty(tabErrors);
+            Assert.Equal(3, SongCount);
+         }
+      }
+
       private void InsertEncodedSongs(byte[][] files) {
          Build();
          var tab = CreateTab();

@@ -692,7 +692,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          // first pass: find out how big the song is and which symbols it needs
          var externals = new Dictionary<string, int>();
          if (knownSymbols != null) foreach (var pair in knownSymbols) externals[pair.Key] = pair.Value;
-         var result = SongAssembler.Assemble(text, 0, externals);
+         var result = SongAssembler.Assemble(text, BaseModel.PointerOffset, externals);
          if (!result.Success && result.UndefinedSymbols.Count > 0) {
             if (voicegroup == null) { error = $"The song needs these symbols, but no voicegroup is selected: {string.Join(", ", result.UndefinedSymbols)}"; return null; }
             var unresolved = new List<string>();
@@ -710,9 +710,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                if (unresolved.Any(symbol => symbol.EndsWith("_B0", StringComparison.Ordinal))) error += " mid2agb writes a jump to a loop that does not exist when a MIDI file has a loop end marker ']' before any loop start marker '['.";
                return null;
             }
-            result = SongAssembler.Assemble(text, 0, externals);
+            result = SongAssembler.Assemble(text, BaseModel.PointerOffset, externals);
          }
          if (!result.Success) { error = "Could not assemble the song: " + result.Error; return null; }
+         if (!HeaderPointsIntoTheRom(result, !OverrideVoicegroup, out var pointerError)) { error = pointerError; return null; }
 
          if (asNewSong && !HasRoomForNewEntry(table, result.Bytes.Length, out var roomError)) { error = roomError; return null; }
 
@@ -782,6 +783,26 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             Warning = warning,
             TableMovedTo = tableMovedTo,
          };
+      }
+
+      /// <summary>
+      /// A number in the song header (a track or voicegroup pointer written as a number, not a label) is written as it is. If it isn't an address of this ROM
+      /// the song can't be played, and the Sound tab can't read its header: -1 or 0 from a typing mistake, for example. Refused before anything is written.
+      /// </summary>
+      private bool HeaderPointsIntoTheRom(SongAssembler.Result assembled, bool checkVoicegroup, out string error) {
+         error = null;
+         var bytes = assembled.Bytes;
+         var limit = (long)model.Count + bytes.Length;
+         int trackCount = bytes[assembled.HeaderOffset];
+         for (int i = -1; i < trackCount; i++) {
+            if (i == -1 && (!checkVoicegroup || trackCount == 0)) continue;
+            var at = assembled.HeaderOffset + (i == -1 ? 4 : 8 + 4 * i);
+            var pointer = (long)(uint)(bytes[at] | bytes[at + 1] << 8 | bytes[at + 2] << 16 | bytes[at + 3] << 24) - BaseModel.PointerOffset;
+            if (pointer >= 0 && pointer < limit) continue;
+            error = $"The song header's {(i == -1 ? "voicegroup" : "track " + (i + 1))} points to 0x{pointer + BaseModel.PointerOffset:X8}, which is no address of this ROM, so the game could not play it.";
+            return false;
+         }
+         return true;
       }
 
       /// <summary>
