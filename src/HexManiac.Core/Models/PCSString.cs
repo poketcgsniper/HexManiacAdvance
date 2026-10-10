@@ -352,14 +352,18 @@ namespace HavenSoft.HexManiac.Core.Models {
             }
 
             // check newlines
-            if (index < input.Length - doubleNewline.Length) {
-               var isNewline = input[index..].StartsWith(Environment.NewLine);
+            // (this has to run for every position, including the last few characters: a line break in front of a short last line,
+            //  or at the very end of the text, used to be skipped as an unknown character, which silently glued the lines together)
+            if (index < input.Length) {
+               var isNewline = string.CompareOrdinal(input, index, Environment.NewLine, 0, Environment.NewLine.Length) == 0;
                if (isNewline && nextNewline == NewlineMode.Explicit) {
                   // don't add anything to result
                   // lastNewline still says what the most recent newline was
                   // nextNewline will get reset after the next character
+                  index += Environment.NewLine.Length;
+                  continue;
                } else if (isNewline) {
-                  if (input[index..].StartsWith(doubleNewline)) {
+                  if (string.CompareOrdinal(input, index, doubleNewline, 0, doubleNewline.Length) == 0) {
                      (lastNewLine, nextNewline) = (NewlineMode.Paragraph, NewlineMode.Wrap);
                      result.Add(0xFB); // paragraph feed
                      index += doubleNewline.Length; ;

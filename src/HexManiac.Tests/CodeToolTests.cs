@@ -480,6 +480,62 @@ pokemart <auto>
       }
 
       [Fact]
+      public void Decoration_Auto_Compiles() {
+         // decorationmart <auto> used to throw a NotImplementedException (a copy-paste slip handled Mart twice and Decor never)
+         EventScript = @"
+decorationmart <auto>
+{
+1
+2
+}
+  end
+";
+
+         Assert.Equal(1, Model.ReadMultiByteValue(6, 2));
+         Assert.Equal(2, Model.ReadMultiByteValue(8, 2));
+         Assert.Equal(0, Model.ReadMultiByteValue(10, 2));
+         Assert.Equal(6, Model.ReadPointer(1));
+      }
+
+      [Fact]
+      public void SpriteTemplate_Auto_WritesTheFieldsThatWereTyped() {
+         Tool.Mode = CodeMode.AnimationScript;
+         Tool.Contents[0].Content = @"
+createsprite <auto> 2
+{
+tileTag     : 10184
+paletteTag  : 10273
+oam         : <000100>
+anims       : <null>
+images      : <null>
+affineAnims : <null>
+callback    : <000200>
+}
+  end
+".Replace("\r\n", "\n").Replace("\n", Environment.NewLine);
+
+         // createsprite is 1 command byte, a 4 byte template pointer and 1 byte of priority; then 'end'
+         var template = Model.ReadPointer(1);
+         Assert.True(template > 5, "the template is written after the script");
+         Assert.Equal(10184, Model.ReadMultiByteValue(template + 0, 2));
+         Assert.Equal(10273, Model.ReadMultiByteValue(template + 2, 2));
+         Assert.Equal(0x100, Model.ReadPointer(template + 4));
+         Assert.Equal(0x200, Model.ReadPointer(template + 20));
+      }
+
+      [Fact]
+      public void ScriptEndsWithPaddingNopsAfterEnd_Compile_NoExtraEndIsAdded() {
+         // the nops after an end command keep an inline stream aligned: another end command shifted the stream by a byte
+         EventScript = "end;nop;nop;nop";
+
+         Assert.Equal(0x02, Model[0]);
+         Assert.Equal(0x00, Model[1]);
+         Assert.Equal(0x00, Model[2]);
+         Assert.Equal(0x00, Model[3]);
+         Assert.Equal(0xFF, Model[4]);
+      }
+
+      [Fact]
       public void Mart_Decompile_Auto() {
          ViewPort.Edit($"^some.script`xse` 86 <006> 02 01 00 02 00 03 00 00 00 @006 ^[item:{HardcodeTablesModel.ItemsTableName}]!0000");
 

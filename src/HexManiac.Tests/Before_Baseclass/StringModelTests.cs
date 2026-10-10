@@ -805,6 +805,33 @@ namespace HavenSoft.HexManiac.Tests {
          property.GetSetMethod(true).Invoke(Model, new object[] { converter });
       }
 
+      [Fact]
+      public void LineBreakBeforeAShortLastLine_Convert_KeepsTheLineBreak() {
+         // a line break within the last few characters of the text used to be skipped as an unknown character,
+         // which glued the two lines together ("Hello" + "I") and flagged the text as containing bad characters
+         var bytes = PCSString.Convert("Hello" + Environment.NewLine + "I", out var containsBadCharacters);
+
+         Assert.False(containsBadCharacters);
+         Assert.Equal(8, bytes.Count);
+         Assert.Equal(0xFE, bytes[5]);
+      }
+
+      [Fact]
+      public void TextEndsWithLineBreak_Convert_KeepsTheLineBreak() {
+         var bytes = PCSString.Convert("Hello" + Environment.NewLine, out var containsBadCharacters);
+
+         Assert.False(containsBadCharacters);
+         Assert.Equal(new byte[] { 0xC2, 0xD9, 0xE0, 0xE0, 0xE3, 0xFE, 0xFF }, bytes.ToArray());
+      }
+
+      [Fact]
+      public void TextWithEscapedLineBreakFollowedByRealLineBreak_Convert_IsNotBadCharacters() {
+         var bytes = PCSString.Convert("A\\n" + Environment.NewLine + "B", out var containsBadCharacters);
+
+         Assert.False(containsBadCharacters);
+         Assert.Equal(4, bytes.Count); // A, FE, B, FF
+      }
+
       private void Write(IDataModel model, ref int i, string characters) {
          foreach (var c in characters.ToCharArray())
             model[i++] = (byte)PCSString.PCS.IndexOf(c.ToString());

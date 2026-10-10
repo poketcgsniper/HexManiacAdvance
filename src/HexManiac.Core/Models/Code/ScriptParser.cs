@@ -696,7 +696,9 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   pointerOffset += arg.Length(model, currentSize + pointerOffset);
                }
 
-               lastCommandIsEndCommand = command.IsEndingCommand;
+               // padding nops after the end command (they keep an inline stream aligned) don't make the script "unfinished":
+               // adding another end command there grew the script by a byte and shifted its inline streams
+               lastCommandIsEndCommand = command.IsEndingCommand || (lastCommandIsEndCommand && command.LineCommand != null && command.LineCommand.StartsWith("nop"));
             } else {
                CompileError.Raise(this, new($"{i}: {line} is not a valid command", new(i, 0, lines[i].Length, SegmentType.Error)));
                return null;
@@ -1224,7 +1226,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
             }
             data.AddShort(0);
             content = data.ToArray();
-         } else if (type == ExpectedPointerType.Mart) {
+         } else if (type == ExpectedPointerType.Decor) {
             //   [item:{HardcodeTablesModel.DecorationsTableName}]!0000
             var data = new List<byte>();
             foreach (var line in text.SplitLines()) {
@@ -1250,7 +1252,9 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
             foreach (var line in text.SplitLines()) {
                var parts = line.Split(':');
                if (parts.Length == 1) continue;
-               var index = format.FindIndex(parts[0].StartsWith);
+               // the lines read "name : value": the name is padded with spaces, and the format entries carry their ':' or '<>'
+               var name = parts[0].Trim();
+               var index = format.FindIndex(entry => entry.TrimEnd(':', '<', '>') == name);
                if (index == -1) continue;
                int offset = index switch {
                   0 => 0,
@@ -1258,12 +1262,14 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   int i => (i - 1) * 4,
                };
                var (value, length) = ReadSpriteTemplateField(format[index], parts[1]);
+               if (length == 4 && value != 0) value |= BaseModel.PointerOffset; // pointer fields are stored with the 08 base
 
                for (int i = 0; i < length; i++) {
                   data[offset + i] = (byte)value;
                   value >>= 8;
                }
             }
+            content = data;
          } else {
             throw new NotImplementedException();
          }
