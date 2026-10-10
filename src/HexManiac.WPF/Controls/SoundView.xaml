@@ -114,7 +114,7 @@
             </Border.Style>
             <DockPanel>
                <TextBlock DockPanel.Dock="Top" Text="Music &amp; Sound Effects" Style="{StaticResource SectionTitle}"/>
-               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="Songs are listed from the song table. Select one to see it as a Sappy / mid2agb .s file, export it, or insert a .s file (made with mid2agb or exported from Sappy) over it or as a brand new song."/>
+               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="Songs are listed from the song table. Select one to see it as a Sappy / mid2agb .s file, export it, or insert a .s file (made with mid2agb or exported from Sappy) or a .mid file over it or as a brand new song. You can also drop .mid and .s files on this tab."/>
                <DockPanel DockPanel.Dock="Top" Margin="0,4">
                   <TextBlock Text="Find:" VerticalAlignment="Center"/>
                   <TextBox Margin="5,0,0,0" Text="{Binding SongFilter, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>
@@ -133,7 +133,7 @@
                      <Button Content="■ Stop" Command="{Binding StopSong}" Style="{StaticResource ToolButton}" ToolTip="Stop playback"/>
                      <Button Content="Export .wav" Command="{Binding ExportSongWav}" Style="{StaticResource ToolButton}" ToolTip="Save the rendered song as a .wav file"/>
                      <Button Content="Export .s" Command="{Binding ExportSong}" Style="{StaticResource ToolButton}" ToolTip="Save the selected song as a Sappy / mid2agb .s file"/>
-                     <Button Content="Insert .s…" Command="{Binding InsertSong}" Style="{StaticResource ToolButton}" ToolTip="Assemble a .s file into free space and put it in the song table"/>
+                     <Button Content="Insert song…" Command="{Binding InsertSong}" Style="{StaticResource ToolButton}" ToolTip="Put a .s file or a .mid file into free space and into the song table. A MIDI file is converted to a song first, like the mid2agb tool does it. Select several files to add them all as new songs."/>
                      <Button Content="Open in table" Command="{Binding GotoSong}" Style="{StaticResource ToolButton}" ToolTip="Jump to this song's entry in the song table"/>
                   </StackPanel>
                   <DockPanel Grid.Row="2" Margin="0,2" IsEnabled="{Binding CanRenameSong}">
@@ -214,6 +214,7 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                      </Grid.RowDefinitions>
                      <TextBlock Grid.Row="0" Grid.Column="0" Text="Insert as:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                      <WrapPanel Grid.Row="0" Grid.Column="1">
@@ -229,7 +230,20 @@
                      </DockPanel>
                      <CheckBox Grid.Row="2" Grid.Column="1" Content="Give the song a new voicegroup of its own" IsChecked="{Binding InsertWithNewVoicegroup}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,4,0,2"
                                ToolTip="After inserting, the song gets a new voicegroup: a copy of the one chosen above with room for all 128 instruments, in free space. Your custom track is then not tied to the instruments of one existing voicegroup: any instrument of the game can be put into it (Change the instruments, above). No other song is touched."/>
-                     <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Hint}" Text="A .s file from mid2agb names its voicegroup with a symbol (for example voicegroup000). That symbol is set to the voicegroup chosen here, so the instruments come from this ROM. With 'a new voicegroup of its own', the song gets a private copy of it, which can then hold any instrument of the game."/>
+                     <TextBlock Grid.Row="3" Grid.Column="0" Text="MIDI files:" VerticalAlignment="Center" Margin="0,2,6,0"/>
+                     <WrapPanel Grid.Row="3" Grid.Column="1" Margin="0,2,0,0">
+                        <TextBlock Text="volume" VerticalAlignment="Center"/>
+                        <TextBox Width="36" Margin="4,0,12,0" Text="{Binding MidiVolume}" VerticalAlignment="Center"
+                                 ToolTip="The master volume of the song, 0 to 127. MIDI files are mixed loud: at 127 most of them crackle on the GBA, so the default is 80."/>
+                        <CheckBox Content="reverb" IsChecked="{Binding MidiReverbOn}" VerticalAlignment="Center" ToolTip="Add reverb to the song. The songs of the original games use 50."/>
+                        <TextBox Width="36" Margin="4,0,12,0" Text="{Binding MidiReverb}" IsEnabled="{Binding MidiReverbOn}" VerticalAlignment="Center" ToolTip="The reverb amount, 0 to 127."/>
+                        <TextBlock Text="priority" VerticalAlignment="Center"/>
+                        <TextBox Width="36" Margin="4,0,12,0" Text="{Binding MidiPriority}" VerticalAlignment="Center"
+                                 ToolTip="When the sound engine runs out of channels, a song with a lower priority gives way first. Use 0 for music."/>
+                        <CheckBox Content="exact note lengths" IsChecked="{Binding MidiExactGateTime}" VerticalAlignment="Center"
+                                  ToolTip="Keep the length of every note exactly, like the songs of the original games do. Off rounds notes to the lengths the sound engine has a command for, which makes the song a bit smaller."/>
+                     </WrapPanel>
+                     <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Hint}" Text="A .s file from mid2agb names its voicegroup with a symbol (for example voicegroup000). That symbol is set to the voicegroup chosen here, so the instruments come from this ROM. With 'a new voicegroup of its own', the song gets a private copy of it, which can then hold any instrument of the game. A MIDI file is converted with the settings above and put in the same way; the voicegroup chosen here is the one whose instruments it plays (All Instruments, if this ROM has it, was chosen for you)."/>
                   </Grid>
                </Grid>
                <Grid>

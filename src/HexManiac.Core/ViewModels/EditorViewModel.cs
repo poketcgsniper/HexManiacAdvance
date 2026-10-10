@@ -797,6 +797,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                await editableViewPort.Model.InitializationWorkload;
                var importSuccessful = SelectedTab.TryImport(file, fileSystem);
                if (importSuccessful) return;
+            } else if (SelectedTab is SoundTab soundTab) {
+               // files dropped on the Sound tab (.mid, .s, .wav) go into the ROM that tab edits; anything else opens as usual
+               await soundTab.Model.InitializationWorkload;
+               if (soundTab.TryImport(file, fileSystem)) return;
             }
             UpdateRecentFiles(file.Name);
             string[] metadataText = new string[0];

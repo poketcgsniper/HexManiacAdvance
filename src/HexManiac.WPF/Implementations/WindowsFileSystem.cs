@@ -90,6 +90,18 @@ namespace HavenSoft.HexManiac.WPF.Implementations {
          return LoadFile(dialog.FileName);
       }
 
+      public IReadOnlyList<LoadedFile> OpenFiles(string extensionDescription = null, params string[] extensionOptions) {
+         var dialog = new OpenFileDialog { Filter = CreateFilterFromOptions(extensionDescription, extensionOptions), Multiselect = true };
+         var result = dialog.ShowDialog();
+         var files = new List<LoadedFile>();
+         if (result != true) return files;
+         foreach (var fileName in dialog.FileNames) {
+            var file = LoadFile(fileName);
+            if (file != null) files.Add(file);
+         }
+         return files;
+      }
+
       public string OpenFolder() {
          using (var dialog = new FolderBrowserDialog()) {
             var result = dialog.ShowDialog();

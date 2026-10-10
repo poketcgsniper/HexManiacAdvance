@@ -12,7 +12,7 @@ using System.Windows.Input;
 
 namespace HavenSoft.HexManiac.Core.ViewModels {
    /// <summary>
-   /// The "Sound" tab: a Pokémon cry editor (play / export / import WAV) and a music tool (view, export and insert Sappy/mid2agb .s songs).
+   /// The "Sound" tab: a Pokémon cry editor (play / export / import WAV) and a music tool (view, export and insert Sappy/mid2agb .s songs and MIDI files).
    /// </summary>
    public class SoundTab : ViewModelCore, ITabContent {
       public const string CryTable = "sound.pokemon.cry.normal";
@@ -20,8 +20,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public const string SongTable = "sound.tracks";
       public const string SongNamesList = "songnames";
       public const string SongFileDescription = "Song assembly (Sappy / mid2agb)";
-      /// <summary>The extensions the insert-song dialog offers, in order. The first is the dialog's default filter, so .s files are listed right away.</summary>
-      public static readonly string[] SongFileExtensions = { "s", "asm", "inc", "txt" };
+      /// <summary>The name of the insert-song dialog's file filter: it lists the .s files and the MIDI files together.</summary>
+      public const string SongInsertDescription = "Songs (*.s, *.mid, ...)";
+      /// <summary>The anchor of the "All Instruments" voicegroup (instruments of many games), which MIDI files made for the GBA are usually meant for. A ROM may not have it.</summary>
+      public const string AllInstrumentsAnchor = VoicegroupCatalog.AnchorPrefix + "all_instruments";
+      /// <summary>A GBA song has at most this many tracks (the engine's limit); a MIDI file that uses more channels cannot be a song.</summary>
+      public const int MaxSongTracks = 16;
+      /// <summary>The extensions the insert-song dialog offers, in order. The first is the dialog's default filter, so .s files are listed right away; the MIDI files are in the same entry.</summary>
+      public static readonly string[] SongFileExtensions = { "s", "mid", "midi", "asm", "inc", "txt" };
+
+      /// <summary>MIDI files are converted to a song (like mid2agb does) before they are inserted. Everything else is read as the song's assembly text.</summary>
+      public static bool IsMidiFile(string fileName) => fileName != null && (fileName.EndsWith(".mid", StringComparison.OrdinalIgnoreCase) || fileName.EndsWith(".midi", StringComparison.OrdinalIgnoreCase));
 
       private readonly IFileSystem fileSystem;
       private readonly ViewPort viewPort;
@@ -77,7 +86,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public bool TryImport(LoadedFile file, IFileSystem fileSystem) {
          if (file == null) return false;
          if (file.Name.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)) { ImportCryFromFile(file); return true; }
-         if (SongFileExtensions.Any(extension => file.Name.EndsWith("." + extension, StringComparison.OrdinalIgnoreCase))) { InsertSongFromFile(file); return true; }
+         if (SongFileExtensions.Any(extension => file.Name.EndsWith("." + extension, StringComparison.OrdinalIgnoreCase))) { InsertSongFile(file); return true; }
          return false;
       }
 
@@ -538,7 +547,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          foreach (var info in VoicegroupCatalog.Scan(model, usages)) Voicegroups.Add(new VoicegroupItem(model, info));
          foreach (var item in Songs) item.MatchToFilter(songFilter);
          // the voicegroup chosen for inserting songs stays chosen when the lists are read again
-         SelectedVoicegroup = (keepInsertVoicegroup == null ? null : FindVoicegroupItem(keepInsertVoicegroup.Value)) ?? Voicegroups.FirstOrDefault();
+         // (at first it is the All Instruments voicegroup if the ROM has one: songs made from MIDI files are meant for it)
+         SelectedVoicegroup = (keepInsertVoicegroup == null ? null : FindVoicegroupItem(keepInsertVoicegroup.Value)) ?? FindAllInstrumentsVoicegroup() ?? Voicegroups.FirstOrDefault();
          // the selected song belongs to the old list: drop it (callers that want a selection pick one again)
          if (selectedSong != null && !Songs.Contains(selectedSong)) SelectedSong = null;
       }
@@ -580,22 +590,61 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       private void ExecuteInsertSong() {
-         var file = fileSystem.OpenFile(SongFileDescription, SongFileExtensions);
-         if (file == null) return;
-         InsertSongFromFile(file);
+         var files = fileSystem.OpenFiles(SongInsertDescription, SongFileExtensions);
+         if (files == null || files.Count == 0) return;
+         if (files.Count == 1) InsertSongFile(files[0]);
+         else InsertSongFiles(files);
+      }
+
+      private void InsertSongFile(LoadedFile file) {
+         if (IsMidiFile(file.Name)) InsertMidiFromFile(file);
+         else InsertSongFromFile(file);
+      }
+
+      /// <summary>What happened to a song put into the ROM.</summary>
+      private class InsertedSong {
+         public int Index { get; init; }
+         public int Address { get; init; }
+         public int Size { get; init; }
+         public int Tracks { get; init; }
+         /// <summary>The label of the song header in the assembly text.</summary>
+         public string AssembledName { get; init; }
+         /// <summary>The name the song has in the song name list now, or null if it was not named.</summary>
+         public string Name { get; init; }
+         public string VoicegroupMessage { get; init; } = string.Empty;
+         /// <summary>A problem that did not stop the insertion (the song is in, but something extra could not be done), or null.</summary>
+         public string Warning { get; init; }
       }
 
       private void InsertSongFromFile(LoadedFile file) {
+         var asNew = InsertAsNewSong;
+         var song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), asNew, true, null, out var error);
+         if (song == null) { OnError?.Invoke(this, error); return; }
+         if (song.Warning != null) OnError?.Invoke(this, song.Warning);
+         Status = $"Inserted {file.Name} ({song.AssembledName}, {song.Size} bytes) at {song.Address:X6} as song {song.Index}.{song.VoicegroupMessage}";
+         OnMessage?.Invoke(this, Status + (asNew ? $" Play it with 'playbgm {song.Index}' / 'playse {song.Index}'." : string.Empty));
+      }
+
+      /// <summary>
+      /// Assembles song text (a mid2agb .s file) into free space and puts it in the song table, as a new song or over the selected one.
+      /// This is the one place that writes songs into the ROM: .s files and MIDI files (converted to .s text first) both come through here.
+      /// </summary>
+      /// <param name="songName">The name a new song gets in the song name list (null: none). Replaced songs keep their name.</param>
+      /// <param name="finish">Complete the change (one undo step) and read the lists again. A batch passes false until the last file.</param>
+      /// <param name="knownSymbols">Symbols the text uses that are already known (a MIDI conversion knows its voicegroup), or null.</param>
+      /// <returns>The inserted song, or null with the reason in 'error'; the ROM is not changed when null is returned for a reason found before the data is written.</returns>
+      private InsertedSong InsertSongFromText(string text, string songName, bool asNewSong, bool finish, IReadOnlyDictionary<string, int> knownSymbols, out string error) {
+         error = null;
          var table = model.GetTable(SongTable);
-         if (table == null) { OnError?.Invoke(this, $"This ROM has no {SongTable} table."); return; }
-         if (!InsertAsNewSong && selectedSong == null) { OnError?.Invoke(this, "Select a song to replace, or choose 'add as new song'."); return; }
-         var text = Encoding.UTF8.GetString(file.Contents);
+         if (table == null) { error = $"This ROM has no {SongTable} table."; return null; }
+         if (!asNewSong && selectedSong == null) { error = "Select a song to replace, or choose 'add as new song'."; return null; }
 
          // first pass: find out how big the song is and which symbols it needs
          var externals = new Dictionary<string, int>();
+         if (knownSymbols != null) foreach (var pair in knownSymbols) externals[pair.Key] = pair.Value;
          var result = SongAssembler.Assemble(text, 0, externals);
          if (!result.Success && result.UndefinedSymbols.Count > 0) {
-            if (selectedVoicegroup == null) { OnError?.Invoke(this, $"The song needs these symbols, but no voicegroup is selected: {string.Join(", ", result.UndefinedSymbols)}"); return; }
+            if (selectedVoicegroup == null) { error = $"The song needs these symbols, but no voicegroup is selected: {string.Join(", ", result.UndefinedSymbols)}"; return null; }
             var unresolved = new List<string>();
             foreach (var symbol in result.UndefinedSymbols) {
                if (symbol.Contains("grp", StringComparison.OrdinalIgnoreCase) || symbol.Contains("voice", StringComparison.OrdinalIgnoreCase) || result.UndefinedSymbols.Count == 1) {
@@ -604,17 +653,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                   unresolved.Add(symbol);
                }
             }
-            if (unresolved.Count > 0) { OnError?.Invoke(this, $"The song uses symbols this ROM doesn't know: {string.Join(", ", unresolved)}"); return; }
+            if (unresolved.Count > 0) { error = $"The song uses symbols this ROM doesn't know: {string.Join(", ", unresolved)}"; return null; }
             result = SongAssembler.Assemble(text, 0, externals);
          }
-         if (!result.Success) { OnError?.Invoke(this, "Could not assemble the song: " + result.Error); return; }
+         if (!result.Success) { error = "Could not assemble the song: " + result.Error; return null; }
 
          // second pass: assemble for real at the chosen address
          var token = viewPort.CurrentChange;
-         if (!VoicegroupEditor.TryAllocate(model, token, result.Bytes.Length + 4, out var address, out var allocationError)) { OnError?.Invoke(this, allocationError); return; }
+         if (!VoicegroupEditor.TryAllocate(model, token, result.Bytes.Length + 4, out var address, out var allocationError)) { error = allocationError; return null; }
          while (address % 4 != 0) address++;
          result = SongAssembler.Assemble(text, address + BaseModel.PointerOffset, externals);
-         if (!result.Success) { OnError?.Invoke(this, "Could not assemble the song: " + result.Error); return; }
+         if (!result.Success) { error = "Could not assemble the song: " + result.Error; return null; }
          var bytes = result.Bytes;
          if (OverrideVoicegroup && selectedVoicegroup != null) {
             var pointer = selectedVoicegroup.Address + BaseModel.PointerOffset;
@@ -625,6 +674,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
          // give the song a voicegroup of its own, so every instrument of the game can be used in it
          var voicegroupMessage = string.Empty;
+         string warning = null;
          if (InsertWithNewVoicegroup) {
             SongHeader.TryRead(model, headerAddress, out var insertedHeader);
             var sourceAddress = insertedHeader?.Voicegroup ?? selectedVoicegroup?.Address ?? -1;
@@ -634,12 +684,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                VoicegroupEditor.AssignToSong(model, token, headerAddress, voicegroupAddress);
                voicegroupMessage = $" It has its own new voicegroup at {voicegroupAddress:X6}{(voicegroupAnchor == null ? string.Empty : " (" + voicegroupAnchor + ")")}.";
             } else {
-               OnError?.Invoke(this, "The song is inserted, but it could not get its own voicegroup: " + voicegroupError);
+               warning = "The song is inserted, but it could not get its own voicegroup: " + voicegroupError;
             }
          }
 
          int index;
-         if (InsertAsNewSong) {
+         if (asNewSong) {
             var originalStart = table.Start;
             table = model.RelocateForExpansion(token, table, table.Length + table.ElementLength);
             table = table.Append(token, 1);
@@ -651,16 +701,187 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          var element = new ModelArrayElement(model, table.Start, index, () => token, table);
          element.SetAddress("pointer", headerAddress);
-         if (InsertAsNewSong) {
+         if (asNewSong) {
             element.SetValue("musicplayer", InsertMusicPlayer);
             element.SetValue("unknown", InsertMusicPlayer);
          }
+         var givenName = asNewSong ? TryNameNewSong(token, index, songName) : null;
+         if (finish) {
+            viewPort.ChangeHistory.ChangeCompleted();
+            viewPort.Refresh();
+            LoadSongs();
+            SelectedSong = index < Songs.Count ? Songs[index] : null;
+         }
+         return new InsertedSong {
+            Index = index,
+            Address = address,
+            Size = bytes.Length,
+            Tracks = bytes[result.HeaderOffset],
+            AssembledName = result.SongName,
+            Name = givenName,
+            VoicegroupMessage = voicegroupMessage,
+            Warning = warning,
+         };
+      }
+
+      #region Song names
+
+      /// <summary>
+      /// Turns a file name (with or without its folder and extension) into something that works as a song name: the song name list can't hold spaces
+      /// (names are identifiers in dropdowns and scripts), so anything but letters, digits and underscores becomes an underscore.
+      /// </summary>
+      public static string SongNameFromFileName(string fileName) {
+         var name = fileName ?? string.Empty;
+         var slash = Math.Max(name.LastIndexOf('/'), name.LastIndexOf('\\'));
+         if (slash >= 0) name = name.Substring(slash + 1);
+         var dot = name.LastIndexOf('.');
+         if (dot > 0) name = name.Substring(0, dot);
+         var sb = new StringBuilder();
+         foreach (var c in name.Trim()) {
+            var keep = c < 128 && (char.IsLetterOrDigit(c) || c == '_');
+            if (keep) sb.Append(c);
+            else if (sb.Length > 0 && sb[sb.Length - 1] != '_') sb.Append('_');
+         }
+         return sb.ToString().Trim('_');
+      }
+
+      /// <summary>
+      /// Writes the name of a new song into the song name list of the metadata, as part of the change being made (so undo takes it back).
+      /// The name is made unique: a second "Route 101" becomes "Route_101_2". Returns the name used, or null if the ROM has no name list or there is no usable name.
+      /// </summary>
+      private string TryNameNewSong(ModelDelta token, int index, string name) {
+         if (string.IsNullOrEmpty(name) || !model.TryGetList(SongNamesList, out var list)) return null;
+         var names = list.ToList();
+         while (names.Count <= index) names.Add(names.Count.ToString());
+         var unique = name;
+         for (int i = 2; names.Where((other, otherIndex) => otherIndex != index).Any(other => string.Equals(other, unique, StringComparison.OrdinalIgnoreCase)); i++) unique = name + "_" + i;
+         names[index] = unique;
+         model.SetList(token, SongNamesList, names, list.Comments, StoredList.GenerateHash(names));
+         model.ClearCacheScope();
+         return unique;
+      }
+
+      #endregion
+
+      #region MIDI files
+
+      private int midiVolume = 80;
+      /// <summary>
+      /// The master volume (0-127) a MIDI file's song is made with. MIDI files are usually mixed for loudness: at 127 most of them crackle on the GBA,
+      /// so the default is lower, as the music packs for the All Instruments voicegroup advise.
+      /// </summary>
+      public int MidiVolume { get => midiVolume; set => SetClamped(ref midiVolume, value, 0, 127); }
+
+      private bool midiReverbOn = true;
+      /// <summary>Add reverb to songs made from MIDI files. Off leaves the song dry, which is what mid2agb does unless it is told otherwise.</summary>
+      public bool MidiReverbOn { get => midiReverbOn; set => Set(ref midiReverbOn, value); }
+
+      private int midiReverb = 50;
+      /// <summary>The reverb amount (0-127) when it is on. The songs of the original games use 50.</summary>
+      public int MidiReverb { get => midiReverb; set => SetClamped(ref midiReverb, value, 0, 127); }
+
+      private int midiPriority;
+      /// <summary>The priority of a song made from a MIDI file (0-255): when the engine runs out of channels, tracks of a song with a lower priority give way first.</summary>
+      public int MidiPriority { get => midiPriority; set => SetClamped(ref midiPriority, value, 0, 255); }
+
+      private bool midiExactGateTime = true;
+      /// <summary>Keep the exact length of every note (like the songs of the original games do) instead of rounding them to the lengths the sound engine has a command for.</summary>
+      public bool MidiExactGateTime { get => midiExactGateTime; set => Set(ref midiExactGateTime, value); }
+
+      private void SetClamped(ref int field, int value, int lower, int upper, [CallerMemberName] string propertyName = null) {
+         var limited = value.LimitToRange(lower, upper);
+         if (field != limited) {
+            field = limited;
+            NotifyPropertyChanged(propertyName);
+         } else if (limited != value) {
+            NotifyPropertyChanged(propertyName); // show the limit instead of the number that was typed
+         }
+      }
+
+      /// <summary>The All Instruments voicegroup (anchored as sound.voicegroups.all_instruments), if the ROM has it.</summary>
+      private VoicegroupItem FindAllInstrumentsVoicegroup()
+         => Voicegroups.FirstOrDefault(group => string.Equals(group.Info.AnchorName, AllInstrumentsAnchor, StringComparison.OrdinalIgnoreCase) && !group.Info.IsCustom)
+         ?? Voicegroups.FirstOrDefault(group => string.Equals(group.Info.Name, "all_instruments", StringComparison.OrdinalIgnoreCase) && !group.Info.IsCustom);
+
+      /// <summary>The options of the conversion, from the settings of the tab. The voicegroup is the one selected for inserting songs.</summary>
+      private MidiToAgbOptions BuildMidiOptions(string fileName) {
+         var voicegroupName = selectedVoicegroup?.Info.Name;
+         var symbolName = string.IsNullOrEmpty(voicegroupName) ? "000" : "_" + new string(voicegroupName.Select(c => c < 128 && (char.IsLetterOrDigit(c) || c == '_') ? c : '_').ToArray());
+         return new MidiToAgbOptions {
+            Label = MidiToAgb.LabelFromFileName(fileName),
+            VoiceGroup = symbolName,
+            MasterVolume = MidiVolume,
+            Priority = MidiPriority,
+            Reverb = MidiReverbOn ? MidiReverb : -1,
+            ExactGateTime = MidiExactGateTime,
+         };
+      }
+
+      private void InsertMidiFromFile(LoadedFile file) {
+         var asNew = InsertAsNewSong;
+         var song = ConvertAndInsertMidi(file, asNew, true, out var error);
+         if (song == null) { OnError?.Invoke(this, error); return; }
+         if (song.Warning != null) OnError?.Invoke(this, song.Warning);
+         Status = $"Converted {file.Name}: {song.Tracks} track{(song.Tracks == 1 ? string.Empty : "s")}, {ToneData.FormatSize(song.Size)}; inserted as song {song.Index}{(string.IsNullOrEmpty(song.Name) ? string.Empty : " (" + song.Name + ")")} at {song.Address:X6}.{song.VoicegroupMessage}";
+         OnMessage?.Invoke(this, Status + (asNew ? $" Play it with 'playbgm {song.Index}' / 'playse {song.Index}'." : string.Empty));
+      }
+
+      /// <summary>Converts a MIDI file to song text with the settings of the tab and puts the song in the ROM, like a .s file.</summary>
+      private InsertedSong ConvertAndInsertMidi(LoadedFile file, bool asNewSong, bool finish, out string error) {
+         error = null;
+         if (selectedVoicegroup == null) { error = "There is no voicegroup to play the MIDI file with. Pick one under 'Insert with voicegroup'."; return null; }
+         var options = BuildMidiOptions(file.Name);
+         MidiConversionResult conversion;
+         try {
+            conversion = MidiToAgb.Convert(file.Contents, options);
+         } catch (MidiConversionException e) {
+            error = $"Could not convert {file.Name}: {e.Message}";
+            return null;
+         }
+         if (conversion.TrackCount == 0) { error = $"{file.Name} has no notes to play."; return null; }
+         if (conversion.TrackCount > MaxSongTracks) {
+            error = $"{file.Name} plays notes on {conversion.TrackCount} channels, but a GBA song can have at most {MaxSongTracks} tracks. Remove or merge some of its tracks in a MIDI editor and try again.";
+            return null;
+         }
+         var symbols = new Dictionary<string, int> { ["voicegroup" + options.VoiceGroup] = selectedVoicegroup.Address + BaseModel.PointerOffset };
+         var song = InsertSongFromText(conversion.Text, SongNameFromFileName(file.Name), asNewSong, finish, symbols, out var insertError);
+         if (song == null) error = $"Could not insert {file.Name}: {insertError}";
+         return song;
+      }
+
+      #endregion
+
+      /// <summary>Inserts several songs (.mid and .s files) at once, every one as a new song at the end of the song table. A file that can't be inserted is skipped and named in the result.</summary>
+      private void InsertSongFiles(IReadOnlyList<LoadedFile> files) {
+         if (model.GetTable(SongTable) == null) { OnError?.Invoke(this, $"This ROM has no {SongTable} table."); return; }
+         var failures = new List<string>();
+         var inserted = new List<InsertedSong>();
+         var warnings = new List<string>();
+         for (int i = 0; i < files.Count; i++) {
+            var file = files[i];
+            Status = $"Inserting song {i + 1} of {files.Count}: {file.Name}";
+            InsertedSong song;
+            string error;
+            if (IsMidiFile(file.Name)) song = ConvertAndInsertMidi(file, true, false, out error);
+            else song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), true, false, null, out error);
+            if (song == null) failures.Add($"{file.Name}: {error}");
+            else {
+               inserted.Add(song);
+               if (song.Warning != null) warnings.Add($"{file.Name}: {song.Warning}");
+            }
+         }
+         // the whole batch is one undo step, and the lists are read once
          viewPort.ChangeHistory.ChangeCompleted();
          viewPort.Refresh();
          LoadSongs();
-         SelectedSong = index < Songs.Count ? Songs[index] : null;
-         Status = $"Inserted {file.Name} ({result.SongName}, {bytes.Length} bytes) at {address:X6} as song {index}.{voicegroupMessage}";
-         OnMessage?.Invoke(this, Status + (InsertAsNewSong ? $" Play it with 'playbgm {index}' / 'playse {index}'." : string.Empty));
+         if (inserted.Count > 0) SelectedSong = Songs.Count > inserted[inserted.Count - 1].Index ? Songs[inserted[inserted.Count - 1].Index] : null;
+         var size = inserted.Sum(song => song.Size);
+         Status = inserted.Count == 0
+            ? $"None of the {files.Count} files could be inserted."
+            : $"Inserted {inserted.Count} of {files.Count} songs as songs {inserted.Min(song => song.Index)} to {inserted.Max(song => song.Index)} ({ToneData.FormatSize(size)} in all).{(failures.Count > 0 ? $" {failures.Count} could not be inserted." : string.Empty)}";
+         var problems = failures.Concat(warnings).ToList();
+         if (problems.Count > 0) OnError?.Invoke(this, string.Join(Environment.NewLine, problems.Take(6)) + (problems.Count > 6 ? $"{Environment.NewLine}... and {problems.Count - 6} more." : string.Empty));
+         if (inserted.Count > 0) OnMessage?.Invoke(this, Status + " Undo (Ctrl+Z) takes them all back.");
       }
 
       private void ExecuteGotoSong() {
