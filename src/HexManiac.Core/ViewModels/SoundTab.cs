@@ -439,8 +439,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             OnError?.Invoke(this, "This ROM's metadata has no song name list to update.");
             return;
          }
-         // list entries can't have spaces: they are used as identifiers in dropdowns and scripts
-         var cleaned = (name ?? string.Empty).Trim().Replace(' ', '_');
+         var cleaned = CleanSongName(name);
          var index = selectedSong.Index;
          if (string.IsNullOrEmpty(cleaned)) cleaned = index.ToString();
          var names = list.ToList();
@@ -457,6 +456,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          NotifyPropertyChanged(nameof(SelectedSongName));
          UpdateSongDetails();
          Status = $"Song {index} is now called {cleaned}.";
+      }
+
+      /// <summary>
+      /// List entries can't have spaces (they are used as identifiers in dropdowns and scripts), and the metadata file they are saved in is made of lines:
+      /// '#' starts a comment there, ''' ends a value, and a line break would split the name (and move every name after it by one).
+      /// </summary>
+      public static string CleanSongName(string name) {
+         var cleaned = new string((name ?? string.Empty).Trim().Select(c => c == ' ' || c == '#' || char.IsControl(c) ? '_' : c).ToArray());
+         while (cleaned.Contains("'''")) cleaned = cleaned.Replace("'''", "''");
+         return cleaned;
       }
 
       private string songDetails = string.Empty;

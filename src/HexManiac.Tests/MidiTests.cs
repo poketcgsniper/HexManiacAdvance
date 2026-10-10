@@ -1385,6 +1385,27 @@ inserted:
          Assert.Equal(2, SongCount);
       }
 
+      [Fact]
+      public void Tab_RenameSong_NamesThatTheMetadataFileCouldNotHold_AreCleanedUp_AndTheOtherNamesSurviveASave() {
+         Build();
+         var tab = CreateTab();
+         var awkward = new[] { "Route #1", "it'''s", "two\nlines", "tab\tbed", "  spaced name  ", "\u00fcn\u00ef \u65e5\u672c" };
+         var expected = new[] { "Route__1", "it''s", "two_lines", "tab_bed", "spaced_name", "\u00fcn\u00ef_\u65e5\u672c" };
+         for (int i = 0; i < awkward.Length; i++) {
+            tab.SelectedSong = tab.Songs[1];
+            tab.SelectedSongName = awkward[i];
+            Assert.Empty(tabErrors);
+            Assert.Equal(expected[i], tab.Songs[1].Name);
+
+            // what is saved is what comes back: no other name is lost or moved by the one that was typed
+            var saved = new StoredMetadata(Model.ExportMetadata(Singletons.MetadataInfo).Serialize());
+            var list = saved.Lists.Single(l => l.Name == SoundTab.SongNamesList);
+            Assert.Equal(expected[i], list[1]);
+            Assert.Equal("MUS_ONE", list[0]);
+            Assert.Equal(2, list.Count);
+         }
+      }
+
       private void InsertEncodedSongs(byte[][] files) {
          Build();
          var tab = CreateTab();
