@@ -728,7 +728,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             r /= 8;
             g /= 8;
             b /= 8;
-            model.WriteMultiByteValue(start, 2, history.CurrentChange, UncompressedPaletteColor.Pack(r, g, b));
+            PaletteRun.WriteStoredColor(model, history.CurrentChange, start, UncompressedPaletteColor.Pack(r, g, b)); // keeps bit 15 of the stored color
             start += 2;
          }
       }

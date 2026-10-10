@@ -314,7 +314,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       public void UpdateModelFromViewModel(FieldArrayElementViewModel viewModel) {
          var colors = PaletteCollection.ParseColor(viewModel.Content);
          if (colors.Count == 0) return;
-         viewModel.Model.WriteMultiByteValue(viewModel.Start, viewModel.Length, viewModel.ViewPort.CurrentChange, PaletteRun.FlipColorChannels(colors[0]));
+         PaletteRun.WriteColor(viewModel.Model, viewModel.ViewPort.CurrentChange, viewModel.Start, colors[0]); // keeps bit 15 of the stored color
       }
 
       public string UpdateViewModelFromModel(FieldArrayElementViewModel viewModel) {

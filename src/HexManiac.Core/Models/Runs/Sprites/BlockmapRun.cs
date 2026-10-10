@@ -485,8 +485,8 @@ namespace HexManiac.Core.Models.Runs.Sprites {
          var start = ReadPointer(8);
          for (int i = 0; i < 16; i++) {
             for (int j = 0; j < 16; j++) {
-               var bgr = PaletteRun.FlipColorChannels(palettes[i][j]);
-               model.WriteMultiByteValue(start + i * 32 + j * 2, 2, token, bgr);
+               // bit 15 of each stored color is not part of the 15-bit colors we hold: keep what is there
+               PaletteRun.WriteColor(model, token, start + i * 32 + j * 2, palettes[i][j]);
             }
          }
       }
