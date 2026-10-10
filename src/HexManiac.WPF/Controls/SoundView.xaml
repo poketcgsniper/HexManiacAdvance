@@ -115,6 +115,8 @@
             <DockPanel>
                <TextBlock DockPanel.Dock="Top" Text="Music &amp; Sound Effects" Style="{StaticResource SectionTitle}"/>
                <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="Songs are listed from the song table. Select one to see it as a Sappy / mid2agb .s file, export it, or insert a .s file (made with mid2agb or exported from Sappy) or a .mid file over it or as a brand new song. You can also drop .mid and .s files on this tab."/>
+               <!-- whether the ROM has the All Instruments patch (the voicegroup that MIDI files and mid2agb -G_all_instruments songs are made for) -->
+               <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="{Binding AllInstrumentsNote}" ToolTip="{Binding AllInstrumentsDetails}"/>
                <DockPanel DockPanel.Dock="Top" Margin="0,4">
                   <TextBlock Text="Find:" VerticalAlignment="Center"/>
                   <TextBox Margin="5,0,0,0" Text="{Binding SongFilter, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center"/>

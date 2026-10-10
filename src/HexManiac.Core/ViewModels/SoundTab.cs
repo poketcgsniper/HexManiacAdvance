@@ -552,7 +552,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Songs.Clear();
          Voicegroups.Clear();
          var table = model.GetTable(SongTable);
-         if (table == null) { SelectedSong = null; return; }
+         if (table == null) { SelectedSong = null; UpdateAllInstruments(); return; }
          IReadOnlyList<string> names = model.GetOptions(SongTable);
          if ((names == null || names.Count == 0) && model.TryGetList(SongNamesList, out var songNames)) names = songNames;
          var usages = new List<(int voicegroup, string song)>();
@@ -566,6 +566,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             if (header != null && header.TrackCount > 0) usages.Add((header.Voicegroup, string.IsNullOrEmpty(name) ? i.ToString() : name));
          }
          foreach (var info in VoicegroupCatalog.Scan(model, usages)) Voicegroups.Add(new VoicegroupItem(model, info));
+         UpdateAllInstruments();
          foreach (var item in Songs) item.MatchToFilter(songFilter);
          // a voicegroup the user picked for inserting songs stays picked when the lists are read again; otherwise it is the All Instruments voicegroup
          // if the ROM has one (songs made from MIDI files are meant for it), or the first one
@@ -833,6 +834,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          } else if (limited != value) {
             NotifyPropertyChanged(propertyName); // show the limit instead of the number that was typed
          }
+      }
+
+      private AllInstrumentsStatus allInstruments;
+      /// <summary>Whether the ROM has the All Instruments patch, said in a sentence that is shown under the description of the music section.</summary>
+      public string AllInstrumentsNote => allInstruments?.Summary ?? string.Empty;
+      /// <summary>What the patch is and what was found, for a tooltip.</summary>
+      public string AllInstrumentsDetails => allInstruments?.Details ?? string.Empty;
+      /// <summary>True when the ROM has the All Instruments voicegroup.</summary>
+      public bool HasAllInstruments => allInstruments?.IsApplied ?? false;
+
+      private void UpdateAllInstruments() {
+         allInstruments = model.GetTable(SongTable) == null ? null : AllInstrumentsPatch.Inspect(model, Voicegroups.Select(group => group.Info));
+         NotifyPropertyChanged(nameof(AllInstrumentsNote));
+         NotifyPropertyChanged(nameof(AllInstrumentsDetails));
+         NotifyPropertyChanged(nameof(HasAllInstruments));
       }
 
       /// <summary>The All Instruments voicegroup (anchored as sound.voicegroups.all_instruments), if the ROM has it.</summary>
