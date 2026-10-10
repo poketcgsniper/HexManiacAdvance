@@ -1188,12 +1188,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                      start = arrayRun.Start + arrayRun.ElementLength * i + arrayRun.ElementContent.Take(j).Sum(seg => seg.Length);
                      if (start + arrayRun.ElementContent[j].Length <= left) continue;
                      if (start > right) break;
-                     for (int k = 0; k < arrayRun.ElementContent[j].Length; k++) {
-                        if (arrayRun.ElementContent[j].Type == ElementContentType.Pointer) {
-                           history.CurrentChange.ChangeData(Model, start + k, 0x00);
-                        } else {
-                           history.CurrentChange.ChangeData(Model, start + k, 0xFF);
-                        }
+                     if (arrayRun.ElementContent[j].Type == ElementContentType.Pointer) {
+                        // a cleared pointer cell is a null pointer: the old destination must stop listing the cell as one of its sources
+                        Model.UpdateArrayPointer(history.CurrentChange, arrayRun.ElementContent[j], arrayRun.ElementContent, i, start, Pointer.NULL);
+                        for (int k = 0; k < arrayRun.ElementContent[j].Length; k++) history.CurrentChange.ChangeData(Model, start + k, 0x00);
+                     } else {
+                        for (int k = 0; k < arrayRun.ElementContent[j].Length; k++) history.CurrentChange.ChangeData(Model, start + k, 0xFF);
                      }
                   }
                }

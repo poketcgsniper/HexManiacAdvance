@@ -245,6 +245,51 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void ClearTableCellWithPointer_DestinationNoLongerListsTheCellAsASource() {
+         // a stale source would be rewritten (un-nulling the cell) the next time the destination moves
+         ViewPort.Edit("@00 <040> <060> @00 ^table[sprite<`ucs4x1x1`>]2 ");
+         ViewPort.ChangeHistory.ChangeCompleted(); // setting up is not something undo should take back
+         Assert.Contains(0, Model.GetNextRun(0x40).PointerSources);
+         Assert.Equal(0x08000040, Model.ReadMultiByteValue(0, 4));
+
+         ViewPort.Goto.Execute(0);
+         ViewPort.SelectionStart = new Point(0, 0);
+         ViewPort.SelectionEnd = new Point(3, 0);
+         ViewPort.Clear.Execute();
+
+         Assert.DoesNotContain(0, (Model.GetNextRun(0x40).PointerSources ?? SortedSpan<int>.None).ToList());
+         var second = Model.GetNextRun(0x60);
+         Assert.Equal(0x60, second.Start);
+         Assert.Contains(4, (second.PointerSources ?? SortedSpan<int>.None).ToList());
+         Assert.Equal(0, Model.ReadMultiByteValue(0, 4));
+
+         Assert.True(ViewPort.Undo.CanExecute(null));
+         ViewPort.Undo.Execute();
+
+         Assert.Equal(0x08000040, Model.ReadMultiByteValue(0, 4));
+         var first = Model.GetNextRun(0x40);
+         Assert.Equal(0x40, first.Start);
+         Assert.Contains(0, (first.PointerSources ?? SortedSpan<int>.None).ToList());
+         Assert.Equal(0x40, Model.ReadPointer(0));
+      }
+
+      [Fact]
+      public void ClearStartingInsideAPointerCell_DestinationsNoLongerListTheClearedCells() {
+         ViewPort.Edit("@00 <040> <060> @00 ^table[sprite<`ucs4x1x1`>]2 ");
+
+         ViewPort.Goto.Execute(0);
+         ViewPort.SelectionStart = new Point(2, 0);
+         ViewPort.SelectionEnd = new Point(5, 0);
+         ViewPort.Clear.Execute();
+
+         // both pointers are damaged, so neither may keep claiming the cell
+         var first = (Model.GetNextRun(0x40).PointerSources ?? SortedSpan<int>.None).ToList();
+         var second = (Model.GetNextRun(0x60).PointerSources ?? SortedSpan<int>.None).ToList();
+         foreach (var source in first) Assert.Equal(0x40, Model.ReadPointer(source));
+         foreach (var source in second) Assert.Equal(0x60, Model.ReadPointer(source));
+      }
+
+      [Fact]
       public void ClearRemovesFormats() {
          ViewPort.Edit("<000100>");
          ViewPort.SelectionStart = new Point(2, 0);

@@ -78,7 +78,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
       public static IReadOnlyList<short> GetPalette(IReadOnlyList<byte> data, int start, int count) {
          var results = new List<short>();
          for (int i = 0; i < count; i++) {
-            var color = (short)data.ReadMultiByteValue(start + i * 2, 2);
+            // a palette that starts near the end of the data has no room for all its colors: the missing ones are black
+            var color = start + i * 2 + 1 < data.Count && start + i * 2 >= 0 ? (short)data.ReadMultiByteValue(start + i * 2, 2) : (short)0;
             results.Add(FlipColorChannels(color));
          }
          return results;
