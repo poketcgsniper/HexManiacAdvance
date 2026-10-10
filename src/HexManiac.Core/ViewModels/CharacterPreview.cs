@@ -222,19 +222,24 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       /// <summary>
-      /// Stores the picture of one frame of an uncompressed sheet (the shape ReadOverworldFrame returns). The bytes of a sheet can have been taken for a pointer or other data:
-      /// whatever HexManiac saw in them is cleared first so that nothing keeps pointing from the middle of the picture. Returns false if the frame can't be stored this way.
+      /// Stores the picture of one frame of an uncompressed sheet (the shape ReadOverworldFrame returns). The bytes of a sheet can have been taken for a pointer:
+      /// a pointer HexManiac saw in the bytes that change is cleared first, so that nothing keeps pointing from the middle of the picture.
+      /// Returns false if the frame can't be stored this way.
       /// </summary>
       public static bool WriteOverworldFrame(IDataModel model, ModelDelta token, ModelTable spriteList, int frame, int[,] pixels) {
          if (pixels == null || !TryLocateOverworldFrame(model, spriteList, frame, out var start, out var length, out var bitsPerPixel)) return false;
          var data = new byte[length];
          SpriteRun.SetPixels(data, 0, pixels, bitsPerPixel);
-         var address = start;
-         while (address < start + length) {
+         var clearedUntil = -1;
+         for (int i = 0; i < data.Length; i++) {
+            var address = start + i;
+            if (model[address] == data[i]) continue;
+            if (address < clearedUntil) continue;
             var run = model.GetNextRun(address);
-            if (run.Start >= start + length) break;
-            if (run is PointerRun) model.ClearFormat(token, run.Start, run.Length);
-            address = Math.Max(address + 1, run.Start + Math.Max(1, run.Length));
+            if (run is PointerRun && run.Start <= address && address < run.Start + run.Length) {
+               model.ClearFormat(token, run.Start, run.Length);
+               clearedUntil = run.Start + run.Length;
+            }
          }
          for (int i = 0; i < data.Length; i++) {
             if (model[start + i] != data[i]) token.ChangeData(model, start + i, data[i]);
