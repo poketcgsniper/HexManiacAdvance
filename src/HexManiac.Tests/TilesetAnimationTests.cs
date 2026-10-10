@@ -464,6 +464,33 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void AnimationFrameSource_StrayPointerIntoAFrame_FramesStillDontOverlapOtherRuns() {
+         // some ROMs have a word in the middle of unrelated data that looks like a pointer into the middle of a frame: the model then has a one byte run there
+         var animations = CreateAnimations();
+         AddPatternedAnimation(animations, 4, 3);
+         var entry = CurrentFirstEntry(animations);
+         var frameStart = animations.FrameAddress(entry, 1);
+         Model.ClearFormat(Token, frameStart, 32 * entry.TileCount); // like in a ROM that was never formatted: the frame is plain data that only the frame table points to
+         Model.WritePointer(Token, entry.FramesAddress + 4, frameStart);
+         var inside = frameStart + 40;
+         var strayPointerAt = 0xE00;
+         Model.WritePointer(Token, strayPointerAt, inside);
+         Model.ObserveRunWritten(Token, NoInfoRun.FromPointer(Model, strayPointerAt)); // the model keeps a one byte run for every pointer destination
+         Assert.Equal(inside, Model.GetNextRun(inside).Start); // the stray pointer made a run in the middle of the frame
+
+         var source = new AnimationFrameSource(Model, animations, TilesetStart, entry, "Anim", () => CurrentFirstEntry(animations));
+         Assert.True(source.Prepare());
+
+         IFormattedRun previous = null;
+         foreach (var run in Model.All<IFormattedRun>()) {
+            if (previous != null) Assert.True(previous.Start + previous.Length <= run.Start, $"the run at {previous.Start:X} ({previous.Length} bytes) overlaps the run at {run.Start:X}");
+            previous = run;
+         }
+         Assert.IsAssignableFrom<ISpriteRun>(Model.GetNextRun(frameStart));
+         Assert.Equal(frameStart, Model.GetNextRun(frameStart).Start);
+      }
+
+      [Fact]
       public void AnimationFrameSource_IsNotValidOnceItsAnimationIsGoneOrIsAnother() {
          var animations = CreateAnimations();
          TilesetAnimationConstants.TryRead(Model, out var constants);
@@ -544,6 +571,26 @@ namespace HavenSoft.HexManiac.Tests {
 
          Model.WritePointer(Token, entry.EntryAddress + 4, 0x40); // the door now belongs to another tileset
          Assert.False(source.IsValid);
+      }
+
+      [Fact]
+      public void DoorFrameSource_StrayPointerIntoTheTiles_TilesStillDontOverlapOtherRuns() {
+         var doors = CreateDoorTable(2, out var entry);
+         Model.ClearFormat(Token, entry.TilesAddress, entry.TilesLength);
+         Model.WritePointer(Token, entry.EntryAddress + 12, entry.TilesAddress);
+         var inside = entry.TilesAddress + 100;
+         Model.WritePointer(Token, 0xE00, inside);
+         Model.ObserveRunWritten(Token, NoInfoRun.FromPointer(Model, 0xE00)); // the model keeps a one byte run for every pointer destination
+         Assert.Equal(inside, Model.GetNextRun(inside).Start);
+
+         Assert.True(new DoorFrameSource(doors, entry, "Door").Prepare());
+
+         IFormattedRun previous = null;
+         foreach (var run in Model.All<IFormattedRun>()) {
+            if (previous != null) Assert.True(previous.Start + previous.Length <= run.Start, $"the run at {previous.Start:X} ({previous.Length} bytes) overlaps the run at {run.Start:X}");
+            previous = run;
+         }
+         Assert.IsAssignableFrom<ISpriteRun>(Model.GetNextRun(entry.TilesAddress));
       }
 
       #endregion
