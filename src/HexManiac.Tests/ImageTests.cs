@@ -209,6 +209,24 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void EditLzGroupHeader_FirstTokenCompressed_RunStaysValid() {
+         SetFullModel(0xFF);
+         var raw = Enumerable.Range(0, 400).Select(i => (byte)((i * i / 7) ^ (i % 5))).ToArray();
+         var compressed = LZRun.Compress(raw, 0, raw.Length);
+         CreateLzRun(0, compressed.ToArray());
+         var length = Model.GetNextRun(0).Length;
+         Assert.Equal(compressed.Count, length);
+
+         // type FF into the first group header and the cells after it: the first token of the data cannot be compressed, there is nothing to copy from yet
+         for (int i = 0; i < 12; i++) ViewPort.Edit($"@{4 + i:X} FF ");
+
+         var run = Model.GetNextRun(0);
+         Assert.True(run.Length > 0, $"the run has the length {run.Length}");
+         Assert.NotNull(LZRun.Decompress(Model, 0));
+         for (int i = 0; i < run.Length; i++) Assert.IsAssignableFrom<IDataFormat>(run.CreateDataFormat(Model, run.Start + i)); // the data can still be shown
+      }
+
+      [Fact]
       public void CanEditLzDataViaStreamTool() {
          SetFullModel(0xFF);
          CreateLzRun(0,
