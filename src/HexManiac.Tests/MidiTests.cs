@@ -768,7 +768,7 @@ t:
       }
 
       /// <summary>Puts the songs, voicegroups and the song table in the ROM. The All Instruments voicegroup is only named when asked for.</summary>
-      private void Build(bool named = true, bool withNames = true) {
+      private void Build(bool named = true, bool withNames = true, bool nameOther = true) {
          var sine = new sbyte[400];
          for (int i = 0; i < sine.Length; i++) sine[i] = (sbyte)(Math.Sin(i * 2 * Math.PI * 220 / 13379) * 100);
          var sample = GbaSample.Build(sine, 13379, compressed: false, loopStart: 0);
@@ -780,7 +780,7 @@ t:
          WriteSquare(AllInstruments + 3 * ToneSize, 4, 0);
          WriteSample(Other + 0 * ToneSize);
          WriteSquare(Other + 1 * ToneSize, 1, 0);
-         Model.ObserveAnchorWritten(Token, "sound.voicegroups.other", new NoInfoRun(Other));
+         if (nameOther) Model.ObserveAnchorWritten(Token, "sound.voicegroups.other", new NoInfoRun(Other));
          if (named) Model.ObserveAnchorWritten(Token, SoundTab.AllInstrumentsAnchor, new NoInfoRun(AllInstruments));
 
          headers[0] = PlaceSong(0x600, Other);
@@ -997,6 +997,22 @@ t:
 
          Assert.Empty(tabErrors);
          Assert.Equal(Other, tab.Songs[2].Header.Voicegroup);
+      }
+
+      [Fact]
+      public void Tab_InsertMidi_WorksWithAVoicegroupThatHasNoName() {
+         Build(named: false, nameOther: false);
+         var tab = CreateTab();
+         FileSystem.OpenFile = (description, options) => Loaded("a.mid", Midi("single"));
+         tab.InsertAsNewSong = true;
+         tab.SelectedSong = tab.Songs[0];
+         Assert.Null(tab.SelectedVoicegroup.Info.Name);
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Empty(tabErrors);
+         Assert.Equal(Other, tab.Songs[2].Header.Voicegroup);
+         Assert.Contains("instruments from Voicegroup 000500", tab.Status);
       }
 
       [Fact]

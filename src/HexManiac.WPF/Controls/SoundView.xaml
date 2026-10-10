@@ -225,7 +225,7 @@
                      </WrapPanel>
                      <TextBlock Grid.Row="1" Grid.Column="0" Text="Insert with voicegroup:" VerticalAlignment="Center" Margin="0,2,6,0"/>
                      <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,2,0,0">
-                        <CheckBox DockPanel.Dock="Right" Content="always use this one" IsChecked="{Binding OverrideVoicegroup}" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="Use the chosen voicegroup even when the .s file gives an address for its own."/>
+                        <CheckBox DockPanel.Dock="Right" Content="always use this one" IsChecked="{Binding OverrideVoicegroup}" VerticalAlignment="Center" Margin="8,0,0,0" ToolTip="Use the chosen voicegroup even when the .s file gives an address for its own. A MIDI file plays All Instruments (if this ROM has it) unless you pick another voicegroup or tick this."/>
                         <ComboBox ItemsSource="{Binding Voicegroups}" SelectedItem="{Binding SelectedVoicegroup}" ItemTemplate="{StaticResource VoicegroupItemTemplate}" VerticalAlignment="Center"/>
                      </DockPanel>
                      <CheckBox Grid.Row="2" Grid.Column="1" Content="Give the song a new voicegroup of its own" IsChecked="{Binding InsertWithNewVoicegroup}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,4,0,2"
