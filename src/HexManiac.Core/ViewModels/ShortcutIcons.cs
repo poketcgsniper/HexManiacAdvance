@@ -1,5 +1,6 @@
 using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Map;
+using HavenSoft.HexManiac.Core.Models.PokemonAnimations;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.Models.Runs.Sprites;
 using HavenSoft.HexManiac.Core.ViewModels.DataFormats;
@@ -80,10 +81,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       // It is called at most once per button, and only when the dialog is first shown, never while the dialog is prepared.
       // ======================================================================================================================================================
       public static ShortcutAnimation CreatePokemonButtonAnimation(IDataModel model, int speciesIndex) {
-         // integrator wires PokemonAnimationTimeline here, for example:
-         //    if (!PokemonAnimationTimeline.TryBuild(model, speciesIndex, PokemonButtonCanvasSize, PokemonButtonIdleMilliseconds, out var timeline)) return null;
-         //    return ShortcutAnimation.Create(timeline.Frames, timeline.DurationsMs);
-         return null;
+         // the in-game front animation of the species (the same engine as the Pokemon editor's preview), then a still picture held for the idle time
+         try {
+            if (!PokemonAnimationTimeline.TryBuild(model, speciesIndex, PokemonButtonCanvasSize, PokemonButtonIdleMilliseconds, out var timeline)) return null;
+            return ShortcutAnimation.Create(timeline.Frames, timeline.DurationsMs);
+         } catch (Exception) {
+            return null; // icons are decoration: the button keeps its still picture
+         }
       }
 
       #endregion
