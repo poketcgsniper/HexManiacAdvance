@@ -11,6 +11,7 @@ namespace HavenSoft.HexManiac.Tests {
    /// Selecting a tab is cheap when nothing was edited since the tab last looked (ModelEditStamp), and exactly as complete as before when something was.
    /// The table used here has two 2-byte fields and four elements, so element 1 starts at address 4 and element 2 at address 8.
    /// </summary>
+   [Collection("TabSwitch")]
    public class TabSwitchTests : BaseViewModelTestClass {
       private const string TableFormat = "^table[a: b:]4 ";
       private readonly EditorViewModel editor;
@@ -404,4 +405,11 @@ namespace HavenSoft.HexManiac.Tests {
 
       #endregion
    }
+
+   /// <summary>
+   /// The edit counter (ModelEditStamp) is shared by every model in the process, so a test that edits a model while these tests run would change it under their feet.
+   /// The collection runs on its own, never in parallel with the other test classes.
+   /// </summary>
+   [CollectionDefinition("TabSwitch", DisableParallelization = true)]
+   public class TabSwitchCollection { }
 }
