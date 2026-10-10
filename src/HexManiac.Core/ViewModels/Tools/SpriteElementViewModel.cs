@@ -304,6 +304,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          NotifyPropertyChanged(nameof(SpriteScale));
       }
 
+      /// <summary>The colours the picture is drawn with right now (the selected palette).</summary>
+      public IReadOnlyList<short> GetCurrentColors() => GetDesiredPalette(Start, CurrentPage, false, out _);
+
       /// <summary>
       /// If the hint is a table name, only match palettes from that table.
       /// </summary>

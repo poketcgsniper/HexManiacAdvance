@@ -673,6 +673,25 @@
                                        <DataTemplate DataType="{x:Type hsg3hvmtr:SpriteIndicatorElementViewModel}">
                                           <hsg3hv:PixelImage SnapsToDevicePixels="True" DataContext="{Binding Image}" Visibility="{Binding Visible, Converter={StaticResource BoolToVisibility}}" />
                                        </DataTemplate>
+                                       <DataTemplate DataType="{x:Type hsg3hvmtr:PokemonAnimationPreviewViewModel}">
+                                          <hsg3hv:PokemonAnimationHost>
+                                             <StackPanel Margin="0,4" Visibility="{Binding Visible, Converter={StaticResource BoolToVisibility}}">
+                                                <hsg3hv:AngleBorder Content="{Binding Header}" FontSize="10" Direction="Out" HorizontalAlignment="Center" />
+                                                <Grid HorizontalAlignment="Center" Visibility="{Binding HasAnimation, Converter={StaticResource BoolToVisibility}}">
+                                                   <hsg3hv:PixelImage SnapsToDevicePixels="True" DataContext="{Binding Surface}" />
+                                                </Grid>
+                                                <TextBlock Text="{Binding Status}" HorizontalAlignment="Center" TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource Secondary}" />
+                                                <Grid HorizontalAlignment="Stretch" Margin="0,5" Height="22" TextBlock.FontSize="10">
+                                                   <Grid.ColumnDefinitions>
+                                                      <ColumnDefinition Width="*"/>
+                                                      <ColumnDefinition Width="*"/>
+                                                   </Grid.ColumnDefinitions>
+                                                   <hsg3hv:AngleButton Direction="Left" Content="{Binding PlayLabel}" Grid.Column="0" Command="{Binding TogglePlay}" ToolTip="Pause or resume the preview" />
+                                                   <hsg3hv:AngleButton Direction="Right" Content="Replay" Grid.Column="1" Command="{Binding Replay}" ToolTip="Play the animation again from the start" />
+                                                </Grid>
+                                             </StackPanel>
+                                          </hsg3hv:PokemonAnimationHost>
+                                       </DataTemplate>
                                        <DataTemplate DataType="{x:Type hsg3hvmtr:PaletteElementViewModel}">
                                           <Grid HorizontalAlignment="Stretch" Visibility="{Binding Visible, Converter={StaticResource BoolToVisibility}}">
                                              <StackPanel PreviewMouseDown="ActivatePalette">
