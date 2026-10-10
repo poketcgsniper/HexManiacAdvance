@@ -132,6 +132,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       public MapTutorialsViewModel MapTutorials { get; } = new();
 
+      /// <summary>Plays the animated buttons of the Goto dialog while it is shown (and the window is the active one). The window tells it when it is deactivated.</summary>
+      public ShortcutAnimationClock ShortcutClock { get; }
+
       private GotoControlViewModel gotoViewModel = new GotoControlViewModel(null, null, null, false);
       public GotoControlViewModel GotoViewModel {
          get => gotoViewModel;
@@ -524,6 +527,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Singletons = new Singletons(workDispatcher, copyLimit);
 
          this.workDispatcher = workDispatcher ?? InstantDispatch.Instance;
+         ShortcutClock = new ShortcutAnimationClock(this.workDispatcher);
          this.allowLoadingMetadata = allowLoadingMetadata;
          QuickEditsPokedex = utilities ?? new List<IQuickEditItem> {
             new UpdateDexConversionTable(),
@@ -1324,6 +1328,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var collection = CreateGotoShortcuts(GotoViewModel);
          if (collection != null) GotoViewModel.Shortcuts = new ObservableCollection<GotoShortcutViewModel>(collection);
          GotoViewModel.PropertyChanged += GotoPropertyChanged;
+         ShortcutClock.Attach(GotoViewModel); // lets go of the previous tab's dialog
          if (SelectedTab is IEditableViewPort vp1 && vp1.Model is BaseModel bm) {
             var vm = GotoViewModel;
             vp1.InitializationWorkload.ContinueWith(task => {
@@ -1376,7 +1381,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             }
             var anchor = model.GotoShortcuts[i].GotoAnchor;
             var text = model.GotoShortcuts[i].DisplayText;
-            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, sprite, anchor, text));
+            var shortcut = new GotoShortcutViewModel(gotoViewModel, viewPort, sprite, anchor, text);
+            ShortcutIcons.CustomizeMenuButton(model, shortcut, anchor, model.GotoShortcuts[i].ImageAnchor); // Pokemon: Cradily, Items: Poke Ball (drawn when first shown)
+            results.Add(shortcut);
          }
          AddEditorShortcuts(gotoViewModel, viewPort, results);
          return results;
@@ -1391,23 +1398,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (SoundTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Sound")) {
             results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Flute", "Bell", "Harp") ?? DrawIcon(NoteIcon), ViewPort.EditorGotoPrefix + "sound", "Sound"));
          }
+         // the pictures below are drawn when the button is first shown (ShortcutIcons), so preparing the dialog stays as light as it was
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
-            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Running", "Mach Bike", "Bike") ?? DrawIcon(GridIcon), HardcodeTablesModel.OverworldSprites, "OW Sprites"));
+            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, () => ShortcutIcons.BrendanStanding(model) ?? FindItemIcon(model, "Running", "Mach Bike", "Bike") ?? DrawIcon(GridIcon), HardcodeTablesModel.OverworldSprites, "OW Sprites"));
          }
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
-            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Wailmer Pail", "Pail", "Watering") ?? DrawIcon(FilmIcon), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles"));
+            var animTiles = new GotoShortcutViewModel(gotoViewModel, viewPort, () => FindItemIcon(model, "Wailmer Pail", "Pail", "Watering") ?? DrawIcon(FilmIcon), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles");
+            animTiles.SetAnimationSource(() => ShortcutIcons.FlowerAnimation(model)); // the animated flower; the old picture stays if the ROM has no flower
+            results.Add(animTiles);
          }
          if (CharacterCustomizationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Character Customization")) {
-            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindCharacterIcon(model) ?? DrawIcon(PersonIcon), ViewPort.EditorGotoPrefix + "customization", "Character\nCustomization"));
-         }
-      }
-
-      /// <summary>The boy standing in the overworld, as the picture of the Character Customization shortcut (null if the ROM doesn't have him).</summary>
-      private static IPixelViewModel FindCharacterIcon(IDataModel model) {
-         try {
-            return CharacterSprites.Load(model, CharacterRole.Male).DrawOverworld(0, null, null, null);
-         } catch (Exception) {
-            return null; // icons are decoration: never fail the shortcut list because of them
+            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, () => ShortcutIcons.CharacterFront(model) ?? ShortcutIcons.BrendanStanding(model) ?? DrawIcon(PersonIcon), ViewPort.EditorGotoPrefix + "customization", "Character\nCustomization"));
          }
       }
 

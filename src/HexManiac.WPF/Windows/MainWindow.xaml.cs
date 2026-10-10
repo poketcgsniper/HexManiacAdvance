@@ -394,7 +394,14 @@ namespace HavenSoft.HexManiac.WPF.Windows {
 
       protected override void OnActivated(EventArgs e) {
          base.OnActivated(e);
+         ViewModel.ShortcutClock.WindowActive = true;
          if (ViewModel.GotoViewModel.ControlVisible) FocusGotoBox();
+      }
+
+      // the animated buttons of the Goto dialog stand still while another window (or another program) is in front, or this window is minimized
+      protected override void OnDeactivated(EventArgs e) {
+         base.OnDeactivated(e);
+         if (ViewModel != null) ViewModel.ShortcutClock.WindowActive = false;
       }
 
       public static FrameworkElement GetChild(DependencyObject depObj, string name, object dataContext) {

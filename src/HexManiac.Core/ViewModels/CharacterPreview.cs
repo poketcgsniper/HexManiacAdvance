@@ -57,7 +57,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       public int Gender { get; }
       public string Title => Gender == CharacterRole.Male ? "Boy (Brendan)" : "Girl (May)";
-      public string OverworldName => Gender == CharacterRole.Male ? "BRENDAN_NORMAL" : "MAY_NORMAL";
+      public string OverworldName => overworldNameOverride ?? (Gender == CharacterRole.Male ? "BRENDAN_NORMAL" : "MAY_NORMAL");
       public string TrainerPicName => Gender == CharacterRole.Male ? "BRENDAN" : "MAY";
 
       public int OverworldIndex { get; private set; } = -1;
@@ -82,14 +82,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <summary>What went wrong, if some of the graphics could not be found.</summary>
       public IReadOnlyList<string> Problems { get; private set; } = Array.Empty<string>();
 
-      private CharacterSprites(int gender) => Gender = gender;
+      private readonly string overworldNameOverride;
+
+      private CharacterSprites(int gender, string overworldName = null) => (Gender, overworldNameOverride) = (gender, overworldName);
 
       public bool HasOverworld => OverworldFrames.Count > 0 && OverworldPalette != null;
       public bool HasFront => Front != null && FrontPalette != null;
       public bool HasBack => Back != null && BackPalette != null;
 
-      public static CharacterSprites Load(IDataModel model, int gender) {
-         var sprites = new CharacterSprites(gender);
+      /// <param name="overworldName">The name of the entry of the overworld sprite table to show, when the ROM doesn't call the player's sprite BRENDAN_NORMAL / MAY_NORMAL (the default).</param>
+      public static CharacterSprites Load(IDataModel model, int gender, string overworldName = null) {
+         var sprites = new CharacterSprites(gender, overworldName);
          var problems = new List<string>();
          try { sprites.LoadOverworld(model, problems); } catch (Exception e) { problems.Add($"The overworld sprite could not be read ({e.Message})."); }
          try { sprites.LoadTrainerPics(model, problems); } catch (Exception e) { problems.Add($"The trainer pictures could not be read ({e.Message})."); }

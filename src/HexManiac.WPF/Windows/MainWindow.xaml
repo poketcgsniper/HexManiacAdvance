@@ -748,7 +748,8 @@
                         <ItemsControl ItemsSource="{Binding GotoViewModel.Shortcuts}" HorizontalAlignment="Center">
                            <ItemsControl.ItemsPanel>
                               <ItemsPanelTemplate>
-                                 <WrapPanel/>
+                                 <!-- at most 5 buttons per row (ShortcutRows.DefaultMaxPerRow), every row centred; fewer per row when the window is narrower -->
+                                 <hsg3hv:CenteredRowsPanel MaxPerRow="5"/>
                               </ItemsPanelTemplate>
                            </ItemsControl.ItemsPanel>
                            <ItemsControl.ItemTemplate>
