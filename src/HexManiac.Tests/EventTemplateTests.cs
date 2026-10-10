@@ -1,5 +1,8 @@
 using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Code;
+using HavenSoft.HexManiac.Core.Models.Runs;
+using HavenSoft.HexManiac.Core.ViewModels.DataFormats;
+using HavenSoft.HexManiac.Core.ViewModels.Images;
 using HavenSoft.HexManiac.Core.ViewModels.Map;
 using HavenSoft.HexManiac.Core.ViewModels.Tools;
 using System;
@@ -267,6 +270,177 @@ namespace HavenSoft.HexManiac.Tests {
                Assert.True(line.width <= CodeBody.MaxEventTextWidth, $"{text}: {line.width}px");
             }
          }
+      }
+
+      #endregion
+
+      #region tutor
+
+      private const int TutorTableAddress = 0x100;
+      private const int ChooseMonForMoveTutorSpecial = 5;
+
+      /// <summary>
+      /// A model with room for texts and scripts, the tables the tutor template reads, and one object event to put the template in.
+      /// The expansion's trainers have another layout than the vanilla ones, and that is what tells the template which kind of ROM it is in.
+      /// </summary>
+      private (EventTemplate template, ObjectEventViewModel objectEvent, ScriptParser parser) TutorSetup(bool expansion, params int[] tutorMoves) {
+         Model.ExpandData(Token, 0x3FFF); // everything past the first 0x200 bytes is free space now
+         ViewPort.Edit("@000 ^objects[id. graphics: unused: x: y: elevation. moveType. range. trainerType. trainerRangeOrBerryID: script<> flag: unused:]2 ");
+         ViewPort.Edit($"@{TutorTableAddress:X} ^{HardcodeTablesModel.MoveTutors}[move:]{tutorMoves.Length} ");
+         for (int i = 0; i < tutorMoves.Length; i++) Model.WriteMultiByteValue(TutorTableAddress + i * 2, 2, Token, tutorMoves[i]);
+         if (expansion) ViewPort.Edit($"@140 ^{HardcodeTablesModel.TrainerTableName}[class. sprite. name\"\"16 pokemon<>]2 ");
+         Model.SetList(Token, "specials", Enumerable.Range(0, 10).Select(i => i == ChooseMonForMoveTutorSpecial ? "ChooseMonForMoveTutor" : i == 7 ? "DisableMsgBoxWalkaway" : "special" + i), null, null);
+         Model.SetList(Token, "FacingOptions", Enumerable.Range(0, 12).Select(i => "movement" + i), null, null); // the template makes the NPC stand still: movement type 8
+         Model.LoadMetadata(BaseModel.GetDefaultMetadatas().First()); // the script lists the scripts compare against, like script_compare
+
+         var parser = ViewPort.Tools.CodeTool.ScriptParser;
+         parser.RefreshGameHash(Model); // the commands of the game the test picked (SetGameCode)
+         var picture = new ReadonlyPixelViewModel(16, 32);
+         var template = new EventTemplate(InstantDispatch.Instance, Model, parser, new IPixelViewModel[] { picture });
+         var element = Model.GetTableModel("objects", () => Token)[0];
+         var objectEvent = new ObjectEventViewModel(null, address => { }, element, template, new IPixelViewModel[] { picture }, picture, null);
+         return (template, objectEvent, parser);
+      }
+
+      /// <summary>The bytes of the question that the script asks, up to and including the end of the text.</summary>
+      private List<byte> TutorQuestion(TutorEventContent content) {
+         var start = Model.ReadPointer(content.InfoPointer);
+         var length = PCSString.ReadString(Model, start, true);
+         return Enumerable.Range(start, length).Select(i => Model[i]).ToList();
+      }
+
+      [Fact]
+      public void TutorInfo_AsksToLearnTheMoveNamedInTheFirstBuffer() {
+         var expected = new List<byte>();
+         expected.AddRange(Model.TextConverter.Convert("Want to learn the move ", out _).Where(b => b != 0xFF));
+         expected.AddRange(new byte[] { 0xFD, 0x02 }); // [buffer1]: the name of the move, put there by the bufferattack command at the start of the script
+         expected.AddRange(Model.TextConverter.Convert("?", out _));
+
+         Assert.Equal(expected, Model.TextConverter.Convert(EventTemplate.TutorInfoText, out _));
+      }
+
+      [Fact]
+      public void TutorInfo_StaysOnOneLineWithALongMoveName() {
+         // the buffer counts as the widest name of the tests, 13 letters (the longest names of the vanilla games); the longest teachable move of the expansion has 16 and fills the box
+         var lines = Lines(Model.TextConverter.Convert(EventTemplate.TutorInfoText, out _));
+         Assert.Single(lines);
+         Assert.True(lines[0].width <= CodeBody.MaxEventTextWidth, $"{lines[0].width}px");
+      }
+
+      [Fact]
+      public void TutorTemplate_Expansion_NamesTheMoveItTeachesBeforeAsking() {
+         var (template, objectEvent, parser) = TutorSetup(expansion: true, 57, 19);
+
+         template.CreateTutor(objectEvent, Token);
+
+         var content = EventTemplate.GetTutorContent(Model, parser, objectEvent);
+         Assert.NotNull(content);
+         Assert.NotEqual(Pointer.NULL, content.MoveBufferAddress);
+         Assert.Equal(0x82, Model[content.MoveBufferAddress - 2]);                          // bufferattack ...
+         Assert.Equal(0, Model[content.MoveBufferAddress - 1]);                             // ... into the first buffer ([buffer1], FD 02 in a text) ...
+         Assert.Equal(57, Model.ReadMultiByteValue(content.MoveBufferAddress, 2));          // ... the move that the special is given
+         Assert.Equal(57, Model.ReadMultiByteValue(content.TutorAddress, 2));
+         Assert.True(content.MoveBufferAddress < content.InfoPointer, "the name is buffered before the question is asked");
+         var question = TutorQuestion(content);
+         var buffer = question.IndexOf(0xFD);
+         Assert.True(buffer > 0, "the question has a buffer in it");
+         Assert.Equal(Model[content.MoveBufferAddress - 1] + 2, question[buffer + 1]); // script buffer 0 is [buffer1], FD 02, buffer 1 is FD 03, ...
+         Assert.Equal(Model.TextConverter.Convert(EventTemplate.TutorInfoText, out _), TutorQuestion(content));
+      }
+
+      [Fact]
+      public void TutorTemplate_Vanilla_NamesTheMoveOfTheTutorTable() {
+         // the vanilla scripts hand the special the number of the tutor, the name needs the move itself
+         var (template, objectEvent, parser) = TutorSetup(expansion: false, 0x123, 0x2A);
+
+         template.CreateTutor(objectEvent, Token);
+
+         var content = EventTemplate.GetTutorContent(Model, parser, objectEvent);
+         Assert.NotNull(content);
+         Assert.Equal(0, Model.ReadMultiByteValue(content.TutorAddress, 2));
+         Assert.Equal(0x123, Model.ReadMultiByteValue(content.MoveBufferAddress, 2));
+         Assert.Equal(Model.TextConverter.Convert(EventTemplate.TutorInfoText, out _), TutorQuestion(content));
+      }
+
+      [Fact]
+      public void TutorTemplate_FireRed_NamesTheMoveToo() {
+         SetGameCode("BPRE0");
+         var (template, objectEvent, parser) = TutorSetup(expansion: false, 0x123, 0x2A);
+
+         template.CreateTutor(objectEvent, Token);
+
+         var content = EventTemplate.GetTutorContent(Model, parser, objectEvent);
+         Assert.NotNull(content);
+         Assert.Equal(0x123, Model.ReadMultiByteValue(content.MoveBufferAddress, 2));
+         Assert.Equal(Model.TextConverter.Convert(EventTemplate.TutorInfoText, out _), TutorQuestion(content));
+      }
+
+      [Theory]
+      [InlineData(false)]
+      [InlineData(true)]
+      public void TutorTemplate_ScriptFitsTheSpaceItLooksFor(bool fireRed) {
+         // FireRed/LeafGreen scripts have a few more commands around the messages
+         if (fireRed) SetGameCode("BPRE0");
+         var (template, objectEvent, parser) = TutorSetup(expansion: !fireRed, 57);
+
+         template.CreateTutor(objectEvent, Token);
+
+         var length = parser.FindLength(Model, objectEvent.ScriptAddress);
+         Assert.InRange(length, 90, EventTemplate.TutorScriptSpace);
+      }
+
+      [Fact]
+      public void TutorMove_ChosenInThePanel_IsWhatTheQuestionNames() {
+         var (template, objectEvent, parser) = TutorSetup(expansion: true, 57, 19);
+         template.CreateTutor(objectEvent, Token);
+         var content = EventTemplate.GetTutorContent(Model, parser, objectEvent);
+
+         Model.WriteMultiByteValue(content.TutorAddress, 2, Token, 19); // what the panel's list does
+         EventTemplate.UpdateTutorMoveName(Model, content, 19, Token);
+
+         Assert.Equal(19, Model.ReadMultiByteValue(content.MoveBufferAddress, 2));
+         Assert.Equal(Model.TextConverter.Convert(EventTemplate.TutorInfoText, out _), TutorQuestion(content)); // the text itself never changes: it names whatever is in the buffer
+      }
+
+      [Fact]
+      public void TutorMove_Vanilla_ChosenInThePanel_NamesTheMoveOfThatTutor() {
+         var (template, objectEvent, parser) = TutorSetup(expansion: false, 0x123, 0x2A, 0x77);
+         template.CreateTutor(objectEvent, Token);
+         var content = EventTemplate.GetTutorContent(Model, parser, objectEvent);
+
+         EventTemplate.UpdateTutorMoveName(Model, content, 2, Token);
+
+         Assert.Equal(0x77, Model.ReadMultiByteValue(content.MoveBufferAddress, 2));
+      }
+
+      [Fact]
+      public void TutorMove_TutorsWithoutABufferedMove_AreLeftAlone() {
+         // tutors made before the template named the move ask "Want to learn a cool move?": there is nothing to keep up to date
+         var (template, objectEvent, parser) = TutorSetup(expansion: true, 57, 19);
+         template.CreateTutor(objectEvent, Token);
+         var content = EventTemplate.GetTutorContent(Model, parser, objectEvent);
+         for (int i = 0; i < 4; i++) Model[content.MoveBufferAddress - 2 + i] = 0x00; // nop
+         var old = EventTemplate.GetTutorContent(Model, parser, objectEvent);
+         Assert.NotNull(old);
+         Assert.Equal(Pointer.NULL, old.MoveBufferAddress);
+         var before = Model.RawData.ToArray();
+
+         EventTemplate.UpdateTutorMoveName(Model, old, 19, Token);
+
+         Assert.Equal(before, Model.RawData);
+      }
+
+      [Fact]
+      public void TutorMove_BufferedFromAVariable_IsLeftAlone() {
+         // a hand-written script may buffer the content of the variable that the special reads: that follows the panel's choice on its own
+         var (template, objectEvent, parser) = TutorSetup(expansion: true, 57, 19);
+         template.CreateTutor(objectEvent, Token);
+         var content = EventTemplate.GetTutorContent(Model, parser, objectEvent);
+         Model.WriteMultiByteValue(content.MoveBufferAddress, 2, Token, 0x8005);
+
+         EventTemplate.UpdateTutorMoveName(Model, content, 19, Token);
+
+         Assert.Equal(0x8005, Model.ReadMultiByteValue(content.MoveBufferAddress, 2));
       }
 
       #endregion

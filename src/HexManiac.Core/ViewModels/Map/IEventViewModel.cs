@@ -1310,6 +1310,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          set {
             if (tutorContent.Value == null) return;
             element.Model.WriteMultiByteValue(tutorContent.Value.TutorAddress, 2, Token, value);
+            EventTemplate.UpdateTutorMoveName(element.Model, tutorContent.Value, value, Token); // the question names the move
          }
       }
 
