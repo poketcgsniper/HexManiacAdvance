@@ -26,6 +26,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public const string AllInstrumentsAnchor = VoicegroupCatalog.AnchorPrefix + "all_instruments";
       /// <summary>A GBA song has at most this many tracks (the engine's limit); a MIDI file that uses more channels cannot be a song.</summary>
       public const int MaxSongTracks = 16;
+      /// <summary>The music player for songs (gMPlayTable[0]) of the unmodified game plays this many tracks of a song, whatever the song has. Hacks change it: NUM_TRACKS_BGM in pokeemerald-expansion.</summary>
+      public const int UnmodifiedBgmTracks = 10;
       /// <summary>The extensions the insert-song dialog offers, in order. The first is the dialog's default filter, so .s files are listed right away; the MIDI files are in the same entry.</summary>
       public static readonly string[] SongFileExtensions = { "s", "mid", "midi", "asm", "inc", "txt" };
 
@@ -86,7 +88,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public bool TryImport(LoadedFile file, IFileSystem fileSystem) {
          if (file == null) return false;
          if (file.Name.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)) { ImportCryFromFile(file); return true; }
-         if (SongFileExtensions.Any(extension => file.Name.EndsWith("." + extension, StringComparison.OrdinalIgnoreCase))) { InsertSongFile(file); return true; }
+         // a dropped file is only taken when its type says it is a song: .asm, .inc and .txt files are offered by the insert dialog, but a dropped one may be anything
+         if (file.Name.EndsWith(".s", StringComparison.OrdinalIgnoreCase) || IsMidiFile(file.Name)) { InsertSongFile(file); return true; }
          return false;
       }
 
@@ -638,14 +641,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          public string Warning { get; init; }
       }
 
+      /// <summary>A reminder when a song has more tracks than the music player of the original game plays, or an empty string.</summary>
+      private static string TrackLimitNote(int tracks, int musicPlayer)
+         => musicPlayer == 0 && tracks > UnmodifiedBgmTracks
+            ? $" Note: it has {tracks} tracks, but the music player of the original game plays only {UnmodifiedBgmTracks}. A game with a bigger music player (NUM_TRACKS_BGM in pokeemerald-expansion) plays more."
+            : string.Empty;
+
       private void InsertSongFromFile(LoadedFile file) {
          var asNew = InsertAsNewSong;
+         var musicPlayer = asNew ? InsertMusicPlayer : selectedSong?.MusicPlayer ?? 0;
          var song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), asNew, true, null, null, out var error);
          if (song == null) { OnError?.Invoke(this, error); return; }
          if (song.Warning != null) OnError?.Invoke(this, song.Warning);
          if (song.TableMovedTo >= 0) OnMessage?.Invoke(this, $"The song table was moved to {song.TableMovedTo:X6} to make room.");
          Status = $"Inserted {file.Name} ({song.AssembledName}, {song.Size} bytes) at {song.Address:X6} as song {song.Index}.{song.VoicegroupMessage}";
-         OnMessage?.Invoke(this, Status + (asNew ? $" Play it with 'playbgm {song.Index}' / 'playse {song.Index}'." : string.Empty));
+         OnMessage?.Invoke(this, Status + (asNew ? $" Play it with 'playbgm {song.Index}' / 'playse {song.Index}'." : string.Empty) + TrackLimitNote(song.Tracks, musicPlayer));
       }
 
       /// <summary>
@@ -856,12 +866,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private void InsertMidiFromFile(LoadedFile file) {
          var asNew = InsertAsNewSong;
+         var musicPlayer = asNew ? InsertMusicPlayer : selectedSong?.MusicPlayer ?? 0;
          var song = ConvertAndInsertMidi(file, asNew, true, out var error);
          if (song == null) { OnError?.Invoke(this, error); return; }
          if (song.Warning != null) OnError?.Invoke(this, song.Warning);
          if (song.TableMovedTo >= 0) OnMessage?.Invoke(this, $"The song table was moved to {song.TableMovedTo:X6} to make room.");
          Status = $"Converted {file.Name}: {song.Tracks} track{(song.Tracks == 1 ? string.Empty : "s")}, {ToneData.FormatSize(song.Size)}; inserted as song {song.Index}{(string.IsNullOrEmpty(song.Name) ? string.Empty : " (" + song.Name + ")")} at {song.Address:X6}, instruments from {song.PlayedWith}.{song.VoicegroupMessage}";
-         OnMessage?.Invoke(this, Status + (asNew ? $" Play it with 'playbgm {song.Index}' / 'playse {song.Index}'." : string.Empty));
+         OnMessage?.Invoke(this, Status + (asNew ? $" Play it with 'playbgm {song.Index}' / 'playse {song.Index}'." : string.Empty) + TrackLimitNote(song.Tracks, musicPlayer));
       }
 
       /// <summary>Converts a MIDI file to song text with the settings of the tab and puts the song in the ROM, like a .s file.</summary>
@@ -924,7 +935,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (problems.Count > 0) OnError?.Invoke(this, string.Join(Environment.NewLine, problems.Take(6)) + (problems.Count > 6 ? $"{Environment.NewLine}... and {problems.Count - 6} more." : string.Empty));
          var tableEnd = model.GetTable(SongTable).Start;
          if (tableEnd != tableStart) OnMessage?.Invoke(this, $"The song table was moved to {tableEnd:X6} to make room.");
-         if (inserted.Count > 0) OnMessage?.Invoke(this, Status + " Undo (Ctrl+Z) takes them all back.");
+         var tooManyTracks = InsertMusicPlayer == 0 ? inserted.Count(song => song.Tracks > UnmodifiedBgmTracks) : 0;
+         var trackNote = tooManyTracks == 0 ? string.Empty : $" {tooManyTracks} of them have more than {UnmodifiedBgmTracks} tracks, the most the music player of the original game plays (a game with a bigger music player, NUM_TRACKS_BGM in pokeemerald-expansion, plays more).";
+         if (inserted.Count > 0) OnMessage?.Invoke(this, Status + " Undo (Ctrl+Z) takes them all back." + trackNote);
       }
 
       private void ExecuteGotoSong() {

@@ -958,6 +958,34 @@ t:
       }
 
       [Fact]
+      public void Tab_InsertSong_RemindsWhenTheMusicPlayerMayNotPlayAllTracks() {
+         Build();
+         var tab = CreateTab();
+         tab.InsertAsNewSong = true;
+         FileSystem.OpenFile = (description, options) => Loaded("ten.mid", MidiToAgbTests.Build(10));
+         tab.InsertSong.Execute(null);
+         Assert.DoesNotContain(tabMessages, message => message.Contains("music player"));
+
+         FileSystem.OpenFile = (description, options) => Loaded("twelve.mid", MidiToAgbTests.Build(12));
+         tab.InsertSong.Execute(null);
+         Assert.Single(tabMessages, message => message.Contains("it has 12 tracks, but the music player of the original game plays only 10"));
+
+         // the sound effect players have their own track counts: the note is only about the music player
+         tabMessages.Clear();
+         tab.InsertMusicPlayer = 1;
+         tab.InsertSong.Execute(null);
+         Assert.DoesNotContain(tabMessages, message => message.Contains("music player"));
+         Assert.Empty(tabErrors);
+
+         // a batch says it once
+         tabMessages.Clear();
+         tab.InsertMusicPlayer = 0;
+         FileSystem.OpenFiles = (description, options) => new[] { Loaded("a.mid", MidiToAgbTests.Build(11)), Loaded("b.mid", MidiToAgbTests.Build(3)), Loaded("c.mid", MidiToAgbTests.Build(14)) };
+         tab.InsertSong.Execute(null);
+         Assert.Single(tabMessages, message => message.Contains("2 of them have more than 10 tracks"));
+      }
+
+      [Fact]
       public void Tab_InsertMidi_PlaysWithTheChosenVoicegroup() {
          Build();
          var tab = CreateTab();
@@ -1135,11 +1163,14 @@ inserted:
          Assert.True(tab.TryImport(Loaded("dropped song.mid", Midi("single")), FileSystem));
          Assert.True(tab.TryImport(Loaded("other.MIDI", Midi("single")), FileSystem));
          Assert.False(tab.TryImport(Loaded("picture.png", new byte[4]), FileSystem));
+         Assert.False(tab.TryImport(Loaded("notes.txt", Encoding.ASCII.GetBytes("not a song")), FileSystem)); // only the file types that are songs
+         Assert.True(tab.TryImport(Loaded("plain.s", Encoding.UTF8.GetBytes(SongSource)), FileSystem)); // .s files too, as before
 
          Assert.Empty(tabErrors);
-         Assert.Equal(4, SongCount);
+         Assert.Equal(5, SongCount);
          Assert.Equal("dropped_song", tab.Songs[2].Name);
          Assert.Equal("other", tab.Songs[3].Name);
+         Assert.Equal("plain", tab.Songs[4].Name);
       }
 
       [Fact]
