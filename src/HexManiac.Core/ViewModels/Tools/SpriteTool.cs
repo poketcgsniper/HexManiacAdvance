@@ -1378,11 +1378,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
          var needWriteSpriteData = true;
          var matchPalettes = palettes;
+         var matchingPage = 0; // a sprite that has one page and shares a palette with several pages is matched against the first page
          if (spriteRun.Pages == 1 && palettes != null && palettes.Length > 1) matchPalettes = palettes.Take(1).ToArray();
-         var problemPixel = TryReorderPalettesFromMatchingSprite(matchPalettes, image, spriteRun.GetPixels(model, spritePage, -1));
+         var reorderAllowed = ReferenceEquals(matchPalettes, palettes) || usablePalPages.Contains(matchingPage);
+         var problemPixel = reorderAllowed ? TryReorderPalettesFromMatchingSprite(matchPalettes, image, spriteRun.GetPixels(model, spritePage, -1)) : new Point(-1, -1);
          if (problemPixel.X == PixelWidth && problemPixel.Y == PixelHeight) {
             // palette is reordered, everything matches up with the original data. No need to write sprite data.
             needWriteSpriteData = false;
+            if (!ReferenceEquals(matchPalettes, palettes)) palettes[matchingPage] = matchPalettes[0]; // the reordering was done on a copy of the first page: keep it
          } else if (noSpriteEdits) {
             // we were requested to not make sprite edits, return the pixel that prevents us from safely importing this way
             return problemPixel;

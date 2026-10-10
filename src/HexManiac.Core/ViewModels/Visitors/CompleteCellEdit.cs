@@ -522,7 +522,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Visitors {
          if (result >= Math.Pow(2L, integer.Length * 8)) ErrorText = $"Warning: number was too big to fit in the available space.";
          int runIndex = integer.Source - run.Start;
          if (run is LZRun lzRun) {
-            TryFixupLzRun(ref lzRun, runIndex + integer.Length); // this is before the first header: it cannot fail.
+            if (!TryFixupLzRun(ref lzRun, runIndex + integer.Length)) { // the new length can be refused: the sprite or palette needs a minimum number of bytes
+               Model.WriteMultiByteValue(integer.Source, integer.Length, CurrentChange, previousValue);
+               ErrorText = $"Could not change the decompressed length to {result} without making the compressed data invalid.";
+               return;
+            }
             run = lzRun;
          }
          if (run is ITableRun tableRun) {

@@ -264,6 +264,45 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(Shown(15), tool.PixelData[4 * tool.PixelWidth + 3]);
       }
 
+      /// <summary>An uncompressed 2x2 tile sprite that is alone on a palette with two pages: tiles 0-1 use color 1, tile 2 uses color 2, tile 3 uses color 3.</summary>
+      private void SetupSpriteOnTwoPagePalette() {
+         data = 0x1000.Range().Select(i => (byte)0xFF).ToArray();
+         for (int i = 0; i < 128; i++) data[SpriteA + i] = i < 64 ? (byte)0x11 : i < 96 ? (byte)0x22 : (byte)0x33;
+         for (int i = 0; i < 32; i++) {
+            data[Palette + i * 2] = (byte)Stored(i);
+            data[Palette + i * 2 + 1] = (byte)(Stored(i) >> 8);
+         }
+         model = new PokemonModel(data, null, BaseViewModelTestClass.Singletons);
+         var delta = new ModelDelta();
+         model.WritePointer(delta, 0x00, SpriteA);
+         model.WritePointer(delta, 0x04, Palette);
+         using (ModelCacheScope.CreateScope(model)) {
+            PokemonModel.ApplyAnchor(model, new ModelDelta(), 0, "^table1[sprite<`ucs4x2x2|table1`> pal<`ucp4:01`>]1");
+         }
+         viewPort = new ViewPort(string.Empty, model, InstantDispatch.Instance, BaseViewModelTestClass.Singletons) { Width = 16, Height = 16 };
+      }
+
+      [Fact]
+      public void TwoPagePalette_ImportPictureWhereTwoIndexesShareAColor_ShownPictureMatchesTheImport() {
+         SetupSpriteOnTwoPagePalette();
+         var tool = viewPort.Tools.SpriteTool;
+         viewPort.Tools.SelectedTool = tool;
+         tool.SpriteAddress = SpriteA;
+         var image = tool.PixelData.ToArray();
+         var width = tool.PixelWidth;
+         var shared = Shown(5);
+         for (int i = 0; i < image.Length; i++) if (image[i] == tool.PixelData[0] || image[i] == tool.PixelData[image.Length - 1 - 8 * width]) image[i] = shared; // the pixels of colors 1 and 2 now look the same
+         var fs = new StubFileSystem {
+            LoadImage = name => (image, width),
+            TryLoadIndexImage = (ref string name, out int[,] indexed, out IReadOnlyList<short> pal) => { name = "image.png"; (indexed, pal) = (null, null); return false; },
+            ShowOptions = (title, prompt, details, options) => 0,
+         };
+
+         tool.ImportPair.Execute(fs);
+
+         for (int i = 0; i < image.Length; i++) Assert.True((image[i] & 0x7FFF) == (tool.PixelData[i] & 0x7FFF), $"pixel {i % width},{i / width} shows {tool.PixelData[i]:X4}, the import has {image[i]:X4}");
+      }
+
       [Fact]
       public void SharedPalette_ImportChangedPicture_OnlyThatSpriteChanges() {
          Setup(2);

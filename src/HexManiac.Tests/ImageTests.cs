@@ -227,6 +227,40 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void EditDecompressedLength_TooShortForTheSpriteFormat_EditIsRefusedAndSpriteStaysValid() {
+         SetFullModel(0xFF);
+         var compressed = LZRun.Compress(Enumerable.Range(0, 128).Select(i => (byte)(i / 3)).ToArray(), 0, 128);
+         for (int i = 0; i < compressed.Count; i++) Model[i] = compressed[i];
+         Model.ObserveRunWritten(ViewPort.CurrentChange, new LzSpriteRun(new SpriteFormat(4, 2, 2, null), Model, 0)); // 2x2 tiles at 4 bits per pixel need 128 bytes
+         var before = Model.RawData.Take(compressed.Count).ToArray();
+         Assert.Equal(compressed.Count, Model.GetNextRun(0).Length);
+
+         ViewPort.Edit("@01 9 "); // 9 bytes cannot hold the picture
+
+         var run = Model.GetNextRun(0);
+         Assert.IsType<LzSpriteRun>(run);
+         Assert.Equal(compressed.Count, run.Length);
+         Assert.Equal(before, Model.RawData.Take(compressed.Count).ToArray());
+         for (int i = 0; i < run.Length; i++) Assert.IsAssignableFrom<IDataFormat>(run.CreateDataFormat(Model, run.Start + i));
+      }
+
+      [Fact]
+      public void EditDecompressedLength_TooShortForThePaletteFormat_EditIsRefusedAndPaletteStaysValid() {
+         SetFullModel(0xFF);
+         var compressed = LZRun.Compress(Enumerable.Range(0, 32).Select(i => (byte)(i * 5)).ToArray(), 0, 32);
+         for (int i = 0; i < compressed.Count; i++) Model[i] = compressed[i];
+         Model.ObserveRunWritten(ViewPort.CurrentChange, new LzPaletteRun(new PaletteFormat(4, 1), Model, 0)); // 16 colors need 32 bytes
+         var before = Model.RawData.Take(compressed.Count).ToArray();
+
+         ViewPort.Edit("@01 9 ");
+
+         var run = Model.GetNextRun(0);
+         Assert.IsType<LzPaletteRun>(run);
+         Assert.Equal(compressed.Count, run.Length);
+         Assert.Equal(before, Model.RawData.Take(compressed.Count).ToArray());
+      }
+
+      [Fact]
       public void CanEditLzDataViaStreamTool() {
          SetFullModel(0xFF);
          CreateLzRun(0,

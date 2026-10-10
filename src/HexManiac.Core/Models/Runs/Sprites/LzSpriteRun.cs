@@ -23,11 +23,13 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
       public LzSpriteRun(SpriteFormat spriteFormat, IDataModel data, int start, SortedSpan<int> sources = null)
          : base(data, start, spriteFormat.AllowLengthErrors, sources) {
          SpriteFormat = spriteFormat;
-         if (spriteFormat.ExpectedByteLength > DecompressedLength) InvalidateLength();
+         if (!IsValidDecompressedLength(DecompressedLength)) InvalidateLength();
          var hintContent = string.Empty;
          if (!string.IsNullOrEmpty(spriteFormat.PaletteHint)) hintContent += "|" + spriteFormat.PaletteHint;
          FormatString = $"`lzs{spriteFormat.BitsPerPixel}x{spriteFormat.TileWidth}x{spriteFormat.TileHeight}{hintContent}`";
       }
+
+      protected override bool IsValidDecompressedLength(int decompressedLength) => SpriteFormat.ExpectedByteLength <= decompressedLength;
 
       public static bool TryParseSpriteFormat(string pointerFormat, out SpriteFormat spriteFormat) {
          spriteFormat = default;

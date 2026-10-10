@@ -23,7 +23,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
       public LzPaletteRun(PaletteFormat paletteFormat, IDataModel data, int start, SortedSpan<int> sources = null)
          : base(data, start, allowLengthErrors: paletteFormat.AllowLengthErrors, sources) {
          PaletteFormat = paletteFormat;
-         if ((int)Math.Pow(2, paletteFormat.Bits) * 2 > DecompressedLength) InvalidateLength();
+         if (!IsValidDecompressedLength(DecompressedLength)) InvalidateLength();
          FormatString = $"`lzp{paletteFormat.Bits}`";
          if (paletteFormat.InitialBlankPages != 0) {
             FormatString = $"`lzp{paletteFormat.Bits}:";
@@ -31,6 +31,8 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
             FormatString += "`";
          }
       }
+
+      protected override bool IsValidDecompressedLength(int decompressedLength) => (int)Math.Pow(2, PaletteFormat.Bits) * 2 <= decompressedLength;
 
       public static bool TryParsePaletteFormat(string pointerFormat, out PaletteFormat paletteFormat) {
          paletteFormat = default;
