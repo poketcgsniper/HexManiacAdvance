@@ -359,11 +359,13 @@ For example scripts and tutorials, see the [HexManiacAdvance Wiki](https://githu
             if (matches.Count < 5) text.AppendLine($"{nl}  Only available in " + " ".Join(matches));
             foreach (var arg in line.Args) {
                if (arg is SilentMatchArg || arg.Name == "filler") continue;
-               if (!string.IsNullOrEmpty(arg.EnumTableName) && !arg.EnumTableName.StartsWith("|")) {
+               if (!string.IsNullOrEmpty(arg.EnumTableName) && !arg.EnumTableName.StartsWith("|") && !ScriptArg.IsNumberOrNameSpec(arg.EnumTableName)) {
                   text.AppendLine($"{nl}*  `{arg.Name}` is from {arg.EnumTableName}");
                } else if (arg.Type != ArgType.Pointer) {
                   if (string.IsNullOrEmpty(arg.EnumTableName)) {
                      text.AppendLine($"{nl}*  `{arg.Name}` is a number.");
+                  } else if (ScriptArg.IsNumberOrNameSpec(arg.EnumTableName)) {
+                     text.AppendLine($"{nl}*  `{arg.Name}` is a number (hex). If the ROM's metadata has a list named {ScriptArg.GetListName(arg.EnumTableName)}, the numbers in that list can also be written as names.");
                   } else {
                      text.AppendLine($"{nl}*  `{arg.Name}` is a number (hex).");
                   }
@@ -408,7 +410,7 @@ For example scripts and tutorials, see the [HexManiacAdvance Wiki](https://githu
                if (line.LineCode.Count > 1) text.Append(" " + line.LineCode[1]);
                foreach (var arg in line.Args) {
                   if (arg is SilentMatchArg || arg.Name == "filler") continue;
-                  if (!string.IsNullOrEmpty(arg.EnumTableName) && !arg.EnumTableName.StartsWith("|")) {
+                  if (!string.IsNullOrEmpty(arg.EnumTableName) && !arg.EnumTableName.StartsWith("|") && !ScriptArg.IsNumberOrNameSpec(arg.EnumTableName)) {
                      var model = ((IViewPort)editor[0]).Model;
                      var options = model.GetOptions(arg.EnumTableName);
                      if (options.Count == 0 && int.TryParse(arg.EnumTableName, out var count)) options = count.Range().Select(i => i.ToString()).ToList();

@@ -278,7 +278,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                keywordCache.Add(line.LineCommand);
                foreach (var arg in line.Args) {
                   if (string.IsNullOrEmpty(arg.EnumTableName)) continue;
-                  foreach (var option in model.GetOptions(arg.EnumTableName)) {
+                  foreach (var option in model.GetOptions(ScriptArg.GetOptionsName(arg.EnumTableName))) {
                      if (option == null) continue;
                      if ("<>!=?".Any(option.Contains)) continue;
                      constantCache.Add(option);
@@ -751,7 +751,20 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
          return options;
       }
 
+      /// <summary>An option from ReadOptions is the name, followed by the list's comment for that name (if the list has one).</summary>
+      public static string OptionName(string option) => option.Split('#')[0].Trim();
+
+      /// <summary>
+      /// The options to suggest for a token that is being typed, for an argument that takes values from the table or list 'tableName'.
+      /// 'list|h' arguments are numbers first: names from the list are only suggested once the token starts with a letter,
+      /// so typing a number (or nothing yet) never opens a list of names.
+      /// </summary>
+      /// <returns>null if the argument has no table or list, otherwise the options (empty if there is nothing to suggest).</returns>
       public List<string> ReadOptions(IDataModel model, string tableName, string token) {
+         if (ScriptArg.IsNumberOrNameSpec(tableName)) {
+            if (string.IsNullOrEmpty(token) || !(char.IsLetter(token[0]) || token[0] == '_')) return new List<string>();
+            tableName = ScriptArg.GetListName(tableName);
+         }
          if (!string.IsNullOrEmpty(tableName)) {
             var isList = model.TryGetList(tableName, out var list);
             var allOptions = model.GetOptions(tableName);
@@ -764,7 +777,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   options.Add(allOptions[i] + comment);
                }
             }
-            options = SortOptions(options, token, option => option).ToList();
+            options = SortOptions(options, token, OptionName).ToList(); // sort on the name, a long comment must not push an option down the list
 
             if (options.Count > 10) {
                while (options.Count > 9) options.RemoveAt(options.Count - 1);
@@ -843,7 +856,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   var token = tokens[tokens.Length - 1];
                   var options = ReadOptions(model, arg.EnumTableName, token);
                   if (options != null) {
-                     if (args.Count == tokens.Length - skipCount && options.Any(option => option == token)) return null; // perfect match on last token
+                     if (args.Count == tokens.Length - skipCount && options.Any(option => OptionName(option) == token)) return null; // perfect match on last token
                      return Environment.NewLine.Join(options);
                   }
                }
