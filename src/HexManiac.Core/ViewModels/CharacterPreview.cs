@@ -184,6 +184,64 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          return result;
       }
 
+      /// <summary>The list of pictures of an entry of the overworld sprite table (null if the entry or its list is gone).</summary>
+      public static ModelTable FindOverworldSpriteList(IDataModel model, int overworldIndex) {
+         var table = model.GetTableModel(HardcodeTablesModel.OverworldSprites);
+         if (table == null || overworldIndex < 0 || overworldIndex >= table.Count) return null;
+         var list = table[overworldIndex].GetSubTable("data")?[0]?.GetSubTable("sprites");
+         return list == null || list.Count == 0 || list.Run == null ? null : list;
+      }
+
+      /// <summary>True for a sheet that lists only its first picture and stores the others right after it (the player's walking sheet).</summary>
+      public static bool IsRelativeSheet(IDataModel model, ModelTable spriteList) => model[spriteList.Run.Start + 6] != 0;
+
+      /// <summary>Where a frame of an uncompressed sheet is stored: its first byte, its length, and how many bits one pixel takes. False if the frame is not plain uncompressed pictures.</summary>
+      public static bool TryLocateOverworldFrame(IDataModel model, ModelTable spriteList, int frame, out int start, out int length, out int bitsPerPixel) {
+         (start, length, bitsPerPixel) = (-1, 0, 4);
+         if (spriteList == null || frame < 0) return false;
+         var listStart = spriteList.Run.Start;
+         if (!IsRelativeSheet(model, spriteList)) {
+            if (frame >= spriteList.Count) return false;
+            if (model.GetNextRun(spriteList[frame].GetAddress("sprite")) is not SpriteRun run) return false;
+            return TryLocate(run, run.Start, 0, out start, out length, out bitsPerPixel);
+         }
+         var firstAddress = model.ReadPointer(listStart);
+         if (firstAddress < 0 || firstAddress >= model.Count) return false;
+         if (model.GetNextRun(firstAddress) is not SpriteRun first) return false;
+         var frameBytes = model.ReadMultiByteValue(listStart + 4, 2);
+         return TryLocate(first, firstAddress, frame, out start, out length, out bitsPerPixel, frameBytes) && start + length <= model.Count;
+      }
+
+      private static bool TryLocate(SpriteRun run, int firstAddress, int frame, out int start, out int length, out int bitsPerPixel, int frameBytes = 0) {
+         var format = run.SpriteFormat;
+         bitsPerPixel = format.BitsPerPixel;
+         length = format.TileWidth * format.TileHeight * 8 * format.BitsPerPixel;
+         if (frameBytes > 0) length = frameBytes;
+         start = firstAddress + length * frame;
+         return length > 0;
+      }
+
+      /// <summary>
+      /// Stores the picture of one frame of an uncompressed sheet (the shape ReadOverworldFrame returns). The bytes of a sheet can have been taken for a pointer or other data:
+      /// whatever HexManiac saw in them is cleared first so that nothing keeps pointing from the middle of the picture. Returns false if the frame can't be stored this way.
+      /// </summary>
+      public static bool WriteOverworldFrame(IDataModel model, ModelDelta token, ModelTable spriteList, int frame, int[,] pixels) {
+         if (pixels == null || !TryLocateOverworldFrame(model, spriteList, frame, out var start, out var length, out var bitsPerPixel)) return false;
+         var data = new byte[length];
+         SpriteRun.SetPixels(data, 0, pixels, bitsPerPixel);
+         var address = start;
+         while (address < start + length) {
+            var run = model.GetNextRun(address);
+            if (run.Start >= start + length) break;
+            if (run is PointerRun) model.ClearFormat(token, run.Start, run.Length);
+            address = Math.Max(address + 1, run.Start + Math.Max(1, run.Length));
+         }
+         for (int i = 0; i < data.Length; i++) {
+            if (model[start + i] != data[i]) token.ChangeData(model, start + i, data[i]);
+         }
+         return true;
+      }
+
       #endregion
 
       #region Trainer front and back pictures
@@ -252,5 +310,87 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public IPixelViewModel DrawBack(CharacterRole role, CharacterColorRow skin, CharacterColorRow clothes) => HasBack ? Draw(Back, Painted(BackPalette, role, skin, clothes)) : null;
 
       #endregion
+   }
+
+   /// <summary>
+   /// Every picture of the boy's or the girl's overworld sprite sheet (standing, walking, running...) for one image editor tab: the dots on the left of the editor choose the picture.
+   /// The sheet is found again by its place in the overworld sprite table every time, so the source keeps working while tables move. Only plain (uncompressed) sheets are handled this way.
+   /// </summary>
+   public class OverworldSheetFrameSource : IImageFrameSource {
+      /// <summary>A sheet that stores its pictures one after the other lists only the first: the game's player sheets have 18 pictures (the walking set and the running set).</summary>
+      public const int PlayerSheetFrames = 18;
+      private static readonly string[] PlayerFrameNotes = {
+         "standing, facing down", "standing, facing up", "standing, facing left (flipped for right)",
+         "walking down", "walking down", "walking up", "walking up", "walking left (flipped for right)", "walking left (flipped for right)",
+      };
+
+      private readonly IDataModel model;
+      private readonly int overworldIndex;
+      private readonly int firstAddress;
+      private readonly int frameCount;
+
+      public string Title { get; }
+
+      public OverworldSheetFrameSource(IDataModel model, int overworldIndex, string title) {
+         (this.model, this.overworldIndex, Title) = (model, overworldIndex, title);
+         var list = List;
+         firstAddress = list == null ? -1 : model.ReadPointer(list.Run.Start);
+         frameCount = CountFrames(list);
+      }
+
+      private ModelTable List => CharacterSprites.FindOverworldSpriteList(model, overworldIndex);
+
+      private int CountFrames(ModelTable list) {
+         if (list == null) return 0;
+         return CharacterSprites.IsRelativeSheet(model, list) ? PlayerSheetFrames : list.Count;
+      }
+
+      public bool IsValid {
+         get {
+            var list = List;
+            return list != null && model.ReadPointer(list.Run.Start) == firstAddress && CountFrames(list) == frameCount;
+         }
+      }
+
+      public int FrameCount => frameCount;
+
+      /// <summary>True if every picture of the sheet is plain uncompressed pictures this source can read and store (compressed sheets are edited one picture at a time instead).</summary>
+      public bool Prepare() {
+         var list = List;
+         if (list == null || frameCount < 1) return false;
+         for (int frame = 0; frame < frameCount; frame++) {
+            if (!CharacterSprites.TryLocateOverworldFrame(model, list, frame, out _, out _, out _)) return false;
+         }
+         return model.GetNextRun(firstAddress) is ISpriteRun;
+      }
+
+      public string FrameNote(int frame) {
+         var list = List;
+         if (list == null || !CharacterSprites.IsRelativeSheet(model, list)) return string.Empty;
+         if (frame >= 0 && frame < PlayerFrameNotes.Length) return PlayerFrameNotes[frame];
+         return frame < PlayerSheetFrames ? "running" : string.Empty;
+      }
+
+      /// <summary>The sheet's own list points at its first picture (which knows the palette); a list with a picture for each frame points at each.</summary>
+      public int SpritePointer(int frame) {
+         var list = List;
+         if (list == null) return -1;
+         if (CharacterSprites.IsRelativeSheet(model, list) || frame < 0) return list.Run.Start;
+         return list[Math.Min(frame, list.Count - 1)].Start;
+      }
+
+      public bool CanChooseWidth => false;
+      public int DefaultWidthTiles => 2;
+      public int MaxWidthTiles => 2;
+
+      public int[,] ReadFrame(int frame, int widthTiles) {
+         var list = List;
+         return (list == null ? null : CharacterSprites.ReadOverworldFrame(model, list, frame)) ?? new int[16, 32];
+      }
+
+      public void WriteFrame(ModelDelta token, int frame, int widthTiles, int[,] pixels) {
+         var list = List;
+         if (list != null) CharacterSprites.WriteOverworldFrame(model, token, list, frame, pixels);
+      }
    }
 }

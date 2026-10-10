@@ -164,10 +164,10 @@ namespace HavenSoft.HexManiac.Core.Models {
       public string DescribeSlots() {
          string List(IReadOnlyList<int> slots, string[] names) {
             var parts = new List<string>();
-            for (int i = 0; i < slots.Count && i < names.Length; i++) if (slots[i] >= 0) parts.Add($"{names[i]} slot {slots[i]}");
+            for (int i = 0; i < slots.Count && i < names.Length; i++) if (slots[i] >= 0) parts.Add($"{names[i]} slot {slots[i]}" + (names[i] == "outline" ? " (made from the shadow)" : string.Empty));
             return string.Join(", ", parts);
          }
-         var skin = List(Skin, new[] { "main", "shadow", "highlight", "outline (made from the shadow)" });
+         var skin = List(Skin, new[] { "main", "shadow", "highlight", "outline" });
          var clothes = List(Clothes, new[] { "main", "shadow", "highlight" });
          var sentences = new List<string>();
          if (skin.Length > 0) sentences.Add($"Skin: {skin}.");

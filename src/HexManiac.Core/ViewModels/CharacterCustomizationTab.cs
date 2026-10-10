@@ -656,9 +656,44 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          viewPort.OpenImageEditorTab(address, 0, 0);
       }
 
+      // one image editor tab per sheet: its dots choose the picture (standing, walking, running...)
+      private readonly Dictionary<int, ImageEditorViewModel> sheetEditors = new();
+
       internal void EditOverworldSprites(CharacterPreviewPanel panel) {
-         if (panel.Sprites == null || panel.Sprites.OverworldAddress < 0) { OnError?.Invoke(this, $"The {panel.Title} overworld sprites were not found in this ROM."); return; }
-         EditPicture(panel.Sprites.OverworldAddress, $"{panel.Title} overworld sprites");
+         var sprites = panel.Sprites;
+         if (sprites == null || sprites.OverworldAddress < 0) { OnError?.Invoke(this, $"The {panel.Title} overworld sprites were not found in this ROM."); return; }
+         CompleteEdit();
+         var editor = GetSheetEditor(sprites);
+         if (editor != null) {
+            var args = new TabChangeRequestedEventArgs(editor);
+            RequestTabChange?.Invoke(this, args);
+            if (args.RequestAccepted) return;
+         }
+         // the pictures can't be shown together (the sheet is compressed or in an unusual shape): edit the first picture on its own
+         EditPicture(sprites.OverworldAddress, $"{panel.Title} overworld sprites");
+      }
+
+      /// <summary>The image editor with every picture of the sheet: the one already open for this character if there is one, otherwise a new one (null if the sheet can't be shown that way).</summary>
+      private ImageEditorViewModel GetSheetEditor(CharacterSprites sprites) {
+         var key = sprites.Gender;
+         if (sheetEditors.TryGetValue(key, out var existing)) {
+            existing.Frame = 0; // an editor whose sheet is gone closes itself here
+            if (sheetEditors.TryGetValue(key, out existing)) return existing;
+         }
+         var source = new OverworldSheetFrameSource(model, sprites.OverworldIndex, $"{sprites.Title} overworld sprites");
+         if (!source.Prepare()) return null;
+         // registering the sheet's formats is not something undo should be able to take back from under the editor
+         viewPort.ChangeHistory.ChangeCompleted();
+         ImageEditorViewModel editor;
+         try {
+            editor = viewPort.CreateImageEditor(model.ReadPointer(source.SpritePointer(0)), 0, 0);
+         } catch (ImageEditorViewModelCreationException) {
+            return null;
+         }
+         editor.SetFrameSource(source, 0);
+         sheetEditors[key] = editor;
+         editor.Closed += (sender, e) => { if (sheetEditors.TryGetValue(key, out var current) && current == editor) sheetEditors.Remove(key); };
+         return editor;
       }
 
       #endregion

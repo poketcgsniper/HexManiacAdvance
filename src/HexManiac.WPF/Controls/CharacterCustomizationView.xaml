@@ -279,7 +279,7 @@
                   <ItemsControl.ItemTemplate>
                      <DataTemplate>
                         <WrapPanel Orientation="Horizontal">
-                           <Button Content="{Binding EditOverworldText}" Command="{Binding EditOverworld}" Style="{StaticResource ToolButton}" ToolTip="Open the overworld sprite in the image editor"/>
+                           <Button Content="{Binding EditOverworldText}" Command="{Binding EditOverworld}" Style="{StaticResource ToolButton}" ToolTip="Open every picture of the walking sheet (standing, walking, running) in the image editor: the dots on its left choose the picture"/>
                            <Button Content="{Binding EditFrontText}" Command="{Binding EditFront}" Style="{StaticResource ToolButton}" ToolTip="Open the trainer front picture in the image editor"/>
                            <Button Content="{Binding EditBackText}" Command="{Binding EditBack}" Style="{StaticResource ToolButton}" ToolTip="Open the back picture in the image editor"/>
                         </WrapPanel>
