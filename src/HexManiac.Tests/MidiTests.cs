@@ -1216,6 +1216,123 @@ inserted:
             Assert.True(peak <= 1.0, $"program {program} is too loud (peak {peak})");
          }
       }
+
+      /// <summary>A format 0 file with a tempo, one quarter note and a marker with the given text one beat later.</summary>
+      private static byte[] MidiWithMarker(string marker)
+         => FromHex("4D546864000000060000000101E0" + "4D54726B00000019" + "00FF510307A120" + "00903C64" + "8360803C00" + "00FF0601" + ((int)marker[0]).ToString("X2") + "00FF2F00");
+
+      [Fact]
+      public void Tab_InsertMidi_WithALoopEndBeforeAnyLoopStart_IsRefused_NotJumpingIntoTheVoicegroup() {
+         // mid2agb writes "GOTO song_1_B0" for a ']' marker with no '[' before it, and nothing defines that label.
+         // The label must not be taken for the voicegroup: the song would jump into the instruments and play garbage.
+         Build();
+         var tab = CreateTab();
+         tab.InsertAsNewSong = true;
+         var before = Model.RawData.ToArray();
+         FileSystem.OpenFile = (description, options) => Loaded("loop.mid", MidiWithMarker("]"));
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Single(tabErrors);
+         Assert.Contains("loop_1_B0", tabErrors[0]);
+         Assert.Contains("']'", tabErrors[0]);
+         Assert.Equal(2, SongCount);
+         Assert.Equal(before, Model.RawData); // nothing was written
+
+         // with a start marker first it is a loop like any other
+         FileSystem.OpenFile = (description, options) => Loaded("loop.mid", MidiWithMarker("["));
+         tab.InsertSong.Execute(null);
+         Assert.Single(tabErrors); // no new error
+         Assert.Equal(3, SongCount);
+      }
+
+      [Fact]
+      public void Tab_InsertSong_RefusesAJumpToALabelThatDoesNotExist_EvenIfItIsTheOnlyUnknownSymbol() {
+         Build();
+         var tab = CreateTab();
+         tab.InsertAsNewSong = true;
+         var before = Model.RawData.ToArray();
+         // the voicegroup is a number here, so "nowhere" is the only symbol the file leaves open
+         var source = SongSource.Replace("t_grp, voicegroup000", "t_grp, 0x08000400").Replace("\t.byte\tFINE", "\t.byte\tGOTO\n\t .word\tnowhere\n\t.byte\tFINE");
+         FileSystem.OpenFile = (description, options) => Loaded("broken.s", Encoding.UTF8.GetBytes(source));
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Single(tabErrors);
+         Assert.Contains("nowhere", tabErrors[0]);
+         Assert.Equal(2, SongCount);
+         Assert.Equal(before, Model.RawData);
+      }
+
+      [Fact]
+      public void Tab_InsertSong_StillTakesAVoicegroupSymbolWithAnUnusualName() {
+         Build();
+         var tab = CreateTab();
+         tab.InsertAsNewSong = true;
+         tab.SelectedSong = tab.Songs[0];
+         FileSystem.OpenFile = (description, options) => Loaded("odd.s", Encoding.UTF8.GetBytes(SongSource.Replace("voicegroup000", "my_instruments")));
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Empty(tabErrors);
+         Assert.Equal(3, SongCount);
+         Assert.Equal(Other, tab.Songs[2].Header.Voicegroup); // the voicegroup selected with the song
+      }
+
+      [Fact]
+      public void Tab_InsertSong_ReadsFilesSavedWithAByteOrderMark_OrAsUtf16()
+         // Notepad saves "UTF-8" files with a byte order mark and "Unicode" files as UTF-16; Windows PowerShell's > writes UTF-16
+         => InsertEncodedSongs(new[] {
+            new byte[] { 0xEF, 0xBB, 0xBF }.Concat(Encoding.UTF8.GetBytes(SongSource)).ToArray(),
+            Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(SongSource)).ToArray(),
+            Encoding.BigEndianUnicode.GetPreamble().Concat(Encoding.BigEndianUnicode.GetBytes(SongSource)).ToArray(),
+            Encoding.Unicode.GetBytes(SongSource), // UTF-16 without the mark
+            Encoding.UTF8.GetBytes(SongSource.Replace("\n", "\r\n")), // and plain text with Windows line ends
+         });
+
+      [Fact]
+      public void Tab_ExportSong_OfASongWithoutTracks_SavesNoFile_AndSaysWhy() {
+         Build();
+         var tab = CreateTab();
+         tab.InsertAsNewSong = true;
+         tab.SelectedSong = tab.Songs[0];
+         var empty = SongSource.Replace("\t.byte\t1\n", "\t.byte\t0\n").Replace("\t.word\tt_1\n", "");
+         FileSystem.OpenFile = (description, options) => Loaded("empty.s", Encoding.UTF8.GetBytes(empty));
+         tab.InsertSong.Execute(null);
+         Assert.Empty(tabErrors);
+         Assert.Equal(0, tab.Songs[2].Header.TrackCount);
+
+         var saved = new List<LoadedFile>();
+         FileSystem.RequestNewName = (name, description, extensions) => "empty_export.s";
+         FileSystem.Save = file => { saved.Add(file); return true; };
+         tab.SelectedSong = tab.Songs[2];
+         tab.ExportSong.Execute(null);
+
+         // a file that only says '(no tracks)' could not be put back in a ROM
+         Assert.Empty(saved);
+         Assert.Single(tabErrors);
+         Assert.Contains("no tracks", tabErrors[0]);
+      }
+
+      private void InsertEncodedSongs(byte[][] files) {
+         Build();
+         var tab = CreateTab();
+         tab.InsertAsNewSong = true;
+         tab.SelectedSong = tab.Songs[0];
+         for (int i = 0; i < files.Length; i++) {
+            var data = files[i];
+            FileSystem.OpenFile = (description, options) => Loaded("encoded" + i + ".s", data);
+            tab.InsertSong.Execute(null);
+            Assert.Empty(tabErrors);
+            Assert.Equal(3 + i, SongCount);
+            Assert.Equal(1, tab.Songs[2 + i].Header.TrackCount);
+         }
+         // the same files in one batch
+         FileSystem.OpenFiles = (description, options) => files.Select((data, i) => Loaded("batch" + i + ".s", data)).ToArray();
+         tab.InsertSong.Execute(null);
+         Assert.Empty(tabErrors);
+         Assert.Equal(2 + 2 * files.Length, SongCount);
+      }
    }
 
 }

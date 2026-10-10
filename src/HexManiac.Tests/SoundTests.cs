@@ -204,5 +204,121 @@ t:
          Assert.True(Rms(12, 15) < 0.01, "nothing should play after the notes end");
          Assert.True(left.Length < 4 * M4aRenderer.OutputRate, "the render should stop soon after FINE");
       }
+
+      [Fact]
+      public void Assembler_NamesTheSymbolOfTheHeadersVoicegroup_NotTheOtherUnknownSymbols() {
+         // the usual voicegroup symbol, used through an .equ
+         Assert.Equal("voicegroup000", SongAssembler.Assemble(Song, 0x08100000).VoicegroupSymbol);
+         // a name nobody would guess
+         Assert.Equal("my_instruments", SongAssembler.Assemble(Song.Replace("voicegroup000", "my_instruments"), 0x08100000).VoicegroupSymbol);
+         // the voicegroup is a number and a GOTO goes to a label that does not exist: the label is not the voicegroup
+         var jump = Song.Replace("test_grp, voicegroup000", "test_grp, 0x08000500").Replace("\t.byte\tFINE", "\t.byte\tGOTO\n\t .word\tnowhere\n\t.byte\tFINE");
+         var result = SongAssembler.Assemble(jump, 0x08100000);
+         Assert.False(result.Success);
+         Assert.Equal(new[] { "nowhere" }, result.UndefinedSymbols);
+         Assert.Null(result.VoicegroupSymbol);
+         // a song that assembles has no unknown symbol to name
+         Assert.Null(SongAssembler.Assemble(Song, 0x08100000, new System.Collections.Generic.Dictionary<string, int> { ["voicegroup000"] = 0x08200000 }).VoicegroupSymbol);
+      }
+
+      /// <summary>Puts a song made from text in the small test ROM, reads it back as text, assembles that, and returns both byte arrays.</summary>
+      private (byte[] original, byte[] again, string text) RoundTripAt(string source) {
+         var result = SongAssembler.Assemble(source, 0x08000100, new System.Collections.Generic.Dictionary<string, int> { ["voicegroup000"] = 0x08000300 });
+         Assert.True(result.Success, result.Error);
+         for (int i = 0; i < result.Bytes.Length; i++) Model[0x100 + i] = result.Bytes[i];
+         Assert.True(SongHeader.TryRead(Model, 0x100 + result.HeaderOffset, out var header));
+         var text = new SongDisassembler(Model).Disassemble(header, "again");
+         var again = SongAssembler.Assemble(text, 0x08000100);
+         Assert.True(again.Success, again.Error + Environment.NewLine + text);
+         return (result.Bytes, again.Bytes, text);
+      }
+
+      private static string TrackSource(string commands) => @"
+	.include ""MPlayDef.s""
+	.equ	t_grp, voicegroup000
+t_1:
+" + commands + @"
+	.align	2
+t:
+	.byte	1
+	.byte	0
+	.byte	0
+	.byte	0
+	.word	t_grp
+	.word	t_1
+	.end
+";
+
+      [Fact]
+      public void Disassembler_KeepsTheAddressOfARepeatThatCountsZero() {
+         // REPT 0 is an endless jump, but the four bytes of the address are still there: the song has to read back as it was
+         var (original, again, text) = RoundTripAt(TrackSource(@"
+	.byte	VOL , 100
+t_1_B1:
+	.byte	N12 , Cn3 , v100
+	.byte	W12
+	.byte	REPT , 3
+	 .word	t_1_B1
+	.byte	REPT , 0
+	 .word	t_1_B2
+t_1_B2:
+	.byte	W12
+	.byte	FINE"));
+         Assert.Equal(original, again);
+         Assert.Contains("REPT , 3", text);
+         Assert.Contains("REPT , 0", text);
+      }
+
+      [Fact]
+      public void Disassembler_WritesAGateTimeThatMid2AgbHasNoNameForAsANumber() {
+         // mid2agb only uses gtp1 to gtp3, other programs write any number from 0 to 127 after the velocity
+         var (original, again, text) = RoundTripAt(TrackSource(@"
+	.byte	N04 , Cn3 , v100 , gtp2
+	.byte	W12
+	.byte	N04 , Dn3 , v100 , 9
+	.byte	W12
+	.byte	N04 , En3 , v100 , 0
+	.byte	W12
+	.byte	N04 , Fn3 , v100 , 127
+	.byte	W12
+	.byte	FINE"));
+         Assert.Equal(original, again);
+         Assert.Contains("gtp2", text);
+         Assert.DoesNotContain("gtp9", text);
+         Assert.DoesNotContain("gtp0", text);
+         Assert.DoesNotContain("gtp127", text);
+      }
+
+      [Fact]
+      public void Disassembler_RoundTripsEveryCommandTheEngineHas() {
+         var (original, again, text) = RoundTripAt(TrackSource(@"
+	.byte	VOL , 100
+	.byte	KEYSH , t_key + 3
+	.byte	PRIO , 7
+	.byte	TEMPO , 90
+	.byte	VOICE , 5
+	.byte	PAN , c_v+20
+	.byte	BEND , c_v-10
+	.byte	BENDR , 12
+	.byte	LFOS , 20
+	.byte	LFODL , 10
+	.byte	MOD , 30
+	.byte	MODT , mod_tre
+	.byte	TUNE , c_v+5
+	.byte	XCMD , xIECV , 40
+	.byte	XCMD , xIECL , 10
+	.byte	MEMACC , mem_set , 1 , 5
+	.byte	TIE , En3 , v090
+	.byte	W48
+	.byte	EOT , En3
+	.byte	PATT
+	 .word	t_1_000
+	.byte	FINE
+t_1_000:
+	.byte	N06 , Gn3 , v127 , gtp2
+	.byte	W24
+	.byte	PEND").Replace("t_key + 3", "3"));
+         Assert.Equal(original, again);
+      }
    }
 }

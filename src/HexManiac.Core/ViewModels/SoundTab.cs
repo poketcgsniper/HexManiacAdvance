@@ -605,6 +605,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private void ExecuteExportSong() {
          if (selectedSong?.Header == null) return;
+         // the text shown for a song without tracks is a label, not a song: a file with it could not be put back in a ROM
+         if (selectedSong.Header.TrackCount == 0) { OnError?.Invoke(this, "This song has no tracks, so there is nothing to export."); return; }
          var defaultName = string.IsNullOrEmpty(selectedSong.Name) ? $"song_{selectedSong.Index}" : selectedSong.Name.ToLower();
          var name = fileSystem.RequestNewName(defaultName + ".s", SongFileDescription, "s");
          if (string.IsNullOrEmpty(name)) return;
@@ -651,7 +653,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private void InsertSongFromFile(LoadedFile file) {
          var asNew = InsertAsNewSong;
          var musicPlayer = asNew ? InsertMusicPlayer : selectedSong?.MusicPlayer ?? 0;
-         var song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), asNew, true, null, null, out var error);
+         var song = InsertSongFromText(DecodeSongText(file.Contents), SongNameFromFileName(file.Name), asNew, true, null, null, out var error);
          if (song == null) { OnError?.Invoke(this, error); return; }
          if (song.Warning != null) OnError?.Invoke(this, song.Warning);
          if (song.TableMovedTo >= 0) OnMessage?.Invoke(this, $"The song table was moved to {song.TableMovedTo:X6} to make room.");
@@ -683,13 +685,19 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             if (voicegroup == null) { error = $"The song needs these symbols, but no voicegroup is selected: {string.Join(", ", result.UndefinedSymbols)}"; return null; }
             var unresolved = new List<string>();
             foreach (var symbol in result.UndefinedSymbols) {
-               if (symbol.Contains("grp", StringComparison.OrdinalIgnoreCase) || symbol.Contains("voice", StringComparison.OrdinalIgnoreCase) || result.UndefinedSymbols.Count == 1) {
+               // the voicegroup is the symbol of the header's voicegroup word, or one that is named like a voicegroup. Any other open symbol (the label of a GOTO or PATT,
+               // for example) is a mistake in the file: binding it to the voicegroup would make the song jump into the instruments.
+               if (symbol == result.VoicegroupSymbol || symbol.Contains("grp", StringComparison.OrdinalIgnoreCase) || symbol.Contains("voice", StringComparison.OrdinalIgnoreCase)) {
                   externals[symbol] = voicegroup.Address + BaseModel.PointerOffset;
                } else {
                   unresolved.Add(symbol);
                }
             }
-            if (unresolved.Count > 0) { error = $"The song uses symbols this ROM doesn't know: {string.Join(", ", unresolved)}"; return null; }
+            if (unresolved.Count > 0) {
+               error = $"The song uses symbols this ROM doesn't know: {string.Join(", ", unresolved)}.";
+               if (unresolved.Any(symbol => symbol.EndsWith("_B0", StringComparison.Ordinal))) error += " mid2agb writes a jump to a loop that does not exist when a MIDI file has a loop end marker ']' before any loop start marker '['.";
+               return null;
+            }
             result = SongAssembler.Assemble(text, 0, externals);
          }
          if (!result.Success) { error = "Could not assemble the song: " + result.Error; return null; }
@@ -763,6 +771,23 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       #region Song names
+
+      /// <summary>
+      /// The text of a song file. Editors save text in different ways: UTF-8 with or without a byte order mark (Notepad adds one), and UTF-16 (the "Unicode" of Notepad, and the > of Windows PowerShell).
+      /// The assembler needs plain text, so the mark is taken off and UTF-16 is converted. Anything else is read as UTF-8.
+      /// </summary>
+      public static string DecodeSongText(byte[] contents) {
+         if (contents == null || contents.Length == 0) return string.Empty;
+         if (contents.Length >= 3 && contents[0] == 0xEF && contents[1] == 0xBB && contents[2] == 0xBF) return Encoding.UTF8.GetString(contents, 3, contents.Length - 3);
+         if (contents.Length >= 2 && contents[0] == 0xFF && contents[1] == 0xFE) return Encoding.Unicode.GetString(contents, 2, contents.Length - 2);
+         if (contents.Length >= 2 && contents[0] == 0xFE && contents[1] == 0xFF) return Encoding.BigEndianUnicode.GetString(contents, 2, contents.Length - 2);
+         // UTF-16 without a mark: plain text then has a zero in every other byte
+         int zerosEven = 0, zerosOdd = 0, length = Math.Min(contents.Length, 256);
+         for (int i = 0; i < length; i++) if (contents[i] == 0) { if (i % 2 == 0) zerosEven++; else zerosOdd++; }
+         if (length >= 8 && zerosOdd * 4 >= length && zerosEven == 0) return Encoding.Unicode.GetString(contents);
+         if (length >= 8 && zerosEven * 4 >= length && zerosOdd == 0) return Encoding.BigEndianUnicode.GetString(contents);
+         return Encoding.UTF8.GetString(contents);
+      }
 
       /// <summary>
       /// Turns a file name (with or without its folder and extension) into something that works as a song name: the song name list can't hold spaces
@@ -931,7 +956,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             InsertedSong song;
             string error;
             if (IsMidiFile(file.Name)) song = ConvertAndInsertMidi(file, true, false, out error);
-            else song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), true, false, null, null, out error);
+            else song = InsertSongFromText(DecodeSongText(file.Contents), SongNameFromFileName(file.Name), true, false, null, null, out error);
             if (song == null) failures.Add($"{file.Name}: {error}");
             else {
                inserted.Add(song);

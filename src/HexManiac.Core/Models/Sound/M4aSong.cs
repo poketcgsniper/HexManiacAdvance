@@ -223,7 +223,7 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          } else if (effectiveCommand == 0xB2 || effectiveCommand == 0xB3) {
             length += 4;
          } else if (effectiveCommand == 0xB5) {
-            length += argStart < model.Count && model[argStart] == 0 ? 1 : 5;
+            length += 5; // the count, then the address. A count of 0 is an endless jump (ply_rept goes on like GOTO): the address is there as well
          } else if (effectiveCommand == 0xB9) {
             length += 3;
          } else if (effectiveCommand == 0xCD) {
@@ -254,7 +254,7 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
             if (effective >= 0xCF) {
                if (argCount > 0) args.Add(MPlayDef.NoteName(model[argStart]));
                if (argCount > 1) args.Add($"v{model[argStart + 1]:D3}");
-               if (argCount > 2) args.Add($"gtp{model[argStart + 2]}");
+               if (argCount > 2) args.Add(model[argStart + 2] >= 1 && model[argStart + 2] <= 3 ? $"gtp{model[argStart + 2]}" : model[argStart + 2].ToString()); // mid2agb only has names for 1 to 3, other programs use any number up to 127
             } else if (effective == 0xCE) {
                if (argCount > 0) args.Add(MPlayDef.NoteName(model[argStart]));
             } else if (effective == 0xB2 || effective == 0xB3) {
@@ -264,15 +264,11 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
                address += length;
                continue;
             } else if (effective == 0xB5) {
-               if (argCount == 1) {
-                  args.Add("0");
-               } else {
-                  var target = model.ReadPointer(argStart + 1);
-                  text.AppendLine($"\t.byte\t{commandName} , {model[argStart]}");
-                  text.AppendLine($"\t .word\t{(labels.TryGetValue(target, out var targetLabel) ? targetLabel : $"0x{target + BaseModel.PointerOffset:X8}")}");
-                  address += length;
-                  continue;
-               }
+               var target = model.ReadPointer(argStart + 1);
+               text.AppendLine($"\t.byte\t{commandName} , {model[argStart]}");
+               text.AppendLine($"\t .word\t{(labels.TryGetValue(target, out var targetLabel) ? targetLabel : $"0x{target + BaseModel.PointerOffset:X8}")}");
+               address += length;
+               continue;
             } else if (effective == 0xB9) {
                for (int i = 0; i < argCount; i++) args.Add(model[argStart + i].ToString());
             } else if (effective == 0xCD) {
@@ -322,6 +318,8 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          public IReadOnlyList<string> UndefinedSymbols { get; init; } = Array.Empty<string>();
          public bool Success => Error == null;
          public string SongName { get; init; }
+         /// <summary>The symbol in the header's voicegroup word when the file leaves it undefined (the symbol the Sound tab replaces by the chosen voicegroup), otherwise null.</summary>
+         public string VoicegroupSymbol { get; init; }
       }
 
       private class Item {
@@ -428,7 +426,7 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
             }
          }
          if (undefined.Count > 0) {
-            return new Result { Error = $"Undefined symbol(s): {string.Join(", ", undefined.OrderBy(s => s))}", UndefinedSymbols = undefined.OrderBy(s => s).ToList() };
+            return new Result { Error = $"Undefined symbol(s): {string.Join(", ", undefined.OrderBy(s => s))}", UndefinedSymbols = undefined.OrderBy(s => s).ToList(), VoicegroupSymbol = FindVoicegroupSymbol() };
          }
 
          // find the song header: the .global label (last one defined in the file)
@@ -446,6 +444,23 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
       }
 
       private Result Fail(string error) => new Result { Error = error };
+
+      /// <summary>
+      /// The undefined symbol that the voicegroup word of the song header (the word after the four bytes of counts, priority and reverb) is made of, following .equ aliases:
+      /// "test_grp" in ".word test_grp" with ".equ test_grp, voicegroup000" gives "voicegroup000". Null if that word is a number or a defined symbol, or the header is not found.
+      /// </summary>
+      private string FindVoicegroupSymbol() {
+         var songName = globals.LastOrDefault(labels.ContainsKey) ?? labels.OrderByDescending(pair => pair.Value).Select(pair => pair.Key).FirstOrDefault();
+         if (songName == null) return null;
+         var word = labels[songName] + 4;
+         foreach (var item in items) {
+            if (item.Directive != ".word" || word < item.Offset || word >= item.Offset + item.Size || (word - item.Offset) % 4 != 0) continue;
+            var name = item.Args[(word - item.Offset) / 4].Trim();
+            for (int hops = 0; hops < 16 && equates.TryGetValue(name, out var expression) && IsSymbol(expression.Trim()); hops++) name = expression.Trim();
+            return undefined.Contains(name) ? name : null;
+         }
+         return null;
+      }
 
       private static string StripComment(string line) {
          var sb = new StringBuilder();
