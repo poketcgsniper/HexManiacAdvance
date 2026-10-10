@@ -189,6 +189,7 @@ namespace HavenSoft.HexManiac.Core.Models {
             RawData[index] = value;
             ClearCacheScope();
             changes.Add(index);
+            ModelEditStamp.Bump();
          }
       }
 
@@ -287,6 +288,7 @@ namespace HavenSoft.HexManiac.Core.Models {
          InitializationWorkload.Wait();
          RawData = newData;
          ClearCacheScope(); // all of the data is new, so nothing cached from the old data is valid
+         ModelEditStamp.Bump();
       }
 
       public abstract void ObserveAnchorWritten(ModelDelta changeToken, string anchorName, IFormattedRun run);

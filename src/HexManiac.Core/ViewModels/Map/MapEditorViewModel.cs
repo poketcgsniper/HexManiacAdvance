@@ -46,7 +46,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
    /// <summary>
    /// Represents the entire map editor tab, with all visible controls, maps, edit boxes, etc
    /// </summary>
-   public class MapEditorViewModel : ViewModelCore, ITabContent {
+   public class MapEditorViewModel : ViewModelCore, ITabContent, IRefreshOnSelect {
       private readonly Format format;
       private readonly IFileSystem fileSystem;
       private readonly IEditableViewPort viewPort;
@@ -335,6 +335,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          primaryMap.ClearCaches(); // needs to reset first, so the width/height is correct when calculating everything else
          UpdatePrimaryMap(primaryMap);
          foreach (var map in VisibleMaps.Except(primaryMap)) map.ClearCaches();
+         refreshedAtEdit = ModelEditStamp.Current;
+      }
+
+      private long refreshedAtEdit = -1; // the edit counter (ModelEditStamp) when Refresh last finished
+
+      /// <summary>
+      /// The tab was selected. The maps are drawn from the model, so they can only be out of date if some model was edited since the last Refresh:
+      /// if not, they are left alone (redrawing every visible map is most of the cost of selecting a map tab).
+      /// </summary>
+      public void RefreshOnSelect() {
+         if (primaryMap == null || refreshedAtEdit != ModelEditStamp.Current || !viewPort.Model.InitializationWorkload.IsCompleted) Refresh();
       }
       public bool TryImport(LoadedFile file, IFileSystem fileSystem) => false;
 

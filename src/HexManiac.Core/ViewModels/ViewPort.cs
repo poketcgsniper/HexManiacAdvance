@@ -29,7 +29,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
    /// <summary>
    /// A range of visible data that should be displayed.
    /// </summary>
-   public class ViewPort : ViewModelCore, IEditableViewPort {
+   public class ViewPort : ViewModelCore, IEditableViewPort, IRefreshOnSelect {
       public const string AllHexCharacters = "0123456789ABCDEFabcdef";
       public const char GotoMarker = '@';
       public const char DirectiveMarker = '.'; // for things like .thumb, .align, etc. Directives always start with a single dot and contain no further dots until they contain a space.
@@ -1443,19 +1443,32 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          return run.Start <= search && run is ITableRun;
       }
 
-      public void Refresh() {
+      public void Refresh() => Refresh(onlyIfChanged: false);
+
+      /// <summary>
+      /// The tab was selected: the same as <see cref="Refresh()"/>, except that the expensive parts (the table tool's content, the cache of the model) are left alone
+      /// if no model was edited since this tab last looked, because then they can't be out of date. See <see cref="ModelEditStamp"/>.
+      /// </summary>
+      public void RefreshOnSelect() => Refresh(onlyIfChanged: true);
+
+      private long refreshedAtEdit = -1; // the edit counter (ModelEditStamp) when Refresh last finished
+
+      private void Refresh(bool onlyIfChanged) {
+         var modelUnchanged = onlyIfChanged && refreshedAtEdit == ModelEditStamp.Current && Model.InitializationWorkload.IsCompleted;
          scroll.DataLength = Model.Count;
-         Model.ClearCacheScope();
+         if (!modelUnchanged) Model.ClearCacheScope();
          var selectionStart = ConvertViewPointToAddress(SelectionStart);
          if (selectionStart > Model.Count + 1) SelectionStart = ConvertAddressToViewPoint(Model.Count + 1);
          scroll.UpdateHeaders();
          if (Model.GetNextRun(selectionStart) is ITableRun table && table.Start <= selectionStart) scroll.SetTableMode(table.Start, table.Length);
          RefreshBackingData();
-         Tools?.TableTool.DataForCurrentRunChanged();
+         if (onlyIfChanged) Tools?.TableTool.DataForCurrentRunChangedIfNeeded();
+         else Tools?.TableTool.DataForCurrentRunChanged();
          Tools?.SpriteTool.DataForCurrentRunChanged();
          Tools?.CodeTool.ClearConstantCache();
          Tools?.CodeTool.DataForCurrentRunChanged();
          UpdateAnchorText(ConvertViewPointToAddress(SelectionStart));
+         refreshedAtEdit = ModelEditStamp.Current;
       }
 
       public void Cut(IFileSystem filesystem) {

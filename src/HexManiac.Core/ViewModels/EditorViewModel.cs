@@ -494,7 +494,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                   findNext.RaiseCanExecuteChanged();
                   runFile.RaiseCanExecuteChanged();
                   duplicateCurrentTab.RaiseCanExecuteChanged();
-                  if (selectedIndex >= 0 && selectedIndex < tabs.Count) tabs[selectedIndex].Refresh();
+                  if (selectedIndex >= 0 && selectedIndex < tabs.Count) TabSwitch.Refresh(tabs[selectedIndex]);
                   UpdateGotoViewModel();
                   foreach (var edit in QuickEditsPokedex.Concat(QuickEditsExpansion).Concat(QuickEditsMisc)) edit.TabChanged();
                   NotifyPropertyChanged(nameof(SelectedTab));

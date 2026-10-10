@@ -373,7 +373,32 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          dataChangedTimer.DelayCall(TimeSpan.FromSeconds(.6), DataForCurrentRunChangedCore);
       }
 
+      /// <summary>
+      /// What the content of the tool was built from. Building the content for a table element is the expensive part of selecting a tab (sprites, palettes, long lists of choices),
+      /// so when a tab is selected again and nothing it was built from has changed, the content can stay as it is: see <see cref="IsUpToDate"/>.
+      /// </summary>
+      private (long edits, int address, bool spartanMode, string fieldFilter, bool useMultiFieldFeature)? builtFrom;
+      private (long edits, int address, bool spartanMode, string fieldFilter, bool useMultiFieldFeature) CurrentSignature => (ModelEditStamp.Current, address, viewPort.SpartanMode, fieldFilter, useMultiFieldFeature);
+
+      /// <summary>
+      /// True if the content is exactly what <see cref="DataForCurrentRunChanged"/> would build right now:
+      /// the last build finished, and since then no model has been edited and the cursor, the filter and the modes are the same.
+      /// A model that is still loading is never up to date, because it finds its tables in the background without going through the edit counter.
+      /// </summary>
+      public bool IsUpToDate => builtFrom.HasValue && model.InitializationWorkload.IsCompleted && builtFrom.Value == CurrentSignature;
+
+      /// <summary>The same as <see cref="DataForCurrentRunChanged"/>, but does nothing if the content is already <see cref="IsUpToDate"/>.</summary>
+      public void DataForCurrentRunChangedIfNeeded() {
+         if (!IsUpToDate) DataForCurrentRunChanged();
+      }
+
       private void DataForCurrentRunChangedCore() {
+         builtFrom = null; // until this build is over, the content is not trustworthy
+         DataForCurrentRunChangedBuild();
+         if (model.InitializationWorkload.IsCompleted) builtFrom = CurrentSignature;
+      }
+
+      private void DataForCurrentRunChangedBuild() {
          foreach (var group in Groups) {
             foreach (var member in group.Members) ClearHandlers(member);
          }
