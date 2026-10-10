@@ -902,6 +902,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             Priority = MidiPriority,
             Reverb = MidiReverbOn ? MidiReverb : -1,
             ExactGateTime = MidiExactGateTime,
+            AddMissingVoice = true, // a channel without a program change would be silent in the game
          };
       }
 

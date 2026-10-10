@@ -30,6 +30,11 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
       public bool ExactGateTime { get; set; }
       /// <summary>Repeated bars become patterns (PATT/PEND). -N turns this off.</summary>
       public bool Compression { get; set; } = true;
+      /// <summary>
+      /// Not an option of mid2agb. A channel that plays notes without ever choosing a program plays program 0 in MIDI, but in the game a track that has not chosen
+      /// an instrument starts on an empty square wave and is silent. When this is on, such a channel gets a "VOICE 0" at its start. Off, the output is mid2agb's.
+      /// </summary>
+      public bool AddMissingVoice { get; set; }
 
       public MidiToAgbOptions Clone() => (MidiToAgbOptions)MemberwiseClone();
 
@@ -872,6 +877,14 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          }
       }
 
+      /// <summary>Gives a channel whose first note comes before any program change the instrument MIDI plays then: program 0 (see MidiToAgbOptions.AddMissingVoice).</summary>
+      private void AddMissingVoice() {
+         var firstNote = int.MaxValue;
+         foreach (var e in trackEvents) if (e.Type == EventType.Note && e.Param2 > 0 && e.Time < firstNote) firstNote = e.Time;
+         if (trackEvents.Any(e => e.Type == EventType.InstrumentChange && e.Time <= firstNote)) return;
+         trackEvents.Insert(0, new Event { Time = 0, Type = EventType.InstrumentChange, Param1 = 0, Param2 = 0 });
+      }
+
       private List<(int midiTrack, int channel)> ReadMidiTracks() {
          var channels = new List<(int, int)>();
          long trackHeaderStart = 14;
@@ -889,6 +902,7 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
                ReadTrackEvents();
 
                if (minNote != 0xFF) {
+                  if (options.AddMissingVoice) AddMissingVoice();
                   var events = MergeEvents();
 
                   // we don't need TEMPO in anything but track 1

@@ -1314,6 +1314,55 @@ inserted:
          Assert.Contains("no tracks", tabErrors[0]);
       }
 
+      /// <summary>The 'single' file with a program change (instrument 5) before the first note.</summary>
+      private static byte[] MidiWithProgram(int program)
+         => FromHex("4D546864000000060000000101E04D54726B0000002000FF510307A12000C0" + program.ToString("X2") + "00903C648360803C000090405A836080400000FF2F00");
+
+      [Fact]
+      public void Tab_InsertMidi_WithoutAProgramChange_PlaysInstrumentZero_NotASilentTrack() {
+         // MIDI plays program 0 on a channel that never chooses one. In the game a track that has not chosen an instrument starts on an empty square wave: it is silent.
+         Build();
+         var tab = CreateTab();
+         tab.InsertAsNewSong = true;
+         FileSystem.OpenFile = (description, options) => Loaded("plain.mid", Midi("single"));
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Empty(tabErrors);
+         var text = tab.SongText;
+         var voice = text.IndexOf("VOICE", StringComparison.Ordinal);
+         Assert.True(voice >= 0, "no VOICE command in " + text);
+         Assert.True(voice < text.IndexOf("Cn3", StringComparison.Ordinal), "the instrument is chosen after the first note");
+         Assert.Equal(voice, text.LastIndexOf("VOICE", StringComparison.Ordinal));
+      }
+
+      [Fact]
+      public void Tab_InsertMidi_WithAProgramChange_KeepsIt_AndAddsNoOther() {
+         Build();
+         var tab = CreateTab();
+         tab.InsertAsNewSong = true;
+         FileSystem.OpenFile = (description, options) => Loaded("piano.mid", MidiWithProgram(5));
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Empty(tabErrors);
+         var text = tab.SongText;
+         var voice = text.IndexOf("VOICE", StringComparison.Ordinal);
+         Assert.True(voice >= 0);
+         Assert.Equal(voice, text.LastIndexOf("VOICE", StringComparison.Ordinal));
+         Assert.Contains("VOICE , 5", text.Replace("\t", " ").Replace("  ", " "));
+      }
+
+      [Fact]
+      public void MidiToAgb_AddMissingVoice_IsOffUnlessAsked_LikeMid2Agb() {
+         var plain = MidiToAgb.Convert(Midi("single"), new MidiToAgbOptions());
+         Assert.DoesNotContain("VOICE", plain.Text);
+         var added = MidiToAgb.Convert(Midi("single"), new MidiToAgbOptions { AddMissingVoice = true });
+         Assert.Contains("VOICE", added.Text);
+         var withProgram = MidiToAgb.Convert(MidiWithProgram(0), new MidiToAgbOptions { AddMissingVoice = true });
+         Assert.Equal(1, withProgram.Text.Split("VOICE").Length - 1);
+      }
+
       private void InsertEncodedSongs(byte[][] files) {
          Build();
          var tab = CreateTab();
