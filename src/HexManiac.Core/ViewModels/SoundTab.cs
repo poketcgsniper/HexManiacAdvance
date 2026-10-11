@@ -439,8 +439,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             OnError?.Invoke(this, "This ROM's metadata has no song name list to update.");
             return;
          }
-         // list entries can't have spaces: they are used as identifiers in dropdowns and scripts
-         var cleaned = (name ?? string.Empty).Trim().Replace(' ', '_');
+         var cleaned = CleanSongName(name);
          var index = selectedSong.Index;
          if (string.IsNullOrEmpty(cleaned)) cleaned = index.ToString();
          var names = list.ToList();
@@ -457,6 +456,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          NotifyPropertyChanged(nameof(SelectedSongName));
          UpdateSongDetails();
          Status = $"Song {index} is now called {cleaned}.";
+      }
+
+      /// <summary>
+      /// List entries can't have spaces (they are used as identifiers in dropdowns and scripts), and the metadata file they are saved in is made of lines:
+      /// '#' starts a comment there, ''' ends a value, and a line break would split the name (and move every name after it by one).
+      /// </summary>
+      public static string CleanSongName(string name) {
+         var cleaned = new string((name ?? string.Empty).Trim().Select(c => c == ' ' || c == '#' || char.IsControl(c) ? '_' : c).ToArray());
+         while (cleaned.Contains("'''")) cleaned = cleaned.Replace("'''", "''");
+         return cleaned;
       }
 
       private string songDetails = string.Empty;
@@ -503,6 +512,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// instead of being tied to a voicegroup other songs share.
       /// </summary>
       public bool InsertWithNewVoicegroup { get => insertWithNewVoicegroup; set => Set(ref insertWithNewVoicegroup, value); }
+
+      /// <summary>The size the ROM may grow to when a song needs more room than the free space has: the size of a GBA cartridge.</summary>
+      public int MaxRomLength { get; set; } = VoicegroupEditor.MaxRomLength;
 
       private int insertMusicPlayer;
       public int InsertMusicPlayer { get => insertMusicPlayer; set => Set(ref insertMusicPlayer, value.LimitToRange(0, 3)); }
@@ -605,6 +617,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private void ExecuteExportSong() {
          if (selectedSong?.Header == null) return;
+         // the text shown for a song without tracks is a label, not a song: a file with it could not be put back in a ROM
+         if (selectedSong.Header.TrackCount == 0) { OnError?.Invoke(this, "This song has no tracks, so there is nothing to export."); return; }
          var defaultName = string.IsNullOrEmpty(selectedSong.Name) ? $"song_{selectedSong.Index}" : selectedSong.Name.ToLower();
          var name = fileSystem.RequestNewName(defaultName + ".s", SongFileDescription, "s");
          if (string.IsNullOrEmpty(name)) return;
@@ -651,7 +665,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private void InsertSongFromFile(LoadedFile file) {
          var asNew = InsertAsNewSong;
          var musicPlayer = asNew ? InsertMusicPlayer : selectedSong?.MusicPlayer ?? 0;
-         var song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), asNew, true, null, null, out var error);
+         var song = InsertSongFromText(DecodeSongText(file.Contents), SongNameFromFileName(file.Name), asNew, true, null, null, out var error);
          if (song == null) { OnError?.Invoke(this, error); return; }
          if (song.Warning != null) OnError?.Invoke(this, song.Warning);
          if (song.TableMovedTo >= 0) OnMessage?.Invoke(this, $"The song table was moved to {song.TableMovedTo:X6} to make room.");
@@ -678,21 +692,30 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          // first pass: find out how big the song is and which symbols it needs
          var externals = new Dictionary<string, int>();
          if (knownSymbols != null) foreach (var pair in knownSymbols) externals[pair.Key] = pair.Value;
-         var result = SongAssembler.Assemble(text, 0, externals);
+         var result = SongAssembler.Assemble(text, BaseModel.PointerOffset, externals);
          if (!result.Success && result.UndefinedSymbols.Count > 0) {
             if (voicegroup == null) { error = $"The song needs these symbols, but no voicegroup is selected: {string.Join(", ", result.UndefinedSymbols)}"; return null; }
             var unresolved = new List<string>();
             foreach (var symbol in result.UndefinedSymbols) {
-               if (symbol.Contains("grp", StringComparison.OrdinalIgnoreCase) || symbol.Contains("voice", StringComparison.OrdinalIgnoreCase) || result.UndefinedSymbols.Count == 1) {
+               // the voicegroup is the symbol of the header's voicegroup word, or one that is named like a voicegroup. Any other open symbol (the label of a GOTO or PATT,
+               // for example) is a mistake in the file: binding it to the voicegroup would make the song jump into the instruments.
+               if (symbol == result.VoicegroupSymbol || symbol.Contains("grp", StringComparison.OrdinalIgnoreCase) || symbol.Contains("voice", StringComparison.OrdinalIgnoreCase)) {
                   externals[symbol] = voicegroup.Address + BaseModel.PointerOffset;
                } else {
                   unresolved.Add(symbol);
                }
             }
-            if (unresolved.Count > 0) { error = $"The song uses symbols this ROM doesn't know: {string.Join(", ", unresolved)}"; return null; }
-            result = SongAssembler.Assemble(text, 0, externals);
+            if (unresolved.Count > 0) {
+               error = $"The song uses symbols this ROM doesn't know: {string.Join(", ", unresolved)}.";
+               if (unresolved.Any(symbol => symbol.EndsWith("_B0", StringComparison.Ordinal))) error += " mid2agb writes a jump to a loop that does not exist when a MIDI file has a loop end marker ']' before any loop start marker '['.";
+               return null;
+            }
+            result = SongAssembler.Assemble(text, BaseModel.PointerOffset, externals);
          }
          if (!result.Success) { error = "Could not assemble the song: " + result.Error; return null; }
+         if (!HeaderPointsIntoTheRom(result, !OverrideVoicegroup, out var pointerError)) { error = pointerError; return null; }
+
+         if (asNewSong && !HasRoomForNewEntry(table, result.Bytes.Length, out var roomError)) { error = roomError; return null; }
 
          // second pass: assemble for real at the chosen address
          var token = viewPort.CurrentChange;
@@ -762,7 +785,64 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          };
       }
 
+      /// <summary>
+      /// A number in the song header (a track or voicegroup pointer written as a number, not a label) is written as it is. If it isn't an address of this ROM
+      /// the song can't be played, and the Sound tab can't read its header: -1 or 0 from a typing mistake, for example. Refused before anything is written.
+      /// </summary>
+      private bool HeaderPointsIntoTheRom(SongAssembler.Result assembled, bool checkVoicegroup, out string error) {
+         error = null;
+         var bytes = assembled.Bytes;
+         var limit = (long)model.Count + bytes.Length;
+         int trackCount = bytes[assembled.HeaderOffset];
+         for (int i = -1; i < trackCount; i++) {
+            if (i == -1 && (!checkVoicegroup || trackCount == 0)) continue;
+            var at = assembled.HeaderOffset + (i == -1 ? 4 : 8 + 4 * i);
+            var pointer = (long)(uint)(bytes[at] | bytes[at + 1] << 8 | bytes[at + 2] << 16 | bytes[at + 3] << 24) - BaseModel.PointerOffset;
+            if (pointer >= 0 && pointer < limit) continue;
+            error = $"The song header's {(i == -1 ? "voicegroup" : "track " + (i + 1))} points to 0x{pointer + BaseModel.PointerOffset:X8}, which is no address of this ROM, so the game could not play it.";
+            return false;
+         }
+         return true;
+      }
+
+      /// <summary>
+      /// Whether a new song of 'songBytes' and one more entry in the song table fit. The table grows where it is when the bytes behind it are free, otherwise it moves
+      /// to free space, and without any it would make the ROM grow: past the size of a cartridge, if the song already used the last room. This is asked before anything is written.
+      /// </summary>
+      private bool HasRoomForNewEntry(ITableRun table, int songBytes, out string error) {
+         error = null;
+         var grownLength = table.Length + table.ElementLength;
+         var tableEnd = table.Start + table.Length;
+         var behind = model.GetNextRun(tableEnd);
+         if (behind.Start == tableEnd && behind.Length == 0) behind = model.GetNextRun(tableEnd + 1);
+         var staysInPlace = tableEnd + table.ElementLength < model.Count && behind.Start >= tableEnd + table.ElementLength;
+         for (int i = tableEnd; staysInPlace && i < tableEnd + table.ElementLength; i++) staysInPlace = model[i] == 0xFF || model[i] == 0x00;
+         if (staysInPlace) return true; // only the song needs room, and allocating it says when there is none
+         if (model.FindFreeSpace(model.FreeSpaceStart, songBytes + 4 + grownLength + 0x80) >= 0) return true;
+         var end = (model.Count + 3) / 4 * 4;
+         if (end + songBytes + 4 + grownLength + 4 <= MaxRomLength) return true; // the ROM can grow for both
+         error = $"There is no room for the song ({songBytes} bytes) and the bigger song table ({grownLength} bytes), and the ROM can't grow past {(MaxRomLength % 0x100000 == 0 ? (MaxRomLength / 0x100000) + "MB" : MaxRomLength + " bytes")}.";
+         return false;
+      }
+
       #region Song names
+
+      /// <summary>
+      /// The text of a song file. Editors save text in different ways: UTF-8 with or without a byte order mark (Notepad adds one), and UTF-16 (the "Unicode" of Notepad, and the > of Windows PowerShell).
+      /// The assembler needs plain text, so the mark is taken off and UTF-16 is converted. Anything else is read as UTF-8.
+      /// </summary>
+      public static string DecodeSongText(byte[] contents) {
+         if (contents == null || contents.Length == 0) return string.Empty;
+         if (contents.Length >= 3 && contents[0] == 0xEF && contents[1] == 0xBB && contents[2] == 0xBF) return Encoding.UTF8.GetString(contents, 3, contents.Length - 3);
+         if (contents.Length >= 2 && contents[0] == 0xFF && contents[1] == 0xFE) return Encoding.Unicode.GetString(contents, 2, contents.Length - 2);
+         if (contents.Length >= 2 && contents[0] == 0xFE && contents[1] == 0xFF) return Encoding.BigEndianUnicode.GetString(contents, 2, contents.Length - 2);
+         // UTF-16 without a mark: plain text then has a zero in every other byte
+         int zerosEven = 0, zerosOdd = 0, length = Math.Min(contents.Length, 256);
+         for (int i = 0; i < length; i++) if (contents[i] == 0) { if (i % 2 == 0) zerosEven++; else zerosOdd++; }
+         if (length >= 8 && zerosOdd * 4 >= length && zerosEven == 0) return Encoding.Unicode.GetString(contents);
+         if (length >= 8 && zerosEven * 4 >= length && zerosOdd == 0) return Encoding.BigEndianUnicode.GetString(contents);
+         return Encoding.UTF8.GetString(contents);
+      }
 
       /// <summary>
       /// Turns a file name (with or without its folder and extension) into something that works as a song name: the song name list can't hold spaces
@@ -877,6 +957,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             Priority = MidiPriority,
             Reverb = MidiReverbOn ? MidiReverb : -1,
             ExactGateTime = MidiExactGateTime,
+            AddMissingVoice = true, // a channel without a program change would be silent in the game
          };
       }
 
@@ -931,7 +1012,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             InsertedSong song;
             string error;
             if (IsMidiFile(file.Name)) song = ConvertAndInsertMidi(file, true, false, out error);
-            else song = InsertSongFromText(Encoding.UTF8.GetString(file.Contents), SongNameFromFileName(file.Name), true, false, null, null, out error);
+            else song = InsertSongFromText(DecodeSongText(file.Contents), SongNameFromFileName(file.Name), true, false, null, null, out error);
             if (song == null) failures.Add($"{file.Name}: {error}");
             else {
                inserted.Add(song);

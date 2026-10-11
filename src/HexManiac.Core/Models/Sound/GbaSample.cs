@@ -228,20 +228,21 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          int pos = 12;
          while (pos + 8 <= file.Length) {
             var id = Encoding.ASCII.GetString(file, pos, 4);
-            int size = BitConverter.ToInt32(file, pos + 4);
+            long size = BitConverter.ToUInt32(file, pos + 4); // unsigned: a streaming writer (ffmpeg to a pipe) leaves 0xFFFFFFFF in the data chunk, meaning 'to the end of the file'
             int body = pos + 8;
-            if (id == "fmt " && size >= 16) {
-               format = BitConverter.ToInt16(file, body);
+            if (id == "fmt " && size >= 16 && body + 16 <= file.Length) {
+               format = BitConverter.ToUInt16(file, body);
                channels = BitConverter.ToInt16(file, body + 2);
                sampleRate = BitConverter.ToInt32(file, body + 4);
                bits = BitConverter.ToInt16(file, body + 14);
-               if (format == 0xFFFE && size >= 26) format = BitConverter.ToInt16(file, body + 24); // WAVE_FORMAT_EXTENSIBLE: first two bytes of the subformat GUID
+               if (format == 0xFFFE && size >= 26 && body + 26 <= file.Length) format = BitConverter.ToUInt16(file, body + 24); // WAVE_FORMAT_EXTENSIBLE: first two bytes of the subformat GUID
             } else if (id == "data") {
                dataStart = body;
-               dataLength = Math.Min(size, file.Length - body);
-               if (dataLength < 0) dataLength = 0;
+               dataLength = (int)Math.Max(0, Math.Min(size, file.Length - body));
             }
-            pos = body + size + (size & 1);
+            var next = body + size + (size & 1);
+            if (next > file.Length) break;
+            pos = (int)next;
          }
          if (channels <= 0 || sampleRate <= 0 || dataStart < 0) { error = "The WAV file has no fmt/data chunks."; return false; }
          bool isFloat = format == 3;
