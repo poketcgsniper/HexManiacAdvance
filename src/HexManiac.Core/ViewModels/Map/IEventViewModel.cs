@@ -1793,7 +1793,9 @@ show:
          ShowGraphicsAsText = Graphics >= sprites.Count;
          objectEvent.Model.TryGetList("FacingOptions", out var list);
          FacingOptions.Update(ComboOption.Convert(list), MoveType);
-         FacingOptions.Bind(nameof(FacingOptions.SelectedIndex), (sender, e) => MoveType = FacingOptions.ModelValue);
+         FacingOptions.Bind(nameof(FacingOptions.SelectedIndex), (sender, e) => {
+            if (FacingOptions.SelectedIndex >= 0) MoveType = FacingOptions.ModelValue; // (a movement type without a name selects nothing: keep the number it has)
+         });
 
          tutorContent = new Lazy<TutorEventContent>(() => EventTemplate.GetTutorContent(element.Model, parser, this));
          martContent = new Lazy<MartEventContent>(() => EventTemplate.GetMartContent(element.Model, parser, this));
@@ -2071,6 +2073,7 @@ show:
          if (!model.TryGetList("MapAttributeBehaviors", out var list)) return false;
 
          int primaryBlockCount = model.IsFRLG() ? 640 : 512;
+         if (X < 0 || Y < 0 || X >= layout.Width || Y >= layout.Height) return false; // outside the map there is no block to warp from (and no cell to read)
          var cell = layout.BlockMap[X, Y];
          if (cell == null) return true; // failure to read layout, this warp rendering doesn't matter.
          var tile = cell.Tile;

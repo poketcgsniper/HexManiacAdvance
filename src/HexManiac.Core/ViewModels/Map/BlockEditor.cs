@@ -515,7 +515,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          LzTilemapRun.WriteTileData(blocks[blockIndex], 3, copyPalettes[1, 1], copyFlipHs[1, 1], copyFlipVs[1, 1], copyTiles[1, 1]);
          for (int i = 0; i < 4; i++) {
             var newImage = BlocksetModel.Read(blocks[blockIndex], i, tiles, palettes);
-            images[i].Fill(newImage.PixelData);
+            images[i]?.Fill(newImage.PixelData); // (a picture that was never shown is drawn from the block when it is first needed)
          }
          BlocksChanged?.Invoke(this, blocks);
          tutorials.Complete(Tutorial.ClickBlock_DrawTile);
@@ -529,7 +529,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          LzTilemapRun.WriteTileData(blocks[blockIndex], 7, copyPalettes[1, 1], copyFlipHs[1, 1], copyFlipVs[1, 1], copyTiles[1, 1]);
          for (int i = 4; i < 8; i++) {
             var newImage = BlocksetModel.Read(blocks[blockIndex], i, tiles, palettes);
-            images[i].Fill(newImage.PixelData);
+            images[i]?.Fill(newImage.PixelData);
          }
          BlocksChanged?.Invoke(this, blocks);
          tutorials.Complete(Tutorial.ClickBlock_DrawTile);
@@ -685,8 +685,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          get => (drawTile % TilesPerRow) * PixelPerTile;
          set {
             var (x, y) = (drawTile % TilesPerRow, drawTile / TilesPerRow);
-            if (x != value / PixelPerTile) {
-               x = value / PixelPerTile;
+            var newX = (value / PixelPerTile).LimitToRange(0, TilesPerRow - 1); // (the picker is 16 tiles wide)
+            if (x != newX) {
+               x = newX;
                drawTile = y * TilesPerRow + x;
                if (drawTile >= tiles.Length) drawTile = tiles.Length - 1;
                NotifyPropertyChanged();
@@ -700,8 +701,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          get => (drawTile / TilesPerRow) * PixelPerTile;
          set {
             var (x, y) = (drawTile % TilesPerRow, drawTile / TilesPerRow);
-            if (y != value / PixelPerTile) {
-               y = value / PixelPerTile;
+            var newY = Math.Max(0, value / PixelPerTile);
+            if (y != newY) {
+               y = newY;
                drawTile = y * TilesPerRow + x;
                if (drawTile >= tiles.Length) {
                   drawTile = tiles.Length - 1;

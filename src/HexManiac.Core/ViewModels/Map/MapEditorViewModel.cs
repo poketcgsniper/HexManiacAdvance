@@ -191,6 +191,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public int CollisionIndex {
          get => collisionIndex;
          set {
+            value = value.LimitToRange(-1, 0x3F); // (-1: none chosen) the collision is six bits of a cell, anything above would be cut off or turn into other collisions
             Set(ref collisionIndex, value);
             foreach (var map in VisibleMaps) {
                map.CollisionHighlight = value;
