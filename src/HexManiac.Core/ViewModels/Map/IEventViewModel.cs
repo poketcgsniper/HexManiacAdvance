@@ -1535,11 +1535,14 @@ show:
       }
 
       public static readonly IReadOnlyList<string> BerryStageNames = new[] { "Planted", "Sprouted", "Taller", "Flowering", "Has berries", "Trunk", "Budding" };
-      public IReadOnlyList<string> BerryStageOptions => BerryStageNames;
+
+      /// <summary>The growth stages this ROM's trees have: the vanilla games stop at 'Has berries', the expansion also has the trunk and budding stages.</summary>
+      private int BerryStageCount => BerryTreeGraphics.StageCount(element.Model).LimitToRange(1, BerryStageNames.Count);
+      public IReadOnlyList<string> BerryStageOptions => BerryStageNames.Take(BerryStageCount).ToList();
 
       /// <summary>How far along the tree is when the game starts (0 = planted ... 4 = has berries).</summary>
       public int SelectedBerryStage {
-         get => berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out var spot) ? (spot.Stage - 1).LimitToRange(0, BerryStageNames.Count - 1) : -1;
+         get => berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out var spot) ? (spot.Stage - 1).LimitToRange(0, BerryStageCount - 1) : -1;
          set {
             if (value < 0 || !berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out var spot) || spot.Stage == value + 1) return;
             var model = element.Model;
@@ -1581,14 +1584,9 @@ show:
 
       /// <param name="stage">0 = planted ... 6 = budding</param>
       public static IPixelViewModel RenderBerryStage(IDataModel model, int berryIndex, int stage) {
-         var berryTable = model.GetTableModel(HardcodeTablesModel.BerryTableName);
-         if (berryTable == null || berryIndex < 0 || berryIndex >= berryTable.Count) return null;
-         var berry = berryTable[berryIndex];
-         if (!berry.HasField("treePicTable") || !berry.HasField("treePaletteSlots")) return null;
-         var picTable = berry.GetAddress("treePicTable");
-         var slots = berry.GetAddress("treePaletteSlots");
-         if (picTable < 0 || slots < 0) return null;
-         stage = stage.LimitToRange(0, BerryFrameForStage.Length - 1);
+         // the expansion lists the tree's frames and palettes in the berry stats, the vanilla games in two arrays (see BerryTreeGraphics)
+         if (!BerryTreeGraphics.TryGetTables(model, berryIndex, out var picTable, out var slots)) return null;
+         stage = stage.LimitToRange(0, Math.Min(BerryFrameForStage.Length, BerryTreeGraphics.StageCount(model)) - 1);
          int frame = BerryFrameForStage[stage];
          // the frame table ends where the data isn't a plausible {pointer, size} pair: clamp to the last real frame
          int frameCount = 0;
@@ -1630,7 +1628,7 @@ show:
             if (berryStageVisuals != null) return berryStageVisuals;
             var options = berryStageVisuals = new ObservableCollection<VisualComboOption>();
             if (!berries.BerryMap.TryGetValue(TrainerRangeOrBerryID, out var spot)) return options;
-            for (int stage = 0; stage < BerryStageNames.Count; stage++) {
+            for (int stage = 0; stage < BerryStageCount; stage++) {
                var image = RenderBerryStage(element.Model, spot.BerryID, stage);
                if (image == null) { options.Add(VisualComboOption.CreateFromSprite(BerryStageNames[stage], new short[16 * 16], 16, stage, 1, false)); continue; }
                options.Add(VisualComboOption.CreateFromSprite(BerryStageNames[stage], image.PixelData, image.PixelWidth, stage, 2, false));
