@@ -4,6 +4,7 @@ using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.ViewModels.DataFormats;
 using HavenSoft.HexManiac.Core.ViewModels.Images;
 using HavenSoft.HexManiac.Core.ViewModels.Map;
+using HexManiac.Core.Models.Runs.Sprites;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -275,6 +276,29 @@ namespace HavenSoft.HexManiac.Tests {
          script.Address = "<1FC>"; // the first entry would need 8 bytes, only 4 are left
 
          Assert.Empty(script.SubScripts);
+      }
+
+      #endregion
+
+      #region blockmap size
+
+      [Fact]
+      public void ResizeBlockmap_UsedByTwoLayouts_UpdatesTheSizeOfBothLayouts() {
+         // "Repoint layout" copies the layout of a map but both copies still share the blockmap until it is repointed too
+         ViewPort.Edit("@40 ^layouts[width:: height:: borderblock<> blockmap<`blm`>]2 ");
+         foreach (var layout in new[] { 0x40, 0x50 }) { Model.WriteValue(Token, layout, 4); Model.WriteValue(Token, layout + 4, 4); }
+         ViewPort.Edit("@4C <140> @5C <140> ");
+         var run = (BlockmapRun)Model.GetNextRun(0x140);
+         Assert.Equal(2, run.PointerSources.Count);
+
+         var newRun = run.TryChangeSize(() => Token, MapDirection.Right, 1, 2, 2);
+
+         Assert.NotNull(newRun);
+         Assert.Equal(5, Model.ReadValue(0x40));
+         Assert.Equal(5, Model.ReadValue(0x50)); // the other layout reads the same blockmap: it has to know about the new width
+         Assert.Equal(4, Model.ReadValue(0x44));
+         Assert.Equal(4, Model.ReadValue(0x54));
+         Assert.Equal(5 * 4 * 2, newRun.Length);
       }
 
       #endregion

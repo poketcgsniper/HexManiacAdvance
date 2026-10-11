@@ -303,10 +303,14 @@ namespace HexManiac.Core.Models.Runs.Sprites {
             model.WriteMultiByteValue(run.Start + i * 2, 2, token, -1);
          }
 
-         var primarySource = PointerSources[0];
-         var layoutStart = primarySource - 12;
-         model.WriteValue(token, layoutStart, newWidth);
-         model.WriteValue(token, layoutStart + 4, newHeight);
+         // every layout that uses this blockmap has to learn the new size (a layout that was copied still shares its blockmap)
+         for (int i = 0; i < PointerSources.Count; i++) {
+            var layoutStart = PointerSources[i] - 12;
+            if (layoutStart < 0) continue;
+            if (i > 0 && (model.ReadValue(layoutStart) != BlockWidth || model.ReadValue(layoutStart + 4) != BlockHeight)) continue; // not a layout of this size
+            model.WriteValue(token, layoutStart, newWidth);
+            model.WriteValue(token, layoutStart + 4, newHeight);
+         }
          var newRun = new BlockmapRun(model, run.Start, run.PointerSources, newWidth, newHeight) {
             backupContent = backupContent,
             backupX = backupX,

@@ -616,6 +616,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             var file = fileSystem.OpenFile("Byte File", "bin");
             if (file == null) return;
             var existingRun = model.GetNextRun(start);
+            // anything that is not a compressed stream would turn the tileset into garbage (and leave a run without a length behind)
+            var allowLengthErrors = existingRun is LZRun existingLz && existingLz.AllowLengthErrors;
+            if (LZRun.IsCompressedLzData(file.Contents, 0, allowLengthErrors) < 1) {
+               viewPort.RaiseError("This tileset is compressed. The file has to hold LZ-compressed tile data, like the file 'Export tileset' writes. Nothing was imported.");
+               return;
+            }
             var newRun = model.RelocateForExpansion(history.CurrentChange, model.GetNextRun(start), file.Contents.Length);
             history.CurrentChange.ChangeData(model, newRun.Start, file.Contents);
             if (newRun is LzTilesetRun tsRun) {
@@ -693,8 +699,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          content.AppendLine("0100");
          content.AppendLine("16");
          for (int i = 0; i < 16; i++) {
-            var color = model.ReadMultiByteValue(start + i * 2, 2);
-            var (r, g, b) = UncompressedPaletteColor.ToRGB((short)color);
+            // the rom stores red in the low five bits, ToRGB expects it in the high bits
+            var color = PaletteRun.FlipColorChannels((short)model.ReadMultiByteValue(start + i * 2, 2));
+            var (r, g, b) = UncompressedPaletteColor.ToRGB(color);
             r = r * 255 / 31;
             g = g * 255 / 31;
             b = b * 255 / 31;
@@ -719,17 +726,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var file = fileSystem.LoadFile(folder + "/" + nameIndex.ToString("X2") + ".pal");
          if (file == null) return;
          var lines = Encoding.ASCII.GetString(file.Contents).SplitLines();
+         int colorCount = 0;
          foreach (var line in lines) {
+            if (colorCount == 16) break; // a palette has 16 colors, a longer file (256 colors from an image editor) must not spill into the next palette
             var parts = line.Split(' ');
             if (parts.Length != 3) continue;
             if (!parts[0].TryParseInt(out var r)) continue;
             if (!parts[1].TryParseInt(out var g)) continue;
             if (!parts[2].TryParseInt(out var b)) continue;
-            r /= 8;
-            g /= 8;
-            b /= 8;
-            PaletteRun.WriteStoredColor(model, history.CurrentChange, start, UncompressedPaletteColor.Pack(r, g, b)); // keeps bit 15 of the stored color
+            r = Math.Clamp(r / 8, 0, 31);
+            g = Math.Clamp(g / 8, 0, 31);
+            b = Math.Clamp(b / 8, 0, 31);
+            PaletteRun.WriteColor(model, history.CurrentChange, start, UncompressedPaletteColor.Pack(r, g, b)); // turns it into the order of the rom and keeps bit 15 of the stored color
             start += 2;
+            colorCount++;
          }
       }
 
