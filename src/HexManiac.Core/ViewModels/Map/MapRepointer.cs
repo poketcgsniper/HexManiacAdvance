@@ -639,6 +639,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       public void ImportSecondaryTileset() => ImportTileset(false);
 
+      /// <summary>All the tiles of the primary tileset as one ordinary .png picture (see <see cref="TilesetPicture"/>).</summary>
+      public void ExportPrimaryTilesetImage() => ExportTilesetImage(true);
+
+      /// <summary>New tiles for the primary tileset from a .png picture. No palette is written.</summary>
+      public void ImportPrimaryTilesetImage() => ImportTilesetImage(true);
+
+      public void ExportSecondaryTilesetImage() => ExportTilesetImage(false);
+
+      public void ImportSecondaryTilesetImage() => ImportTilesetImage(false);
+
       private void ExportTileset(bool primary) {
          var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
          var layout = GetLayout();
@@ -691,6 +701,37 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       private void ImportTileset(bool primary) {
+         var file = fileSystem.OpenFile("Byte File", "bin", "png");
+         if (file == null) return;
+         ImportTilesetFile(primary, file);
+      }
+
+      private void ImportTilesetImage(bool primary) {
+         var file = fileSystem.OpenFile("Tileset Picture", "png", "bin");
+         if (file == null) return;
+         ImportTilesetFile(primary, file);
+      }
+
+      /// <summary>
+      /// Both Import commands take either kind of file: the program looks at what is in the file, not at what the dialog was asked for.
+      /// A .png picture gives new tiles (see <see cref="TilesetPicture"/>), anything else is the tileset file the Export (.bin) command writes.
+      /// </summary>
+      private void ImportTilesetFile(bool primary, LoadedFile file) {
+         if (PlainPng.HasPngSignature(file.Contents)) {
+            ImportTilesetPicture(primary, file.Contents);
+         } else if (IsPictureFileName(file.Name)) {
+            viewPort.RaiseError("That file is not a PNG picture (only PNG pictures can be imported; save it as a .png file from your picture program). The tileset was left as it is.");
+         } else {
+            ImportTilesetBytes(primary, file.Contents);
+         }
+      }
+
+      private static bool IsPictureFileName(string name) {
+         var extension = name == null ? string.Empty : System.IO.Path.GetExtension(name).ToLowerInvariant();
+         return extension.IsAny(".png", ".bmp", ".jpg", ".jpeg", ".gif", ".webp", ".tif", ".tiff", ".ico");
+      }
+
+      private void ImportTilesetBytes(bool primary, byte[] fileContents) {
          var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
          var layout = GetLayout();
          var blockset = layout.GetSubTable(blocksetName)[0];
@@ -698,33 +739,108 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var start = blockset.GetAddress(Format.Tileset);
          var isCompressed = blockset.GetValue("isCompressed") != 0;
          if (isCompressed) {
-            var file = fileSystem.OpenFile("Byte File", "bin");
-            if (file == null) return;
-            if (!TryReadTilesetFile(file.Contents, maxTiles, out var contents, out var error)) {
+            if (!TryReadTilesetFile(fileContents, maxTiles, out var contents, out var error)) {
                viewPort.RaiseError(error);
                return;
             }
-            var existingRun = model.GetNextRun(start);
-            var newRun = model.RelocateForExpansion(history.CurrentChange, model.GetNextRun(start), contents.Length);
-            history.CurrentChange.ChangeData(model, newRun.Start, contents);
-            if (newRun is LzTilesetRun tsRun) {
-               tsRun = new LzTilesetRun(tsRun.TilesetFormat, model, tsRun.Start, tsRun.PointerSources);
-               model.ObserveRunWritten(history.CurrentChange, tsRun);
-            }
-            if (newRun.Start != start) {
-               DataMoved.Raise(this, new("Tileset", newRun.Start));
-            } else {
-               DataMoved.Raise(this, null);
-            }
-            for (int i = contents.Length; i < existingRun.Length; i++) {
-               history.CurrentChange.ChangeData(model, newRun.Start + i, 0xFF);
-            }
+            WriteCompressedTileset(blockset, contents);
          } else {
-            if (ImportBytes(start, currentTiles * 0x20, maxTiles * 0x20)) {
+            if (fileContents == null || fileContents.Length == 0) {
+               viewPort.RaiseError("The file is empty, so the tileset was left as it is.");
+               return;
+            }
+            if (fileContents.Length % 0x20 != 0) {
+               viewPort.RaiseError("Expected tile data with a multiple of 32 bytes (a whole number of tiles). The tileset was left as it is.");
+               return;
+            }
+            if (ImportBytes(start, currentTiles * 0x20, maxTiles * 0x20, fileContents)) {
                DataMoved.Raise(this, null);
             }
          }
       }
+
+      /// <summary>
+      /// Puts new LZ data where the compressed tileset is. If it doesn't fit, the tileset moves (and everything that points at it follows).
+      /// </summary>
+      private void WriteCompressedTileset(ModelArrayElement blockset, byte[] contents) {
+         var start = blockset.GetAddress(Format.Tileset);
+         var newStart = TilesetPictureImporter.WriteCompressed(model, history.CurrentChange, blockset.Start, contents);
+         DataMoved.Raise(this, newStart != start ? new("Tileset", newStart) : null);
+      }
+
+      #region Tileset pictures
+
+      private bool TryGetBlockset(bool primary, out ModelArrayElement blockset, out string error) {
+         blockset = null;
+         error = null;
+         var table = GetLayout()?.GetSubTable(primary ? Format.PrimaryBlockset : Format.SecondaryBlockset);
+         if (table == null || table.Count == 0) {
+            error = $"This map has no {(primary ? "primary" : "secondary")} tileset.";
+            return false;
+         }
+         blockset = table[0];
+         return true;
+      }
+
+      private void ExportTilesetImage(bool primary) {
+         if (!TryGetBlockset(primary, out var blockset, out var error)) {
+            viewPort.RaiseError(error);
+            return;
+         }
+         var tileset = new TilesetPictureImporter(model, blockset.Start);
+         if (!tileset.TryExport(out var picture, out var tileCount, out error)) {
+            viewPort.RaiseError(error);
+            return;
+         }
+         var name = fileSystem.RequestNewName(SuggestPictureName(blockset, primary), "PNG Picture", "png");
+         if (string.IsNullOrWhiteSpace(name)) return;
+         if (!name.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) name += ".png";
+         if (!fileSystem.Save(new LoadedFile(name, picture))) return;
+         var estimated = tileset.IsCompressed ? string.Empty : " The tiles of this tileset are stored without compression, so the number of tiles is the best guess of the program.";
+         viewPort.RaiseMessage($"Exported the {(primary ? "primary" : "secondary")} tileset ({tileCount} tiles) as a {TilesetPicture.PictureWidth} x {TilesetPicture.RowsFor(tileCount) * 8} picture to {name}. It carries palette {tileset.PaletteNumber} of the tileset; importing it never changes a palette.{estimated}");
+      }
+
+      private string SuggestPictureName(ModelArrayElement blockset, bool primary) {
+         var start = blockset.GetAddress(Format.Tileset);
+         var name = start >= 0 ? model.GetAnchorFromAddress(-1, start) : null;
+         if (string.IsNullOrEmpty(name)) name = $"{(primary ? "primary" : "secondary")} tileset {Math.Max(0, start):X6}";
+         foreach (var bad in System.IO.Path.GetInvalidFileNameChars()) name = name.Replace(bad, '_');
+         return name + ".png";
+      }
+
+      private void ImportTilesetPicture(bool primary, byte[] file) {
+         // read everything and check everything first: the ROM and the history are only touched when the picture is good
+         if (!TryGetBlockset(primary, out var blockset, out var error)) {
+            viewPort.RaiseError(error);
+            return;
+         }
+         var tileset = new TilesetPictureImporter(model, blockset.Start);
+         if (!tileset.TryRead(file, out var picture, out error)) {
+            viewPort.RaiseError(error);
+            return;
+         }
+         if (picture.IsSameAsBefore) {
+            viewPort.RaiseMessage("The picture has exactly the tiles the tileset has now, so nothing was changed.");
+            return;
+         }
+
+         var start = tileset.TilesStart;
+         history.ChangeCompleted(); // (what was done before is its own step in the history)
+         var newStart = tileset.Write(history.CurrentChange, picture);
+         DataMoved.Raise(this, newStart != start ? new("Tileset", newStart) : null);
+         history.ChangeCompleted();
+
+         var message = new StringBuilder($"Imported the tileset picture: {picture.TileCount} tiles, {picture.ChangedTiles.Count} of them different. No palette was changed.");
+         if (picture.TileCount > picture.PreviousTileCount) message.Append($" The tileset grew from {picture.PreviousTileCount} to {picture.TileCount} tiles.");
+         if (picture.ColorsMatched) message.Append($" The colours of the picture were matched with palette {tileset.PaletteNumber} of the tileset{(picture.TransparentPixels > 0 ? $" ({picture.TransparentPixels} see-through pixels became colour 0)" : string.Empty)}.");
+         else if (picture.PaletteDiffers) message.Append($" The picture's own colours are not the colours of palette {tileset.PaletteNumber}: the colour numbers were used, not the colours.");
+         var animated = tileset.DescribeAnimatedTiles(picture.ChangedTiles, () => history.CurrentChange);
+         if (animated != null) message.Append(' ').Append(animated);
+         if (newStart != start) message.Append($" The tileset was moved to {newStart:X6} because it no longer fit.");
+         viewPort.RaiseMessage(message.ToString());
+      }
+
+      #endregion
 
       #endregion
 

@@ -1207,10 +1207,12 @@
                            </local:AngleMenuItem>
                         </Menu>
                         <!-- Tileset -->
-                        <Menu Grid.Row="6" Grid.Column="0" ToolTip="Tilesets are stored as a single .bin file that contains all the tiles.">
+                        <Menu Grid.Row="6" Grid.Column="0" ToolTip="A tileset can be exported as one ordinary .png picture with all the tiles (16 tiles per row), or as a single .bin file that contains all the tiles.">
                            <local:AngleMenuItem Direction="Left">
-                              <MenuItem Header="Import" Command="{res:MethodCommand ImportPrimaryTileset}" ToolTip="Import a single .bin file." />
-                              <MenuItem Header="Export" Command="{res:MethodCommand ExportPrimaryTileset}" ToolTip="Export a single .bin file." />
+                              <MenuItem Header="Import Image" Command="{res:MethodCommand ImportPrimaryTilesetImage}" ToolTip="Import all the tiles from a .png picture of the size that Export Image writes (128 pixels wide, 16 tiles per row). Only the tiles change: no palette is touched." />
+                              <MenuItem Header="Export Image" Command="{res:MethodCommand ExportPrimaryTilesetImage}" ToolTip="Export all the tiles as one .png picture (128 pixels wide, 16 tiles per row) that carries palette 0 of the tileset." />
+                              <MenuItem Header="Import .bin" Command="{res:MethodCommand ImportPrimaryTileset}" ToolTip="Import a single .bin file (a .png picture also works)." />
+                              <MenuItem Header="Export .bin" Command="{res:MethodCommand ExportPrimaryTileset}" ToolTip="Export a single .bin file." />
                            </local:AngleMenuItem>
                         </Menu>
                         <local:AngleButton Content="Repoint" Direction="Left" Grid.Row="6" Grid.Column="1"
@@ -1222,10 +1224,12 @@
                                            ToolTip="{Binding ExpandSecondaryTilesetText}" Command="{Binding ExpandSecondaryTileset}" />
                         <local:AngleButton Content="Repoint" Direction="Right" Grid.Row="6" Grid.Column="5"
                                            ToolTip="{Binding RepointSecondaryTilesetText}" Command="{Binding RepointSecondaryTileset}" />
-                        <Menu Grid.Row="6" Grid.Column="6" ToolTip="Tilesets are stored as a single .bin file that contains all the tiles.">
+                        <Menu Grid.Row="6" Grid.Column="6" ToolTip="A tileset can be exported as one ordinary .png picture with all the tiles (16 tiles per row), or as a single .bin file that contains all the tiles.">
                            <local:AngleMenuItem Direction="Right">
-                              <MenuItem Header="Import" Command="{res:MethodCommand ImportSecondaryTileset}" ToolTip="Import a single .bin file."/>
-                              <MenuItem Header="Export" Command="{res:MethodCommand ExportSecondaryTileset}" ToolTip="Export a single .bin file." />
+                              <MenuItem Header="Import Image" Command="{res:MethodCommand ImportSecondaryTilesetImage}" ToolTip="Import all the tiles from a .png picture of the size that Export Image writes (128 pixels wide, 16 tiles per row). Only the tiles change: no palette is touched." />
+                              <MenuItem Header="Export Image" Command="{res:MethodCommand ExportSecondaryTilesetImage}" ToolTip="Export all the tiles as one .png picture (128 pixels wide, 16 tiles per row) that carries the first palette the game uses for a secondary tileset (palette 6 in Emerald, palette 7 in FireRed and LeafGreen)." />
+                              <MenuItem Header="Import .bin" Command="{res:MethodCommand ImportSecondaryTileset}" ToolTip="Import a single .bin file (a .png picture also works)." />
+                              <MenuItem Header="Export .bin" Command="{res:MethodCommand ExportSecondaryTileset}" ToolTip="Export a single .bin file." />
                            </local:AngleMenuItem>
                         </Menu>
                         <!-- Palette -->
