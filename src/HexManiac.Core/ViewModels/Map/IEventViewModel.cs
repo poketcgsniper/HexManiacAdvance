@@ -306,6 +306,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       protected void RaiseEventVisualUpdated() => EventVisualUpdated.Raise(this);
 
+      /// <summary>the segment as it is for the element at this address: a switch field (like the argument of a signpost) is a pointer or a number, depending on another field. Null if it is not a pointer.</summary>
+      private static ArrayRunElementSegment GetPointerSegment(IDataModel model, ITableRun table, ArrayRunElementSegment segment, int address) {
+         if (segment is ArrayRunRecordSegment record) segment = record.CreateConcrete(model, table, address);
+         return segment.Type == ElementContentType.Pointer ? segment : null;
+      }
+
       protected bool DeleteElement(string parentCountField) {
          var table = element.Table;
          var model = element.Model;
@@ -313,12 +319,35 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var offset = table.ConvertByteOffsetToArrayOffset(element.Start);
          var editCount = table.ElementCount - offset.ElementIndex - 1;
          for (int i = 0; i < editCount; i++) {
+            // switch fields depend on another field of their element: find out what they are before that other field gets overwritten
+            var destinationStart = element.Start + i * element.Length;
+            var sourceStart = destinationStart + element.Length;
+            var oldPointer = new ArrayRunElementSegment[table.ElementContent.Count];
+            var newPointer = new ArrayRunElementSegment[table.ElementContent.Count];
+            int segmentStart = 0;
+            for (int j = 0; j < table.ElementContent.Count; j++) {
+               if (table.ElementContent[j] is ArrayRunRecordSegment) {
+                  oldPointer[j] = GetPointerSegment(model, table, table.ElementContent[j], destinationStart + segmentStart);
+                  newPointer[j] = GetPointerSegment(model, table, table.ElementContent[j], sourceStart + segmentStart);
+               }
+               segmentStart += table.ElementContent[j].Length;
+            }
+
             int segmentOffset = 0;
             for (int j = 0; j < table.ElementContent.Count; j++) {
                var source = element.Start + (i + 1) * element.Length + segmentOffset;
                var destination = source - element.Length;
                var length = table.ElementContent[j].Length;
-               if (table.ElementContent[j].Type == ElementContentType.Pointer) {
+               if (table.ElementContent[j] is ArrayRunRecordSegment) {
+                  // the one that is moved over is no longer pointing at its script: its pointer source goes away
+                  if (oldPointer[j] != null) model.UpdateArrayPointer(token, null, null, 0, destination, Pointer.NULL);
+                  var pointer = newPointer[j] == null ? Pointer.NULL : model.ReadPointer(source);
+                  if (pointer >= 0) {
+                     model.UpdateArrayPointer(token, newPointer[j], table.ElementContent, offset.ElementIndex, destination, pointer);
+                  } else {
+                     model.WriteMultiByteValue(destination, length, token, model.ReadMultiByteValue(source, length));
+                  }
+               } else if (table.ElementContent[j].Type == ElementContentType.Pointer) {
                   model.UpdateArrayPointer(token, table.ElementContent[j], table.ElementContent, offset.ElementIndex, destination, model.ReadPointer(source));
                } else {
                   model.WriteMultiByteValue(destination, length, token, model.ReadMultiByteValue(source, length));
@@ -327,6 +356,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             }
          }
          if (table.ElementCount > 1) {
+            // the last element falls off the table. Its switch fields are cleared without knowing what they were, so let go of its pointers first.
+            var lastStart = table.Start + (table.ElementCount - 1) * table.ElementLength;
+            int segmentStart = 0;
+            foreach (var segment in table.ElementContent) {
+               if (segment is ArrayRunRecordSegment && GetPointerSegment(model, table, segment, lastStart + segmentStart) != null) {
+                  model.UpdateArrayPointer(token, null, null, 0, lastStart + segmentStart, Pointer.NULL);
+               }
+               segmentStart += segment.Length;
+            }
             var shorterTable = table.Append(token, -1);
             model.ObserveRunWritten(token, shorterTable);
          } else {
@@ -2191,9 +2229,12 @@ show:
          set {
             ClearDestinationFormat();
             var old = element.GetValue("kind");
-            element.SetValue("kind", value);
             var wasPointer = old < 5;
             var isPointer = value < 5;
+            // a signpost that stops showing a script is no longer a pointer to it: the script must not keep it as a source
+            // (otherwise moving the script later would write its address over the hidden item)
+            if (wasPointer && !isPointer) element.SetAddress("arg", DataFormats.Pointer.NULL, false);
+            element.SetValue("kind", value);
             NotifyPropertiesChanged(nameof(ShowArg), nameof(ShowPointer), nameof(ShowHiddenItemProperties));
             if (ShowHiddenItemProperties) NotifyPropertyChanged(nameof(ItemID));
             SetDestinationFormat();

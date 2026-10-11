@@ -178,5 +178,105 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       #endregion
+
+      #region delete event
+
+      private const string SignpostFormat = "[x:|z y:|z elevation. kind. unused: arg::|s=kind(0=<>|1=<>|2=<>|3=<>|4=<>)]";
+
+      [Fact]
+      public void DeleteSignpost_ThatIsNotTheLast_MovesTheScriptPointersOfTheOthersAlong() {
+         // three signposts, each shows its own script
+         ViewPort.Edit($"@{SignpostStart:X2} ^signposts{SignpostFormat}3 ");
+         ViewPort.Edit("@48 <100> @54 <110> @60 <120> ");
+         Assert.Empty(StalePointerSources());
+         var table = new ModelTable(Model, (ITableRun)Model.GetNextRun(SignpostStart), () => Token);
+         var first = new SignpostEventViewModel(table[0], address => { });
+
+         first.Delete();
+
+         Assert.Empty(StalePointerSources());
+         Assert.Equal(0x110, Model.ReadPointer(0x48));
+         Assert.Equal(0x120, Model.ReadPointer(0x54));
+         Assert.Equal(new[] { 0x48 }, Model.GetNextRun(0x110).PointerSources.ToArray());
+         Assert.Equal(new[] { 0x54 }, Model.GetNextRun(0x120).PointerSources.ToArray());
+         // the signpost that moved up is the second one, the slot that fell off the table does not count as a source anymore
+         Assert.DoesNotContain(Model.All<IFormattedRun>(), run => run.PointerSources != null && run.PointerSources.Contains(0x60));
+      }
+
+      [Fact]
+      public void DeleteSignpost_ThatShowsAScript_BeforeSignpostsThatHoldAnItem_LeavesNothingPointingAtTheScript() {
+         // kind 0 -> arg is a script pointer, kind 5 -> arg is a hidden item (not a pointer)
+         ViewPort.Edit($"@{SignpostStart:X2} ^signposts{SignpostFormat}3 ");
+         ViewPort.Edit("@48 <100> @54 <110> @60 <120> ");
+         var table = new ModelTable(Model, (ITableRun)Model.GetNextRun(SignpostStart), () => Token);
+         new SignpostEventViewModel(table[1], address => { }).Kind = 5;
+         new SignpostEventViewModel(table[2], address => { }).Kind = 5;
+         Assert.Empty(StalePointerSources());
+         var first = new SignpostEventViewModel(table[0], address => { });
+
+         first.Delete();
+
+         // the item signposts moved up and nothing points at the first script anymore
+         Assert.Empty(StalePointerSources());
+         Assert.Equal(5, table[0].GetValue("kind"));
+         Assert.DoesNotContain(Model.All<IFormattedRun>(), run => run.PointerSources != null && run.PointerSources.Contains(0x48));
+      }
+
+      [Fact]
+      public void DeleteSignpost_ThatHoldsAnItem_BeforeASignpostWithAScript_PointsTheMovedSignpostAtItsScript() {
+         ViewPort.Edit($"@{SignpostStart:X2} ^signposts{SignpostFormat}2 ");
+         ViewPort.Edit("@54 <110> ");
+         var table = new ModelTable(Model, (ITableRun)Model.GetNextRun(SignpostStart), () => Token);
+         var first = new SignpostEventViewModel(table[0], address => { });
+         first.Kind = 5;
+         Assert.Empty(StalePointerSources());
+
+         first.Delete();
+
+         Assert.Empty(StalePointerSources());
+         Assert.Equal(0x110, Model.ReadPointer(0x48));
+         Assert.Equal(new[] { 0x48 }, Model.GetNextRun(0x110).PointerSources.ToArray());
+      }
+
+      [Fact]
+      public void SignpostKind_ChangedFromScriptToHiddenItem_LetsGoOfTheScript() {
+         ViewPort.Edit($"@{SignpostStart:X2} ^signposts{SignpostFormat}1 ");
+         ViewPort.Edit("@48 <100> ");
+         var table = new ModelTable(Model, (ITableRun)Model.GetNextRun(SignpostStart), () => Token);
+         var signpost = new SignpostEventViewModel(table[0], address => { });
+         Assert.Contains(0x48, Model.GetNextRun(0x100).PointerSources);
+
+         signpost.Kind = 5;
+
+         // the hidden item shares the place of the pointer: moving the script must not write its address there
+         Assert.Empty(StalePointerSources());
+         Assert.DoesNotContain(Model.All<IFormattedRun>(), run => run.PointerSources != null && run.PointerSources.Contains(0x48));
+      }
+
+      #endregion
+
+      #region map script
+
+      [Fact]
+      public void MapScript_AddressOutsideTheFile_ShowsNoSubScripts() {
+         ViewPort.Edit("@40 02 <100> "); // a per-frame table of sub scripts
+         var script = new MapScriptViewModel(ViewPort, null, 0x40);
+
+         script.Address = "<1FFFFFC>"; // a place that is not in the file
+
+         Assert.Empty(script.SubScripts);
+      }
+
+      [Fact]
+      public void MapScript_TableThatRunsIntoTheEndOfTheFile_StopsAtTheEnd() {
+         ViewPort.Edit("@40 02 <100> @1FC 01 ");
+         var script = new MapScriptViewModel(ViewPort, null, 0x40);
+
+         script.Address = "<1FC>"; // the first entry would need 8 bytes, only 4 are left
+
+         Assert.Empty(script.SubScripts);
+      }
+
+      #endregion
    }
 }
