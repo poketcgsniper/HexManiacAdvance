@@ -28,6 +28,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public const int MaxSongTracks = 16;
       /// <summary>The music player for songs (gMPlayTable[0]) of the unmodified game plays this many tracks of a song, whatever the song has. Hacks change it: NUM_TRACKS_BGM in pokeemerald-expansion.</summary>
       public const int UnmodifiedBgmTracks = 10;
+      /// <summary>The name a song added with 'Add new song' gets, followed by a number: song names can't have spaces, so this is "New song 1" with an underscore.</summary>
+      public const string NewSongNamePrefix = "New_song_";
       /// <summary>The extensions the insert-song dialog offers, in order. The first is the dialog's default filter, so .s files are listed right away; the MIDI files are in the same entry.</summary>
       public static readonly string[] SongFileExtensions = { "s", "mid", "midi", "asm", "inc", "txt" };
 
@@ -513,6 +515,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// </summary>
       public bool InsertWithNewVoicegroup { get => insertWithNewVoicegroup; set => Set(ref insertWithNewVoicegroup, value); }
 
+      private bool newSongsGetOwnVoicegroup = true;
+      /// <summary>
+      /// When set (it starts set), a song put into an empty slot (one that 'Add new song' made, or any song without tracks) gets a voicegroup of its own, made from the instruments the song uses:
+      /// a MIDI file's General MIDI programs, or the voices a .s file selects, are taken from the voicegroup the song would have used, and every other slot is filled with a blank instrument.
+      /// Replacing a song that has tracks never does this on its own (InsertWithNewVoicegroup is the way to ask for it).
+      /// </summary>
+      public bool NewSongsGetOwnVoicegroup { get => newSongsGetOwnVoicegroup; set => Set(ref newSongsGetOwnVoicegroup, value); }
+
       /// <summary>The size the ROM may grow to when a song needs more room than the free space has: the size of a GBA cartridge.</summary>
       public int MaxRomLength { get; set; } = VoicegroupEditor.MaxRomLength;
 
@@ -600,11 +610,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             return;
          }
          var header = selectedSong.Header;
+         if (header.TrackCount == 0) {
+            // an empty slot: nothing to play, and its header is shared with the other unused slots, so there is no voicegroup to show or change
+            sb.AppendLine($"Header: {header.Address:X6}, no tracks: this slot is empty and plays nothing.");
+            sb.AppendLine(NewSongsGetOwnVoicegroup
+               ? "Insert a song file into it ('Insert song…'): it then gets its own voicegroup, made from the instruments the song uses."
+               : "Insert a song file into it ('Insert song…').");
+            SongDetails = sb.ToString();
+            SyncVoicegroupSelection();
+            SongText = "(no tracks)";
+            return;
+         }
          sb.AppendLine($"Header: {header.Address:X6}, {header.TrackCount} tracks, priority {header.Priority}, reverb {header.Reverb}");
          sb.AppendLine($"Voicegroup: {DescribeVoicegroup(header.Voicegroup)}");
          SongDetails = sb.ToString();
          SyncVoicegroupSelection();
-         if (header.TrackCount == 0) { SongText = "(no tracks)"; return; }
          try {
             var name = string.IsNullOrEmpty(selectedSong.Name) ? $"song_{selectedSong.Index}" : selectedSong.Name.ToLower();
             SongText = new SongDisassembler(model).Disassemble(header, name);
@@ -731,7 +751,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          token.ChangeData(model, address, bytes);
          var headerAddress = address + result.HeaderOffset;
 
-         // give the song a voicegroup of its own, so every instrument of the game can be used in it
+         // a song put into an empty slot (and a song the user asked a voicegroup of its own for) gets one, so every instrument of the game can be used in it
          var voicegroupMessage = string.Empty;
          string warning = null;
          if (InsertWithNewVoicegroup) {
@@ -745,27 +765,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             } else {
                warning = "The song is inserted, but it could not get its own voicegroup: " + voicegroupError;
             }
+         } else if (!asNewSong && NewSongsGetOwnVoicegroup && IsEmptySlot(selectedSong)) {
+            voicegroupMessage = CreateVoicegroupFromSongInstruments(token, headerAddress, address, bytes.Length, result.SongName ?? selectedSong.Name, out warning);
          }
 
          int index;
          var tableMovedTo = -1;
          if (asNewSong) {
-            var originalStart = table.Start;
-            table = model.RelocateForExpansion(token, table, table.Length + table.ElementLength);
-            table = table.Append(token, 1);
-            model.ObserveRunWritten(token, table);
-            index = table.ElementCount - 1;
-            if (table.Start != originalStart) tableMovedTo = table.Start;
+            table = AppendSongTableEntry(token, table, out index, out tableMovedTo);
          } else {
             index = selectedSong.Index;
          }
-         var element = new ModelArrayElement(model, table.Start, index, () => token, table);
-         element.SetAddress("pointer", headerAddress);
-         if (asNewSong) {
-            element.SetValue("musicplayer", InsertMusicPlayer);
-            element.SetValue("unknown", InsertMusicPlayer);
-         }
-         var givenName = asNewSong ? TryNameNewSong(token, index, songName) : null;
+         WriteSongTableEntry(token, table, index, headerAddress, asNewSong ? InsertMusicPlayer : -1);
+         // a song put into a slot that only had a placeholder name (New_song_1, unnamed, ...) is named after the song
+         var givenName = asNewSong || IsPlaceholderSongName(selectedSong?.Name, selectedSong?.Index ?? -1) ? TryNameNewSong(token, index, songName) : null;
          if (finish) {
             viewPort.ChangeHistory.ChangeCompleted();
             viewPort.Refresh();
@@ -824,6 +837,137 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          error = $"There is no room for the song ({songBytes} bytes) and the bigger song table ({grownLength} bytes), and the ROM can't grow past {(MaxRomLength % 0x100000 == 0 ? (MaxRomLength / 0x100000) + "MB" : MaxRomLength + " bytes")}.";
          return false;
       }
+
+      #region Adding songs
+
+      private StubCommand addNewSong;
+      /// <summary>Adds an empty song at the end of the song table and selects it. The song plays nothing until a song file is inserted into it (that gives it its own voicegroup).</summary>
+      public ICommand AddNewSong => StubCommand(ref addNewSong, ExecuteAddNewSong, () => HasSongs);
+
+      /// <summary>A slot without a song: its header is missing or has no tracks (the game's unused slots all share one such header).</summary>
+      private static bool IsEmptySlot(SongItem song) => song != null && (song.Header == null || song.Header.TrackCount == 0);
+
+      /// <summary>Whether a name is only a stand-in for a song that was not named: nothing, its number, 'unnamed12', 'dummy_song_header' or a name made by 'Add new song'.</summary>
+      public static bool IsPlaceholderSongName(string name, int index) {
+         if (string.IsNullOrWhiteSpace(name)) return true;
+         if (name == index.ToString()) return true;
+         if (name.Equals("dummy_song_header", StringComparison.OrdinalIgnoreCase)) return true;
+         foreach (var prefix in new[] { NewSongNamePrefix, "unnamed" }) {
+            if (name.Length > prefix.Length && name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && name.Skip(prefix.Length).All(c => c >= '0' && c <= '9')) return true;
+         }
+         return false;
+      }
+
+      /// <summary>"New_song_1", or the first of New_song_2, New_song_3... that no song is called yet. Null when the ROM has no song name list.</summary>
+      private string NextNewSongName() {
+         if (!model.TryGetList(SongNamesList, out var list)) return null;
+         var taken = new HashSet<string>(list, StringComparer.OrdinalIgnoreCase);
+         for (int n = 1; ; n++) {
+            var name = NewSongNamePrefix + n;
+            if (!taken.Contains(name)) return name;
+         }
+      }
+
+      /// <summary>
+      /// The header an empty song points at: the one the game itself uses for the slots that have no song (an 8 byte header without tracks that many entries of the song table share).
+      /// The most shared one is taken, so a new slot costs the entry in the table and nothing else. Returns -1 when the song table has none.
+      /// </summary>
+      private int FindEmptySongHeader(ITableRun table) {
+         var counts = new Dictionary<int, int>();
+         for (int i = 0; i < table.ElementCount; i++) {
+            var headerAddress = model.ReadPointer(table.Start + table.ElementLength * i);
+            if (headerAddress < 0 || !SongHeader.TryRead(model, headerAddress, out var header) || header.TrackCount != 0) continue;
+            counts[headerAddress] = counts.TryGetValue(headerAddress, out var count) ? count + 1 : 1;
+         }
+         if (counts.Count == 0) return -1;
+         return counts.OrderByDescending(pair => pair.Value).ThenBy(pair => pair.Key).First().Key;
+      }
+
+      /// <summary>A song header without tracks (4 zero bytes, then a voicegroup pointer for tools that look at it), for a ROM whose song table has none to share.</summary>
+      private bool TryCreateEmptySongHeader(ModelDelta token, out int address, out string error) {
+         if (!VoicegroupEditor.TryAllocate(model, token, 12, out address, out error)) return false;
+         while (address % 4 != 0) address++;
+         token.ChangeData(model, address, new byte[8]);
+         var voicegroup = Voicegroups.FirstOrDefault(group => !group.IsCustom);
+         if (voicegroup != null) {
+            model.WritePointer(token, address + 4, voicegroup.Address);
+            model.ObserveRunWritten(token, new PointerRun(address + 4));
+         }
+         return true;
+      }
+
+      /// <summary>Makes room for one more entry at the end of the song table (it moves when the bytes behind it are in use) and adds the entry. Returns the table, which may be somewhere else now.</summary>
+      private ITableRun AppendSongTableEntry(ModelDelta token, ITableRun table, out int index, out int tableMovedTo) {
+         var originalStart = table.Start;
+         table = model.RelocateForExpansion(token, table, table.Length + table.ElementLength);
+         table = table.Append(token, 1);
+         model.ObserveRunWritten(token, table);
+         index = table.ElementCount - 1;
+         tableMovedTo = table.Start != originalStart ? table.Start : -1;
+         return table;
+      }
+
+      /// <summary>Points entry 'index' of the song table at a song header. A music player of 0 or more is written too (new entries); -1 leaves the entry's player as it is.</summary>
+      private void WriteSongTableEntry(ModelDelta token, ITableRun table, int index, int headerAddress, int musicPlayer) {
+         var element = new ModelArrayElement(model, table.Start, index, () => token, table);
+         element.SetAddress("pointer", headerAddress);
+         if (musicPlayer >= 0) {
+            element.SetValue("musicplayer", musicPlayer);
+            element.SetValue("unknown", musicPlayer);
+         }
+      }
+
+      private void ExecuteAddNewSong() {
+         var table = model.GetTable(SongTable);
+         if (table == null) { OnError?.Invoke(this, $"This ROM has no {SongTable} table."); return; }
+         var headerAddress = FindEmptySongHeader(table);
+         if (!HasRoomForNewEntry(table, headerAddress >= 0 ? 0 : 12, out var roomError)) { OnError?.Invoke(this, roomError); return; }
+         var token = viewPort.CurrentChange;
+         if (headerAddress < 0 && !TryCreateEmptySongHeader(token, out headerAddress, out var headerError)) { OnError?.Invoke(this, headerError); return; }
+         table = AppendSongTableEntry(token, table, out var index, out var tableMovedTo);
+         WriteSongTableEntry(token, table, index, headerAddress, InsertMusicPlayer);
+         var name = TryNameNewSong(token, index, NextNewSongName());
+         viewPort.ChangeHistory.ChangeCompleted();
+         viewPort.Refresh();
+         SongFilter = string.Empty; // the new song is at the end of the list: a filter could hide it
+         LoadSongs();
+         SelectedSong = index < Songs.Count ? Songs[index] : null;
+         var player = InsertMusicPlayer == 0 ? "playbgm" : "playse";
+         Status = $"Added song {index}{(string.IsNullOrEmpty(name) ? string.Empty : " (" + name + ")")}: an empty song that plays nothing. Use 'Insert song…' to put a MIDI or .s file in it{(NewSongsGetOwnVoicegroup ? "; it then gets a voicegroup of its own, made from the instruments the song uses" : string.Empty)}. Scripts play it with '{player} {index}'.";
+         OnMessage?.Invoke(this, Status + (tableMovedTo >= 0 ? $" The song table was moved to {tableMovedTo:X6} to make room." : string.Empty));
+      }
+
+      /// <summary>
+      /// Gives the song that was just written (its header is at 'headerAddress', the whole song at 'songAddress') a voicegroup of its own that holds only the instruments it uses.
+      /// The voices are what the song's VOICE commands select (a MIDI file's General MIDI programs, or what the .s file asks for); each one is copied from the same slot of the voicegroup the song was written with.
+      /// Every other slot is the games' blank instrument. Returns the sentence for the status line. 'warning' says why it could not be made (the song then keeps the voicegroup it was written with).
+      /// </summary>
+      private string CreateVoicegroupFromSongInstruments(ModelDelta token, int headerAddress, int songAddress, int songLength, string songName, out string warning) {
+         warning = null;
+         if (!SongHeader.TryRead(model, headerAddress, out var header) || header.TrackCount == 0) return string.Empty;
+         // a song file that defines its voicegroup inside its own data has one already
+         if (header.Voicegroup >= songAddress && header.Voicegroup < songAddress + songLength) return " It brings its own voicegroup, so none was made.";
+         var voices = new SongDisassembler(model).FindVoices(header);
+         if (voices.Count == 0) return " It selects no instrument, so it keeps the voicegroup it was written with.";
+         var sourceItem = FindVoicegroupItem(header.Voicegroup);
+         var source = sourceItem?.Info ?? VoicegroupCatalog.Inspect(model, header.Voicegroup);
+         var sourceTitle = sourceItem?.Title ?? source.Name ?? header.Voicegroup.ToString("X6");
+         if (!VoicegroupEditor.TryCreateForVoices(model, token, source, voices, songName, out var address, out var anchorName, out var missing, out var error)) {
+            warning = "The song is inserted, but it could not get its own voicegroup: " + error;
+            return string.Empty;
+         }
+         VoicegroupEditor.AssignToSong(model, token, headerAddress, address);
+         var message = $" It has its own new voicegroup at {address:X6}{(anchorName == null ? string.Empty : " (" + anchorName + ")")}: the {voices.Count} instrument{(voices.Count == 1 ? string.Empty : "s")} the song uses (slot{(voices.Count == 1 ? " " : "s ")}{DescribeNumbers(voices)}) taken from {sourceTitle}, the other slots blank.";
+         if (missing.Count > 0) message += $" {sourceTitle} has no instrument in slot{(missing.Count == 1 ? " " : "s ")}{DescribeNumbers(missing)}, so {(missing.Count == 1 ? "that slot stays" : "those slots stay")} blank.";
+         return message;
+      }
+
+      private static string DescribeNumbers(IEnumerable<int> numbers) {
+         var list = numbers.ToList();
+         return string.Join(", ", list.Take(8)) + (list.Count > 8 ? ", ..." : string.Empty);
+      }
+
+      #endregion
 
       #region Song names
 
@@ -1059,13 +1203,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          set {
             if (value == songVoicegroup) return;
             if (updatingVoicegroupSelection) { songVoicegroup = value; NotifyPropertyChanged(); return; }
-            if (value == null || !HasSelectedSong) return; // the list was reloaded or the selection cleared: nothing to apply
+            if (value == null || !CanChangeVoicegroup) return; // the list was reloaded or the selection cleared: nothing to apply
             ChangeSongVoicegroup(value);
          }
       }
 
-      /// <summary>The voicegroup choices are only meaningful for a song with a readable header.</summary>
-      public bool CanChangeVoicegroup => HasSelectedSong;
+      /// <summary>The voicegroup choices are only meaningful for a song with a readable header and tracks (an empty slot shares its header with the game's other unused slots).</summary>
+      public bool CanChangeVoicegroup => HasSelectedSong && selectedSong.Header.TrackCount > 0;
 
       private string voicegroupNote = string.Empty;
       /// <summary>Says whether other songs share the selected song's voicegroup.</summary>
@@ -1077,14 +1221,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private StubCommand newVoicegroup, gotoVoicegroup, previewSlot, previewInstrument, useInstrument;
       /// <summary>Gives the selected song a new voicegroup of its own: a copy of NewVoicegroupSource with room for all 128 instruments.</summary>
-      public ICommand NewVoicegroup => StubCommand(ref newVoicegroup, ExecuteNewVoicegroup, () => HasSelectedSong);
+      public ICommand NewVoicegroup => StubCommand(ref newVoicegroup, ExecuteNewVoicegroup, () => CanChangeVoicegroup);
       public ICommand GotoVoicegroup => StubCommand(ref gotoVoicegroup, ExecuteGotoVoicegroup, () => songVoicegroup != null && HasSelectedSong);
       /// <summary>Plays the instrument in the chosen slot of the song's voicegroup.</summary>
       public ICommand PreviewSlot => StubCommand(ref previewSlot, ExecutePreviewSlot, () => selectedSlot != null && HasSelectedSong);
       /// <summary>Plays the instrument chosen in the picker.</summary>
       public ICommand PreviewInstrument => StubCommand(ref previewInstrument, ExecutePreviewInstrument, () => selectedInstrument != null);
       /// <summary>Copies the instrument chosen in the picker into the chosen slot of the song's voicegroup.</summary>
-      public ICommand UseInstrument => StubCommand(ref useInstrument, ExecuteUseInstrument, () => selectedInstrument != null && selectedSlot != null && HasSelectedSong);
+      public ICommand UseInstrument => StubCommand(ref useInstrument, ExecuteUseInstrument, () => selectedInstrument != null && selectedSlot != null && CanChangeVoicegroup);
 
       /// <summary>TryUpdate for view model objects, which are compared by reference.</summary>
       private bool UpdateReference<T>(ref T field, T value, [CallerMemberName] string propertyName = null) where T : class {
@@ -1179,7 +1323,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          syncedSongIndex = selectedSong?.Index ?? -1;
          updatingVoicegroupSelection = true;
          try {
-            var item = header == null ? null : EnsureVoicegroupItem(header.Voicegroup);
+            var item = header == null || header.TrackCount == 0 ? null : EnsureVoicegroupItem(header.Voicegroup);
             SongVoicegroup = item;
             NewVoicegroupSource = (keepNewSource == null ? null : FindVoicegroupItem(keepNewSource.Value)) ?? item;
             InstrumentSourceGroup = (keepPickerSource == null ? null : FindVoicegroupItem(keepPickerSource.Value)) ?? item;
@@ -1317,7 +1461,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private void ExecuteNewVoicegroup() {
          var song = selectedSong;
-         if (song?.Header == null) return;
+         if (song?.Header == null || song.Header.TrackCount == 0) return;
          var source = newVoicegroupSource ?? songVoicegroup;
          var token = viewPort.CurrentChange;
          if (!CreatePrivateVoicegroup(song, source, token, out var address, out var anchorName)) { viewPort.ChangeHistory.ChangeCompleted(); return; }
@@ -1378,7 +1522,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private void ExecuteUseInstrument() {
          var song = selectedSong;
-         if (song?.Header == null || selectedSlot == null || selectedInstrument == null || songVoicegroup == null) return;
+         if (song?.Header == null || song.Header.TrackCount == 0 || selectedSlot == null || selectedInstrument == null || songVoicegroup == null) return;
          var slot = selectedSlot.Slot;
          var instrument = selectedInstrument;
          var group = songVoicegroup;
