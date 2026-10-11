@@ -205,14 +205,15 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          // if parent width changed, add/subtract space to the right edge of the sprite. Min width is one tile.
          // if the parent height changed, add/subtract space to the bottom of the sprite. Min height is one tile.
          if (segName == "width" || segName == "height") {
-            var listOffset = GetOffset<ArrayRunPointerSegment>(parent, pSeg => pSeg.InnerFormat == SharedFormatString);
-            var elementStart = PointerSources[0] - listOffset;
+            var listOffset = GetOffset<ArrayRunPointerSegment>(parent, pSeg => pSeg.InnerFormat.StartsWith("`osl")); // `osl` or `osl|palette hint`
+            var elementStart = pointerSource - listOffset;
             var widthOffset = GetOffset(parent, seg => seg.Name == "width");
             var heightOffset = GetOffset(parent, seg => seg.Name == "height");
             var width = Math.Max(1, model.ReadMultiByteValue(elementStart + widthOffset, 2));
             var height = Math.Max(1, model.ReadMultiByteValue(elementStart + heightOffset, 2));
             var newTileWidth = (int)Math.Max(1, Math.Ceiling(width / 8.0));
             var newTileHeight = (int)Math.Max(1, Math.Ceiling(height / 8.0));
+            if (newTileWidth > 30 || newTileHeight > 20) return this; // not a size an overworld sprite can have (see the sanity check in the constructor): don't resize megabytes of data to match
             var movedRuns = new List<ISpriteRun>();
             for (int i = 0; i < ElementCount; i++) {
                var spriteStart = model.ReadPointer(Start + ElementLength * i);

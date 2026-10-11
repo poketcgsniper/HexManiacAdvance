@@ -101,5 +101,54 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.All(data, value => Assert.Equal(0, value));
       }
    }
+
+   public class OverworldSpriteListResizeTests : BaseViewModelTestClass {
+      public const int
+         Pal1Start = 0x20,
+         Pal2Start = 0x40,
+         PalTable = 0x60,
+         SpriteList = 0x80,
+         Parent = 0xA0,
+         SpriteStart = 0x100;
+
+      public OverworldSpriteListResizeTests() : base(0x400) { }
+
+      [Theory]
+      [InlineData("`osl`")]
+      [InlineData("`osl|" + HardcodeTablesModel.OverworldPalettes + ":id=`")] // the sprite format of a table that names its palettes: the offsets of the parent's fields must be found the same way
+      public void OverworldSpriteList_ParentWidthEdited_SpriteResizedFromThatElementsWidthAndHeight(string listFormat) {
+         ViewPort.Edit($"@{PalTable:X2} <020> 00 00 <040> 01 00 @{PalTable:X2} ^{HardcodeTablesModel.OverworldPalettes}[pal<`ucp4`> id:|h]2 ");
+         ViewPort.Edit($"@{SpriteList:X2} <{SpriteStart:X3}> 40 ");
+         ViewPort.Edit($"@{Parent:X2} FF FF 00 00 40 00 10 00 08 00 <{SpriteList:X3}>");
+         ViewPort.Edit($"@{Parent:X2} ^parent[starterbytes:|h paletteid:|h length: width: height: sprites<{listFormat}>]1 ");
+         ViewPort.ChangeHistory.ChangeCompleted();
+         Assert.Equal(0x40, Model.ReadMultiByteValue(SpriteList + 4, 2));
+         Assert.IsAssignableFrom<OverworldSpriteListRun>(Model.GetNextRun(SpriteList));
+
+         ViewPort.Edit($"@{Parent + 6:X2} 8 "); // narrower: two tiles wide became one tile wide, one tile tall
+
+         Assert.Equal(8, Model.ReadMultiByteValue(Parent + 6, 2));
+         Assert.Equal(0x20, Model.ReadMultiByteValue(SpriteList + 4, 2));
+         Assert.IsAssignableFrom<OverworldSpriteListRun>(Model.GetNextRun(SpriteList));
+      }
+
+      [Theory]
+      [InlineData(6)]
+      [InlineData(8)]
+      public void OverworldSpriteList_ParentSizeEditedToSomethingAbsurd_SpriteDataIsLeftAloneInsteadOfGrowingByMegabytes(int fieldOffset) {
+         ViewPort.Edit($"@{PalTable:X2} <020> 00 00 <040> 01 00 @{PalTable:X2} ^{HardcodeTablesModel.OverworldPalettes}[pal<`ucp4`> id:|h]2 ");
+         ViewPort.Edit($"@{SpriteList:X2} <{SpriteStart:X3}> 40 ");
+         ViewPort.Edit($"@{Parent:X2} FF FF 00 00 40 00 10 00 08 00 <{SpriteList:X3}>");
+         ViewPort.Edit($"@{Parent:X2} ^parent[starterbytes:|h paletteid:|h length: width: height: sprites<`osl`>]1 ");
+         ViewPort.ChangeHistory.ChangeCompleted();
+         var size = Model.Count;
+
+         ViewPort.Edit($"@{Parent + fieldOffset:X2} 60000 "); // 60000 pixels
+
+         Assert.Equal(size, Model.Count);
+         Assert.Equal(0x40, Model.ReadMultiByteValue(SpriteList + 4, 2));
+         Assert.Equal(SpriteStart, Model.ReadPointer(SpriteList));
+      }
+   }
 }
 
