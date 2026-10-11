@@ -1074,6 +1074,11 @@ namespace HavenSoft.HexManiac.Core.Models {
                // if the only thing changed was the anchor, then don't change the format, just merge the anchor
                existingRun = runs[index];
                changeToken.RemoveRun(existingRun);
+               if (existingRun is WordRun oldWord && !(run is WordRun newWord && newWord.SourceArrayName == oldWord.SourceArrayName)) {
+                  // the named constant at this cell is replaced by another format: the name no longer matches this cell
+                  changeToken.RemoveMatchedWord(oldWord.Start, oldWord.SourceArrayName);
+                  if (matchedWords.TryGetValue(oldWord.SourceArrayName, out var oldWords)) oldWords.Remove(oldWord.Start);
+               }
                if (existingRun is PointerRun) {
                   var needClearPointerRun = !(run is NoInfoRun) && !(run is PointerRun);
                   if (((run as OffsetPointerRun)?.Offset ?? 0) != ((existingRun as OffsetPointerRun)?.Offset ?? 0)) needClearPointerRun = true;
@@ -1091,6 +1096,8 @@ namespace HavenSoft.HexManiac.Core.Models {
                      ModifyAnchorsFromPointerArray(changeToken, arrayRun1, null, arrayRun1.ElementCount, ClearPointerFormat);
                   } else {
                      ModifyAnchorsFromPointerArray(changeToken, tableRun1, arrayRun1, arrayRun1.ElementCount, ClearPointerFormat);
+                     // a pointer of the old table that is not a pointer cell of the new table (same element length, different fields) stops pointing
+                     if (!arrayRun1.DataFormatMatches(tableRun1)) ModifyAnchorsFromPointerArray(changeToken, arrayRun1, null, arrayRun1.ElementCount, (segment, segments, parentIndex, token, start) => { if (!IsPointerCell(tableRun1, start)) ClearPointerFormat(segment, segments, parentIndex, token, start); });
                   }
                   index = BinarySearch(run.Start); // have to recalculate index, because ClearPointerFormat can removed runs.
                }
@@ -1152,6 +1159,14 @@ namespace HavenSoft.HexManiac.Core.Models {
       public override bool WritePointer(ModelDelta changeToken, int address, int pointerDestination) {
          if (pointerOffsets.TryGetValue(address, out var offset)) pointerDestination += offset;
          return base.WritePointer(changeToken, address, pointerDestination);
+      }
+
+      private static bool IsPointerCell(ITableRun table, int address) {
+         if (address < table.Start || address >= table.Start + table.Length) return false;
+         var offset = table.ConvertByteOffsetToArrayOffset(address);
+         if (offset.SegmentStart != address || offset.SegmentIndex < 0 || offset.SegmentIndex >= table.ElementContent.Count) return false;
+         var segment = table.ElementContent[offset.SegmentIndex];
+         return segment.Type == ElementContentType.Pointer || segment is ArrayRunRecordSegment; // a record segment might be a pointer: leave it alone
       }
 
       /// <summary>

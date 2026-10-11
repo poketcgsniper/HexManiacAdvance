@@ -3,6 +3,7 @@ using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.Models.Runs.Sprites;
 using HavenSoft.HexManiac.Core.ViewModels.Tools;
+using System.Collections.Generic;
 using System.Linq;
 using Xunit;
 namespace HavenSoft.HexManiac.Tests {
@@ -54,6 +55,21 @@ namespace HavenSoft.HexManiac.Tests {
          var run = (ISpriteRun)Model.GetNextRun(SpriteStart);
          Assert.Equal(0x0001, Model.ReadMultiByteValue(0xA2, 2));
          Assert.Equal($"{HardcodeTablesModel.OverworldPalettes}:id=0001", run.SpriteFormat.PaletteHint);
+      }
+
+      [Theory]
+      [InlineData("^other[a:: b:: c:: d::]1 ")]
+      [InlineData("^other[a: b:]1 ")]
+      [InlineData("^other[a:: b::]2 ")]
+      public void OverworldSpriteList_OverwrittenByAnotherFormat_SpriteNoLongerListsTheListEntryAsASource(string format) {
+         // pasting a table over a sprite list left the sprites listing the old list entries as pointer sources (the model then disagreed with the bytes once they changed)
+         var sprite = Model.GetNextRun(SpriteStart);
+         Assert.Contains(SpriteList, (IEnumerable<int>)sprite.PointerSources);
+
+         ViewPort.Edit($"@{SpriteList:X2} " + format);
+
+         sprite = Model.GetNextRun(SpriteStart);
+         Assert.DoesNotContain(SpriteList, (sprite.PointerSources ?? SortedSpan<int>.None).ToList());
       }
 
       [Fact]

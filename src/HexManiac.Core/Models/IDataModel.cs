@@ -765,7 +765,9 @@ namespace HavenSoft.HexManiac.Core.Models {
          int elementOffset = table.ElementLength * elementIndex;
          foreach (var segment in table.ElementContent) {
             if (segment is ArrayRunPointerSegment pSegment) {
-               var destination = model.ReadPointer(table.Start + elementOffset + segmentOffset);
+               var source = table.Start + elementOffset + segmentOffset;
+               if (source < 0 || source + 4 > model.Count) yield break; // an element index outside the data (ex: a pointer source that no longer belongs to a table)
+               var destination = model.ReadPointer(source);
                if (model.GetNextRun(destination) is T result && result.Start == destination) yield return result;
             }
             segmentOffset += segment.Length;

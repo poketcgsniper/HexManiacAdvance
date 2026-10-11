@@ -244,6 +244,25 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(0xFF, ViewPort[4, 4].Value);
       }
 
+      [Theory]
+      [InlineData("^table[a:: b::]2 ")]
+      [InlineData("^table[a: b: c: d:]2 ")]
+      [InlineData("^table[b:: p<`ucs4x1x1`>]2 ")]
+      public void ReformatTable_SameElementLength_CellsThatAreNoLongerPointersAreNoLongerSources(string newFormat) {
+         // the old pointer cells kept listing themselves as sources of their destinations, so the destinations rewrote what is now a plain number when they moved
+         ViewPort.Edit("@00 <040> 11 22 33 44 <060> 55 66 77 88 @00 ^table[sprite<`ucs4x1x1`> value::]2 ");
+         ViewPort.ChangeHistory.ChangeCompleted();
+         Assert.Contains(0, Model.GetNextRun(0x40).PointerSources);
+         Assert.Contains(8, Model.GetNextRun(0x60).PointerSources);
+
+         ViewPort.Edit("@00 " + newFormat);
+
+         var table = Assert.IsAssignableFrom<ITableRun>(Model.GetNextRun(0));
+         Assert.Equal(8, table.ElementLength);
+         Assert.DoesNotContain(0, (Model.GetNextRun(0x40).PointerSources ?? SortedSpan<int>.None).ToList());
+         Assert.DoesNotContain(8, (Model.GetNextRun(0x60).PointerSources ?? SortedSpan<int>.None).ToList());
+      }
+
       [Fact]
       public void ClearTableCellWithPointer_DestinationNoLongerListsTheCellAsASource() {
          // a stale source would be rewritten (un-nulling the cell) the next time the destination moves
