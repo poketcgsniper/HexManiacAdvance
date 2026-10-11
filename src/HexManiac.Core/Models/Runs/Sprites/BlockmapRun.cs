@@ -569,6 +569,22 @@ namespace HexManiac.Core.Models.Runs.Sprites {
          return data;
       }
 
+      /// <summary>The metatile behavior of one block of this blockset (numbered inside the blockset, so the first block of a secondary blockset is 0), or -1 if the block has no readable attribute.</summary>
+      public int ReadBlockBehavior(int blockIndex) {
+         int blockCount = primaryBlocks;
+         int start = ReadPointer(12);
+         if (IsSecondary) blockCount = 1024 - blockCount;
+         var attributeStart = ReadPointer(attributeOffset);
+         if (!start.InRange(0, model.Count) || !attributeStart.InRange(0, model.Count)) return -1;
+         EstimateBlockCount(model, ref blockCount, start, attributeStart);
+         if (blockIndex < 0 || blockIndex >= blockCount) return -1;
+         var attribute = new byte[BytesPerAttribute];
+         var attributeAddress = attributeStart + blockIndex * attribute.Length;
+         if (attributeAddress + attribute.Length > model.Count) return -1;
+         for (int i = 0; i < attribute.Length; i++) attribute[i] = model[attributeAddress + i];
+         return TileAttribute.Create(attribute).Behavior;
+      }
+
       public void WriteBlockAttributes(byte[][] attributes, Func<ModelDelta> tokenFactory) {
          int attributeStart = ReadPointer(attributeOffset);
          for (int i = 0; i < attributes.Length; i++) {

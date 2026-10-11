@@ -160,7 +160,6 @@ namespace HavenSoft.HexManiac.WPF.Controls {
 
    public class PixelImage : Image {
       private IPixelViewModel ViewModel => DataContext as IPixelViewModel;
-      private WriteableBitmap maskSource;
 
       private bool showDebugGrid;
       public bool ShowDebugGrid {
@@ -299,19 +298,19 @@ namespace HavenSoft.HexManiac.WPF.Controls {
             }
          }
          if (pixels == null || ViewModel == null) return;
-         if (!UseTrueTransparency) {
-            pixels = ConvertTransparentPixels(pixels);
-            if (OpacityMask is VisualBrush) OpacityMask = null;
-         } else if (ViewModel.Transparent != -1) {
-            OpacityMask = new VisualBrush(CreateOpacityMask());
-         } else {
-            if (OpacityMask is VisualBrush) OpacityMask = null;
-         }
+         // true transparency: the see-through pixels get an alpha of 0 in the bitmap itself (see AlphaPixels).
+         // (It used to be an OpacityMask the size of the picture. WPF smooths that mask when the picture is zoomed, which left a halo of the see-through colour around every sprite.)
+         var transparent = ViewModel.Transparent;
+         var useAlpha = UseTrueTransparency && transparent != -1;
+         if (!UseTrueTransparency) pixels = ConvertTransparentPixels(pixels);
+         if (OpacityMask is VisualBrush) OpacityMask = null; // (a mask left by an older version of this control)
          var expectedLength = ViewModel.PixelWidth * ViewModel.PixelHeight;
          if (pixels.Length < expectedLength || pixels.Length == 0) { Source = null; return; }
-         int stride = ViewModel.PixelWidth * 2;
-         var format = PixelFormats.Bgr555;
          if (ShowDebugGrid) { pixels = pixels.ToArray(); DrawDebugGrid(pixels, ViewModel.PixelWidth); }
+         var format = useAlpha ? PixelFormats.Pbgra32 : PixelFormats.Bgr555;
+         int stride = ViewModel.PixelWidth * (useAlpha ? 4 : 2);
+         Array data = pixels;
+         if (useAlpha) data = AlphaPixels.ToPremultipliedBgra(pixels, expectedLength, transparent);
 
          if (!(Source is WriteableBitmap wSource) ||
             wSource.PixelWidth != ViewModel.PixelWidth ||
@@ -322,25 +321,7 @@ namespace HavenSoft.HexManiac.WPF.Controls {
 
          var source = (WriteableBitmap)Source;
          var rect = new Int32Rect(0, 0, ViewModel.PixelWidth, ViewModel.PixelHeight);
-         source.WritePixels(rect, pixels, stride, 0);
-      }
-
-      private Image CreateOpacityMask() {
-         if (ViewModel.Transparent == -1) return null;
-         if (maskSource == null || maskSource.PixelWidth != ViewModel.PixelWidth || maskSource.PixelHeight != ViewModel.PixelHeight) {
-            maskSource = new WriteableBitmap(ViewModel.PixelWidth, ViewModel.PixelHeight, 96, 96, PixelFormats.Bgra32, null);
-         }
-         var pixels = new int[ViewModel.PixelWidth * ViewModel.PixelHeight];
-         for (int y = 0; y < ViewModel.PixelHeight; y++) {
-            for (int x = 0; x < ViewModel.PixelWidth; x++) {
-               var i = y * ViewModel.PixelWidth + x;
-               pixels[i] = ViewModel.PixelData[i] == ViewModel.Transparent ? 0 : -1;
-            }
-         }
-         var rect = new Int32Rect(0, 0, ViewModel.PixelWidth, ViewModel.PixelHeight);
-         int stride = ViewModel.PixelWidth * 4;
-         maskSource.WritePixels(rect, pixels, stride, 0);
-         return new Image { Source = maskSource };
+         source.WritePixels(rect, data, stride, 0);
       }
 
       private short[] ConvertTransparentPixels(short[] pixels) {
