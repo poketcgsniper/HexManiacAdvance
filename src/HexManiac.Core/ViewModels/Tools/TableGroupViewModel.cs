@@ -50,6 +50,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       public void Open() {
          if (isOpen) return;
          currentMember = 0;
+         pending.Clear();
          isOpen = true;
       }
 
@@ -58,52 +59,158 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       private MultiFieldArrayElementViewModel multiInProgress;
 
+      // While the group is open (a refresh is going on), the new members are collected here: Close() then brings Members in line with them in one go.
+      // (Knowing the whole new list is what lets a member that appeared or disappeared in the middle cost one change, instead of changing every member after it.)
+      private readonly List<IArrayElementViewModel> pending = new();
+
       public void Add(IArrayElementViewModel child) {
          if (UseMultiFieldFeature && child is IMultiEnabledArrayElementViewModel newField) {
             if (multiInProgress == null) multiInProgress = new(viewPort);
             multiInProgress.Add(newField);
-         } else if (currentMember == Members.Count) {
-            if (multiInProgress != null) {
-               Members.Add(multiInProgress);
-               multiInProgress = null;
-               currentMember++;
-            }
-            Members.Add(child);
-            currentMember++;
-         } else {
-            if (multiInProgress != null) {
-               if (Members[currentMember].TryCopy(multiInProgress)) {
-                  // no need to copy
-               } else {
-                  Members[currentMember] = multiInProgress;
-               }
-               multiInProgress = null;
-               currentMember++;
-               Add(child); // we're adding a non-multi, and now have dealt with the current multi. Recurse so the child can be added using either "full" or "replace" strategy
-            } else if (Members[currentMember].TryCopy(child)) {
-               currentMember += 1; // copied over successfully
-            } else {
-               // replace existing
-               Members[currentMember] = child;
-               currentMember += 1;
-            }
+            return;
          }
+         if (multiInProgress != null) {
+            Commit(multiInProgress);
+            multiInProgress = null;
+         }
+         Commit(child);
+      }
+
+      private void Commit(IArrayElementViewModel member) {
+         if (isOpen) pending.Add(member);
+         else Members.Add(member); // a group nobody opened yet (a brand new one) simply grows
+         currentMember++;
       }
 
       public void Close() {
          if (!isOpen) return;
          if (multiInProgress != null) {
-            if (currentMember == Members.Count) {
-               Members.Add(multiInProgress);
-            } else if (!Members[currentMember].TryCopy(multiInProgress)) {
-               Members[currentMember] = multiInProgress;
-            }
-            currentMember += 1;
+            Commit(multiInProgress);
             multiInProgress = null;
          }
-         while (Members.Count > currentMember) Members.RemoveAt(Members.Count - 1);
-         isOpen = false;
+         try {
+            Reconcile(pending);
+         } finally {
+            pending.Clear();
+            isOpen = false;
+         }
       }
+
+      #region Reconciling Members with the new list
+
+      /// <summary>Two members are of the same kind if a member can be updated to show what the other one shows (see <see cref="IArrayElementViewModel.TryCopy"/>) instead of being thrown away.</summary>
+      private static bool SameKind(IArrayElementViewModel existing, IArrayElementViewModel replacement) {
+         if (existing.GetType() != replacement.GetType()) return false;
+         if (existing is FieldArrayElementViewModel field && replacement is FieldArrayElementViewModel other) return field.Type == other.Type;
+         return true;
+      }
+
+      /// <summary>The name a member goes by, to prefer pairing members that have the same name when a choice has to be made. Null if it has none.</summary>
+      private static string NameOf(IArrayElementViewModel member) => member switch {
+         IMultiEnabledArrayElementViewModel field => field.Name,
+         StreamElementViewModel stream => stream.ParentName,
+         BitListArrayElementViewModel bits => bits.Name,
+         TupleArrayElementViewModel tuple => tuple.Name,
+         ButtonArrayElementViewModel button => button.Text,
+         SplitterArrayElementViewModel splitter => splitter.SectionName,
+         _ => null,
+      };
+
+      // finding the best pairing takes (old members) x (new members) steps: a refresh never gets near this, but a limit keeps a freak table from stalling the program
+      private const int MaxPairingWork = 1_000_000;
+
+      /// <summary>
+      /// For every new member, the index of the existing member that will be updated to become it, or -1 if there is none (a new view model is needed).
+      /// The pairs are in order: the existing members that are not paired are removed, the new members that are not paired are inserted.
+      /// </summary>
+      public static int[] PairUp(IReadOnlyList<IArrayElementViewModel> existing, IReadOnlyList<IArrayElementViewModel> replacements) {
+         var pairs = new int[replacements.Count];
+         Array.Fill(pairs, -1);
+
+         // switching to the same kind of element (the usual refresh): everything stays where it is
+         int head = 0;
+         while (head < existing.Count && head < replacements.Count && SameKind(existing[head], replacements[head])) { pairs[head] = head; head++; }
+         if (head == existing.Count && head == replacements.Count) return pairs;
+
+         // the members before and after the part that changed keep their partner
+         int oldEnd = existing.Count, newEnd = replacements.Count;
+         while (oldEnd > head && newEnd > head && SameKind(existing[oldEnd - 1], replacements[newEnd - 1])) { oldEnd--; newEnd--; pairs[newEnd] = oldEnd; }
+
+         // what is left in the middle: pair as many as possible, in order (the longest common subsequence). A pair with the same name counts more than one without.
+         int oldCount = oldEnd - head, newCount = newEnd - head;
+         if (oldCount == 0 || newCount == 0) return pairs;
+         if ((long)oldCount * newCount > MaxPairingWork) {
+            for (int i = 0; i < Math.Min(oldCount, newCount); i++) if (SameKind(existing[head + i], replacements[head + i])) pairs[head + i] = head + i;
+            return pairs;
+         }
+
+         var oldNames = new string[oldCount];
+         var newNames = new string[newCount];
+         for (int i = 0; i < oldCount; i++) oldNames[i] = NameOf(existing[head + i]);
+         for (int j = 0; j < newCount; j++) newNames[j] = NameOf(replacements[head + j]);
+         int Weight(int i, int j) {
+            if (!SameKind(existing[head + i], replacements[head + j])) return 0;
+            return oldNames[i] != null && oldNames[i] == newNames[j] ? 3 : 2;
+         }
+
+         // best[i, j]: the best total for the first i existing and the first j new members of the middle
+         var best = new int[oldCount + 1, newCount + 1];
+         for (int i = 1; i <= oldCount; i++) {
+            for (int j = 1; j <= newCount; j++) {
+               var value = Math.Max(best[i - 1, j], best[i, j - 1]);
+               var weight = Weight(i - 1, j - 1);
+               if (weight > 0) value = Math.Max(value, best[i - 1, j - 1] + weight);
+               best[i, j] = value;
+            }
+         }
+         for (int i = oldCount, j = newCount; i > 0 && j > 0;) {
+            var weight = Weight(i - 1, j - 1);
+            if (weight > 0 && best[i, j] == best[i - 1, j - 1] + weight) {
+               pairs[head + j - 1] = head + i - 1;
+               i--; j--;
+            } else if (best[i - 1, j] >= best[i, j - 1]) {
+               i--;
+            } else {
+               j--;
+            }
+         }
+         return pairs;
+      }
+
+      /// <summary>
+      /// Makes <see cref="Members"/> show the new members. An existing member that is paired with a new one is updated with it (so the view keeps the controls it has built),
+      /// a new one without a partner is inserted, and an existing one without a partner is removed.
+      /// Next to each other, an unpaired existing and an unpaired new member are swapped in one step.
+      /// </summary>
+      private void Reconcile(List<IArrayElementViewModel> replacements) {
+         var pairs = PairUp(Members, replacements);
+         // for each new member: the existing member its next partner is (everything before that, that was not paired, is not needed any more)
+         var nextPartner = new int[replacements.Count];
+         for (int j = replacements.Count - 1, next = Members.Count; j >= 0; j--) {
+            nextPartner[j] = next;
+            if (pairs[j] >= 0) next = pairs[j];
+         }
+
+         int existingIndex = 0; // the existing member (as numbered before any change) that Members[position] is
+         int position = 0;
+         for (int j = 0; j < replacements.Count; j++) {
+            var replacement = replacements[j];
+            if (pairs[j] >= 0) {
+               while (existingIndex < pairs[j]) { Members.RemoveAt(position); existingIndex++; }
+               if (!Members[position].TryCopy(replacement)) Members[position] = replacement;
+               existingIndex++;
+            } else if (existingIndex < nextPartner[j]) {
+               Members[position] = replacement;
+               existingIndex++;
+            } else {
+               Members.Insert(position, replacement);
+            }
+            position++;
+         }
+         while (Members.Count > position) Members.RemoveAt(Members.Count - 1);
+      }
+
+      #endregion
 
       /// <param name="splitPortion">Only add the fields of this partition (partitions are separated by '|' in the table's format). -1 adds every field.</param>
       /// <param name="fields">If not empty, add just these fields (names, or partition numbers) in this order, instead of the partition: this is how a group re-orders a table.</param>
@@ -304,6 +411,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             ForwardModelChanged(newStream);
             ForwardModelDataMoved(newStream);
             // using var scope = Members[myIndex].SilencePropertyNotifications();
+            if (myIndex >= Members.Count) return; // the group has been rebuilt with fewer members since
             if (!Members[myIndex].TryCopy(newStream)) Members[myIndex] = newStream;
          };
          ForwardModelDataMoved(streamElement);

@@ -102,9 +102,13 @@ namespace HavenSoft.HexManiac.Tests {
       private readonly ViewPort viewPort;
       private readonly PokemonModel model;
 
-      public PokemonSpriteSwitchTests() {
+      public PokemonSpriteSwitchTests() : this(-1) { }
+
+      /// <param name="speciesWithoutPalette">The pokemon whose palette pointer is empty (-1 for none): its table tool has no palette, so it is not made of the same kinds of views.</param>
+      private PokemonSpriteSwitchTests(int speciesWithoutPalette) {
          singletons = new Singletons(dispatch);
          WriteRom(data);
+         if (speciesWithoutPalette >= 0) WriteWord(data, speciesWithoutPalette * ElementLength + 10, 0);
          model = new PokemonModel(data, null, singletons);
          viewPort = new ViewPort("file.gba", model, InstantDispatch.Instance, singletons) { AllowMultipleElementsPerLine = true, Width = 0x10, Height = 0x10 };
          viewPort.Edit($"@00 ^{HardcodeTablesModel.PokemonStatsTable}[frontAnimDelay. frontAnimId. frontAnimFrames<> frontPic<`lzs4x8x16`> palette<`ucp4`>]{Species} ");
@@ -343,6 +347,59 @@ namespace HavenSoft.HexManiac.Tests {
          Preview.Advance(40);
 
          Assert.Equal(Preview.Timeline.Frames[Preview.CurrentFrameIndex].PixelData, Preview.Surface.PixelData);
+      }
+
+      [Fact]
+      public void SwitchingToAPokemonWithoutAPalette_ReplacesOnlyTheViewThatIsNotTheSameKind() {
+         var other = new PokemonSpriteSwitchTests(2);
+         other.ShowOnScreen(0);
+         var fields = other.Tool.Groups[0].Members.ToList();
+         var group = other.Tool.Groups[1];   // the sprite and the palette
+         var sprite = group.Members.OfType<SpriteElementViewModel>().Single();
+         var memberActions = new List<NotifyCollectionChangedAction>();
+         var groupActions = new List<NotifyCollectionChangedAction>();
+         group.Members.CollectionChanged += (sender, e) => memberActions.Add(e.Action);
+         other.Tool.Groups.CollectionChanged += (sender, e) => groupActions.Add(e.Action);
+
+         other.Select(2);
+         other.dispatch.Pump();
+
+         // the palette view cannot show "no palette": one view is replaced. The sprite and the fields keep their views, and no group is replaced.
+         Assert.Equal(new[] { NotifyCollectionChangedAction.Replace }, memberActions);
+         Assert.Empty(groupActions);
+         Assert.Same(group, other.Tool.Groups[1]);
+         Assert.Same(sprite, group.Members[0]);
+         Assert.IsType<TextStreamElementViewModel>(group.Members[1]);
+         Assert.Equal(fields, other.Tool.Groups[0].Members.ToList());
+
+         memberActions.Clear();
+         other.Select(0);
+         other.dispatch.Pump();
+
+         Assert.Equal(new[] { NotifyCollectionChangedAction.Replace }, memberActions);
+         Assert.Same(sprite, group.Members[0]);
+         Assert.IsType<PaletteElementViewModel>(group.Members[1]);
+         Assert.Equal(fields, other.Tool.Groups[0].Members.ToList());
+      }
+
+      [Fact]
+      public void SwitchingToAPokemonWithoutAPalette_AndBack_LooksLikeOpeningThemFresh() {
+         var withoutPalette = new PokemonSpriteSwitchTests(2);
+         withoutPalette.ShowOnScreen(0);
+         var first = Render(withoutPalette.Tool);
+
+         withoutPalette.Select(2);
+         withoutPalette.dispatch.Pump();
+         var switched = Render(withoutPalette.Tool);
+         withoutPalette.Select(0);
+         withoutPalette.dispatch.Pump();
+         var back = Render(withoutPalette.Tool);
+
+         var fresh = new PokemonSpriteSwitchTests(2);
+         fresh.ShowOnScreen(2);
+         Assert.Equal(Render(fresh.Tool), switched);
+         Assert.NotEqual(first, switched);
+         Assert.Equal(first, back);
       }
 
       [Fact]
