@@ -792,6 +792,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Visitors {
             ErrorText = "Cannot write constant with no name.";
             return;
          }
+         // the constant takes these bytes: another format that starts inside them (a pointer next to the cell, for example) is no longer that format.
+         // (a table keeps its format: the cells of a table are not given names this way)
+         var coveredRun = Model.GetNextRun(memoryLocation);
+         if (CurrentChange is not NoDataChangeDeltaModel && !(coveredRun is ITableRun && coveredRun.Start < memoryLocation + byteCount)) Model.ClearFormat(CurrentChange, memoryLocation, byteCount);
          var addresses = Model.GetMatchedWords(constantName);
          WordRun valueSource = null;
          foreach (var address in addresses) {

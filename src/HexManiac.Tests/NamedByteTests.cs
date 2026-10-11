@@ -130,6 +130,21 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void NamedConstant_TwoByteValueWrittenOverTheStartOfAPointer_ThePointerStopsBeingAPointer() {
+         // the constant's 2 bytes ran into the first byte of the pointer next to it: the destination kept listing the changed bytes as a source
+         ViewPort.Edit("@10 <100> ");
+         ViewPort.Edit("@00 D2 04 @00 :some.constant ");
+         Assert.Contains(0x10, Model.GetNextRun(0x100).PointerSources.ToList());
+
+         ViewPort.Edit("@0F :some.constant ");
+
+         Assert.Equal(1234, Model.ReadMultiByteValue(0x0F, 2));
+         Assert.DoesNotContain(0x10, (Model.GetNextRun(0x100).PointerSources ?? SortedSpan<int>.None).ToList());
+         var run = Model.GetNextRun(0x10);
+         Assert.False(run.Start == 0x10 && run is PointerRun, "the pointer cell is still a pointer");
+      }
+
+      [Fact]
       public void NamedConstant_CreateTableWithMatchingLength_TableHasExpectedLength() {
          ViewPort.Edit(".some.length 12 @04 ^table[a:]some.length ");
 
