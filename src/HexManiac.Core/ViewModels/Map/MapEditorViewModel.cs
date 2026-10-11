@@ -1094,6 +1094,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var singleSelect = tilesToDraw == null || (tilesToDraw.GetLength(0) == 1 && tilesToDraw.GetLength(1) == 1);
          if (singleSelect && blockBag.Contains(drawBlockIndex)) {
             primaryMap.RepeatBlock(() => history.CurrentChange, blockBag, collisionIndex, left, top, width, height, true);
+         } else if (tilesToDraw == null && drawBlockIndex >= 0 && drawBlockIndex < primaryMap.BlockRenders.Count) {
+            // the brush is a block without tiles (a right-click on the map that was released outside of it): paint that block, like a click does
+            primaryMap.RepeatBlock(() => history.CurrentChange, new[] { drawBlockIndex }, collisionIndex, left, top, width, height, true);
          } else {
             primaryMap.RepeatBlocks(() => history.CurrentChange, tilesToDraw, left, top, width, height, true);
          }

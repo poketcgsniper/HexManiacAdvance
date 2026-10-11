@@ -71,10 +71,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          RefreshFromModel();
       }
 
-      /// <summary>The connection may not have been made (the person can cancel the question), so ask the map.</summary>
-      private void RefreshFromModel() {
+      /// <summary>
+      /// The connection may not have been made (the person can cancel the question), or may have been made or removed since (undo, redo), so ask the map.
+      /// </summary>
+      public void RefreshFromModel() {
          var allmaps = AllMapsModel.Create(viewPort.Model, () => viewPort.ChangeHistory.CurrentChange);
-         var connection = allmaps[group][map].Connections?.FirstOrDefault(c => c.Direction.IsAny(MapDirection.Dive, MapDirection.Emerge));
+         var connection = allmaps[group]?[map]?.Connections?.FirstOrDefault(c => c.Direction.IsAny(MapDirection.Dive, MapDirection.Emerge));
          CanWarp = connection != null;
          CanEmerge = connection != null && connection.Direction == MapDirection.Emerge;
       }

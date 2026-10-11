@@ -2083,9 +2083,13 @@ show:
             blockset = layout.SecondaryBlockset;
          }
 
-         var behavior = blockset.Attribute(tile).Behavior;
-         if (list.Count <= behavior) return false;
-         return new[] { "Warp", "Door", "Stairs", "Ladder", "Escalator" }.Any(list[behavior].Contains);
+         var attribute = blockset?.Attribute(tile);
+         if (attribute == null) return true; // failure to read the attributes, this warp rendering doesn't matter.
+         var behavior = attribute.Behavior;
+         if (behavior < 0 || list.Count <= behavior) return false;
+         var behaviorName = list[behavior];
+         if (behaviorName == null) return false; // a behavior without a name (the list has holes) is not a warp behavior
+         return new[] { "Warp", "Door", "Stairs", "Ladder", "Escalator" }.Any(behaviorName.Contains);
       }
    }
 

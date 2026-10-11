@@ -327,5 +327,32 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       #endregion
+
+      #region block count of a blockset
+
+      // 8 attributes of 2 bytes right before 8 blocks of 16 bytes (pokeemerald-expansion builds put the attributes first),
+      // and four bytes in the middle of the blocks that happen to look like a pointer
+      [Fact]
+      public void EstimateBlockCount_AttributesBeforeTheBlocks_IsNotCutShortByAPointerLookingThingInsideTheBlocks() {
+         ViewPort.Edit("@40 ^attributes 00 @50 ^blocks 00 @70 <000010> ");
+         Assert.IsType<PointerRun>(Model.GetNextRun(0x70));
+
+         int count = 512;
+         BlocksetModel.EstimateBlockCount(Model, ref count, 0x50, 0x40);
+
+         Assert.Equal(8, count); // (the attributes say 8, the pointer at 0x70 would say 2)
+      }
+
+      [Fact]
+      public void EstimateBlockCount_AttributesAfterTheBlocks_StopsAtTheAttributes() {
+         ViewPort.Edit("@40 ^blocks 00 @70 <000010> @C0 ^attributes 00 ");
+
+         int count = 512;
+         BlocksetModel.EstimateBlockCount(Model, ref count, 0x40, 0xC0);
+
+         Assert.Equal(8, count); // (0x40 to 0xC0 is 8 blocks, the pointer inside them does not end them)
+      }
+
+      #endregion
    }
 }

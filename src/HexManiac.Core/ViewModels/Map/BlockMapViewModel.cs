@@ -509,7 +509,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                surfConnection.ConnectNewMap += (sender, e) => ConnectNewMap(e);
                surfConnection.ConnectExistingMap += (sender, e) => ConnectExistingMap(e);
                surfConnection.RequestRemoveConnection += (sender, e) => {
-                  var connections = AllMapsModel.Create(model, tokenFactory)[group][map].Connections;
+                  var connections = AllMapsModel.Create(model, tokenFactory)[group]?[map]?.Connections;
+                  if (connections == null) return; // (nothing to remove: for example, undo already took the connection away)
                   var toRemove = connections.Count.Range().Where(i => connections[i].Direction.IsAny(MapDirection.Dive, MapDirection.Emerge)).ToList();
                   RemoveConnections(toRemove);
                };
@@ -643,6 +644,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          Header.UpdateFromModel();
          ClearPixelCache();
          if (!MapScriptCollection.Unloaded) MapScriptCollection.Load(GetMapModel());
+         surfConnection?.RefreshFromModel(); // undo/redo may have added or removed the dive/emerge connection
          NotifyPropertiesChanged(nameof(BlockRenders), nameof(BlockPixels), nameof(BerryInfo));
          if (SelectedEvent != null) CycleActiveEvent(default, EventCycleDirection.None);
       }
@@ -1065,9 +1067,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
          // use maps in the game to figure out the corners
          foreach (var map in GetAllMaps()) {
+            if (map?.Layout?.PrimaryBlockset == null || map.Layout.SecondaryBlockset == null) continue; // a map whose tilesets cannot be found has nothing to teach
             if (map.Layout.PrimaryBlockset.Start != layout.PrimaryBlockset.Start && map.Layout.SecondaryBlockset.Start != layout.SecondaryBlockset.Start) continue;
 
             var blockMap = map.Layout.BlockMap;
+            if (blockMap.Model == null || blockMap.Start < 0 || blockMap.Width <= 0 || blockMap.Height <= 0) continue;
             for (int y = 0; y < blockMap.Height; y++) {
                bool topEdge = y == 0, bottomEdge = y == blockMap.Height - 1;
                for (int x = 0; x < blockMap.Width; x++) {

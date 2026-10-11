@@ -636,12 +636,18 @@ namespace HexManiac.Core.Models.Runs.Sprites {
 
       public static void EstimateBlockCount(IDataModel model, ref int blockCount, int blockStart, int attributeStart) {
          var blockLength = 0x10;
+         var attributeLength = model.IsFRLG() ? 4 : 2;
+         // The blocks end where the attributes begin or where something that is not plain data begins.
+         // Some ROMs (pokeemerald-expansion builds) put the attributes before the blocks: then only the size of a full table limits how far to look.
+         var limit = attributeStart > blockStart ? attributeStart : blockStart + blockCount * blockLength;
          IFormattedRun run;
-         for (run = model.GetNextRun(blockStart + 1); run.Start < attributeStart; run = model.GetNextRun(run.Start + run.Length)) {
-            if (run is NoInfoRun || run is PointerRun) continue;
+         for (run = model.GetNextRun(blockStart + 1); run.Start < limit; run = model.GetNextRun(run.Start + run.Length)) {
+            if (run is NoInfoRun || run is PointerRun) continue; // (block data is full of bytes that look like pointers)
             break;
          }
          blockCount = Math.Min(blockCount, (run.Start - blockStart) / blockLength);
+         // attributes right before the blocks have one entry for each block
+         if (attributeStart >= 0 && attributeStart < blockStart) blockCount = Math.Min(blockCount, (blockStart - attributeStart) / attributeLength);
          if (blockCount < 1) blockCount = 1;
       }
 
