@@ -72,6 +72,20 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.DoesNotContain(SpriteList, (sprite.PointerSources ?? SortedSpan<int>.None).ToList());
       }
 
+      [Theory]
+      [InlineData("^script`xse` 6A 5A 0F 00 ")]
+      [InlineData("^script`xse` 02 6A 5A 0F 00 ")]
+      public void OverworldSpriteList_ReplacedByANonTableFormatAndNewData_SpriteNoLongerListsTheListEntryAsASource(string edit) {
+         // pasting a script over a sprite list: the bytes of the first entry stopped being a pointer, but the sprite kept the entry as a source
+         var sprite = Model.GetNextRun(SpriteStart);
+         Assert.Contains(SpriteList, (IEnumerable<int>)sprite.PointerSources);
+
+         ViewPort.Edit($"@{SpriteList:X2} " + edit);
+
+         sprite = Model.GetNextRun(SpriteStart);
+         Assert.DoesNotContain(SpriteList, (sprite.PointerSources ?? SortedSpan<int>.None).ToList());
+      }
+
       [Fact]
       public void OverworldSpriteList_UpdatePaletteIDInline_SpriteToolPaletteUpdates() {
          ViewPort.Goto.Execute(SpriteList);

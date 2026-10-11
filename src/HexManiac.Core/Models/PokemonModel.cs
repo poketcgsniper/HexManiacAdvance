@@ -1100,6 +1100,10 @@ namespace HavenSoft.HexManiac.Core.Models {
                      if (!arrayRun1.DataFormatMatches(tableRun1)) ModifyAnchorsFromPointerArray(changeToken, arrayRun1, null, arrayRun1.ElementCount, (segment, segments, parentIndex, token, start) => { if (!IsPointerCell(tableRun1, start)) ClearPointerFormat(segment, segments, parentIndex, token, start); });
                   }
                   index = BinarySearch(run.Start); // have to recalculate index, because ClearPointerFormat can removed runs.
+               } else if (existingRun is ITableRun replacedTable && run is not ITableRun) {
+                  // the table is replaced by something that is not a table: the pointer cells it had are no longer pointers
+                  ModifyAnchorsFromPointerArray(changeToken, replacedTable, null, replacedTable.ElementCount, ClearPointerFormat);
+                  index = BinarySearch(run.Start);
                }
                SetIndex(index, run);
                changeToken.AddRun(run);
