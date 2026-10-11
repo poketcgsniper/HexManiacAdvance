@@ -333,6 +333,20 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void SingleElementStream_DeserializeWithoutAPointerField_ThePointerIsClearedAndTheDestinationForgetsIt() {
+         // fields that the text does not mention are reset to 0; a pointer field reset that way kept its old destination listing the cell as a source
+         ViewPort.Edit("@100 <120> <120> @100 ^pics[front<[sprite<`ucs4x1x1`> palette<`ucp4`>]1>]2 ");
+         ViewPort.Edit("@120 <140> <160> @140 ^pic0img`ucs4x1x1` @160 ^pic0pal`ucp4` ");
+         Assert.Contains(0x124, Model.GetNextRun(0x160).PointerSources);
+         var stream = Assert.IsType<TableStreamRun>(Model.GetNextRun(0x120));
+
+         stream.DeserializeRun("sprite : <140>", Token, out _, out _);
+
+         Assert.Equal(0, Model.ReadMultiByteValue(0x124, 4));
+         Assert.DoesNotContain(0x124, (Model.GetNextRun(0x160).PointerSources ?? SortedSpan<int>.None).ToList());
+      }
+
+      [Fact]
       public void SingleElementStreamRunWithTuple_Serialize_TupleAppearsAsTuple() {
          var stream = new TableStreamRun(Model, 0, SortedSpan<int>.None, "[index::|t|:.|i::::::. unknown:|h unused:|h]", null, new FixedLengthStreamStrategy(1));
 
