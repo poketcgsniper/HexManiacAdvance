@@ -32,9 +32,15 @@ namespace HavenSoft.HexManiac.Tests {
       /// <summary>Runs everything at once, but lets a test change the world just before the patch is built in the background.</summary>
       private class HookedDispatcher : IWorkDispatcher {
          public Action BeforeBackgroundWork { get; set; }
+         /// <summary>When set, work for the UI thread waits in <see cref="Queued"/> until the test runs it.</summary>
+         public bool QueueUiWork { get; set; }
+         public List<Action> Queued { get; } = new List<Action>();
          public Task WaitForRenderingAsync() => Task.CompletedTask;
          public void BlockOnUIWork(Action action) => action();
-         public Task DispatchWork(Action action) { action?.Invoke(); return Task.CompletedTask; }
+         public Task DispatchWork(Action action) {
+            if (QueueUiWork) Queued.Add(action); else action?.Invoke();
+            return Task.CompletedTask;
+         }
          public Task RunBackgroundWork(Action action) {
             var hook = BeforeBackgroundWork;
             BeforeBackgroundWork = null; // only the first piece of background work (the patch itself), not the model that loads afterwards
@@ -259,6 +265,25 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.True(cubeTab.ChangeHistory.HasDataChange);
          Assert.True(cubeTab.Save.CanExecute(fs));
          Assert.False(cubeTab.Undo.CanExecute(null));
+      }
+
+      [Fact]
+      public void VanillaTab_Run_OffersSaveOnlyOnceTheNewRomHasLoaded() {
+         var tab = AddTab(VanillaPath, vanilla);
+         dispatcher.QueueUiWork = true; // the UI thread is busy: what is dispatched to it waits
+
+         item.Run(tab).Wait();
+         var cubeTab = SelectedViewPort;
+
+         Assert.True(cubeTab.ChangeHistory.IsSaved); // saving now would write the metadata of a model that is still being built
+         Assert.False(cubeTab.Save.CanExecute(fs));
+
+         dispatcher.QueueUiWork = false;
+         foreach (var work in dispatcher.Queued.ToList()) work?.Invoke();
+
+         Assert.False(cubeTab.ChangeHistory.IsSaved);
+         Assert.True(cubeTab.Save.CanExecute(fs));
+         Assert.Equal("Emerald*", cubeTab.Name);
       }
 
       [Fact]
@@ -531,6 +556,21 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.False(result.IsWarning);
          Assert.Contains("Could not build CUBE", result.ErrorMessage);
          Assert.Same(tab, editor[0]);
+      }
+
+      [Fact]
+      public void PatchWhoseResultHasTheWrongChecksum_Run_ChangesNothing() {
+         // the patch ran, but what it made is not what its author recorded: the tab must keep the original ROM
+         resources.Patch = new BpsPatchTests.BpsBuilder(vanilla, cube).SourceRead(0x100).TargetRead(new byte[CubeLength - 0x100]).Build(targetCrc: 0x12345678);
+         var tab = AddTab(VanillaPath, vanilla);
+
+         var result = item.Run(tab).Result;
+
+         Assert.False(result.IsWarning);
+         Assert.Contains("Could not build CUBE", result.ErrorMessage);
+         Assert.Same(tab, editor[0]);
+         Assert.Equal(vanilla, tab.Model.RawData);
+         Assert.Empty(savedRoms);
       }
 
       [Fact]

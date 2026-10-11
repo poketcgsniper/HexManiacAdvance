@@ -823,7 +823,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <summary>
       /// Swaps the ROM of an open tab for new data with new metadata (used by "Apply CUBE"):
       /// a new tab for the same file name opens in the place of the old one, and the old tab and every tab that works on the same ROM close without asking.
-      /// Nothing is written to disk: the new tab is tagged as having unsaved changes, so saving (over the same file, or with Save As) stays the user's choice.
+      /// Nothing is written to disk: the new tab is tagged as having unsaved changes (as soon as it has loaded), so saving (over the same file, or with Save As) stays the user's choice.
       /// Returns the new tab, or null if the old tab is not open. Throws, before anything has been changed, if the metadata can not be read.
       /// </summary>
       public ViewPort ReplaceRomTab(ViewPort oldTab, byte[] newData, string[] metadataLines) {
@@ -841,7 +841,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var viewPort = new ViewPort(fileName, model, workDispatcher, Singletons, MapTutorials, FileSystem, PythonTool);
 
          Add(viewPort); // selects the new tab, so closing the old ones below does not change the selection
-         viewPort.ChangeHistory.TagAsUnsaved();
+         // The tab counts as changed (and File > Save becomes available) once the new ROM has finished loading: saving writes the metadata of the model, which has to be complete.
+         _ = viewPort.InitializationWorkload.ContinueWith(task => workDispatcher.DispatchWork(() => viewPort.ChangeHistory.TagAsUnsaved()), TaskContinuationOptions.ExecuteSynchronously);
          foreach (var tab in tabs.ToList()) {
             if (tab == viewPort) continue;
             if (ModelOf(tab) == oldModel) RemoveTab(tab, EventArgs.Empty);
