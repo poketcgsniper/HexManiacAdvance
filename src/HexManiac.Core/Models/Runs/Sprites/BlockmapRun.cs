@@ -126,13 +126,14 @@ namespace HexManiac.Core.Models.Runs.Sprites {
       /// <summary>The attributes (behavior and layer data) of every block, numbered the same way as <see cref="ReadAllBlocks"/>.</summary>
       public static byte[][] ReadAllBlockAttributes(BlocksetModel primary, BlocksetModel secondary) => ReadBlockAttributes(-1, -1, primary, secondary);
 
+      /// <summary>Writes the blocks 0 to maxUsed (inclusive) of each blockset, the same range <see cref="ReadBlocks"/> reads: 'maxUsed' is the highest block number in use, not a count.</summary>
       public static void WriteBlocks(Func<ModelDelta> tokenFactory, int maxUsedPrimary, int maxUsedSecondary, BlocksetModel blockModel1, BlocksetModel blockModel2, byte[][] blocks) {
          var primary = new List<byte[]>();
          var secondary = new List<byte[]>();
          for (int i = 0; i < blockModel1.PrimaryBlocks; i++) primary.Add(blocks[i]);
          for (int i = 0; i < blocks.Length - blockModel1.PrimaryBlocks; i++) secondary.Add(blocks[i + blockModel1.PrimaryBlocks]);
-         blockModel1.WriteBlocks(primary.Take(maxUsedPrimary).ToArray(), tokenFactory);
-         blockModel2.WriteBlocks(secondary.Take(maxUsedSecondary).ToArray(), tokenFactory);
+         blockModel1.WriteBlocks(primary.Take(maxUsedPrimary + 1).ToArray(), tokenFactory);
+         blockModel2.WriteBlocks(secondary.Take(maxUsedSecondary + 1).ToArray(), tokenFactory);
       }
 
       public static byte[][] ReadBlockAttributes(int maxUsedPrimary, int maxUsedSecondary, BlocksetModel blockModel1, BlocksetModel blockModel2) {
@@ -145,13 +146,14 @@ namespace HexManiac.Core.Models.Runs.Sprites {
          return result.ToArray();
       }
 
+      /// <summary>Writes the attributes of blocks 0 to maxUsed (inclusive) of each blockset; 'maxUsed' is the highest block number in use, not a count.</summary>
       public static void WriteBlockAttributes(Func<ModelDelta> tokenFactory, int maxUsedPrimary, int maxUsedSecondary, BlocksetModel blockModel1, BlocksetModel blockModel2, byte[][] blockAttributes) {
          var primary = new List<byte[]>();
          var secondary = new List<byte[]>();
          for (int i = 0; i < blockModel1.PrimaryBlocks; i++) primary.Add(blockAttributes[i]);
          for (int i = 0; i < blockAttributes.Length - blockModel1.PrimaryBlocks; i++) secondary.Add(blockAttributes[i + blockModel1.PrimaryBlocks]);
-         blockModel1.WriteBlockAttributes(primary.Take(maxUsedPrimary).ToArray(), tokenFactory);
-         blockModel2.WriteBlockAttributes(secondary.Take(maxUsedSecondary).ToArray(), tokenFactory);
+         blockModel1.WriteBlockAttributes(primary.Take(maxUsedPrimary + 1).ToArray(), tokenFactory);
+         blockModel2.WriteBlockAttributes(secondary.Take(maxUsedSecondary + 1).ToArray(), tokenFactory);
       }
 
       public static IEnumerable<IPixelViewModel> CalculateBlockRenders(byte[][] blocks, byte[][] blockAttributes, int[][,] tiles, IReadOnlyList<short>[] palettes) {
