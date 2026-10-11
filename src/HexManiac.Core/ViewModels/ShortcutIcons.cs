@@ -26,6 +26,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
    ///
    /// Every picture is found through the ROM's metadata, never through addresses, so it follows the data when tables move. Every function returns null when the ROM
    /// doesn't have the pieces (and never throws), and the caller then keeps the picture the button had before. Pictures are only drawn when a button is first shown.
+   /// A button that ends up with no picture at all (an unedited game has none for Sound or OW Sprites) gets a built-in sprite from <see cref="ShortcutFallbackIcons"/>.
    /// </summary>
    public static class ShortcutIcons {
       /// <summary>The species the Pokemon button shows. The user asked for it by name.</summary>

@@ -1412,6 +1412,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             var text = model.GotoShortcuts[i].DisplayText;
             var shortcut = new GotoShortcutViewModel(gotoViewModel, viewPort, sprite, anchor, text);
             ShortcutIcons.CustomizeMenuButton(model, shortcut, anchor, model.GotoShortcuts[i].ImageAnchor); // Pokemon: Cradily, Items: Poke Ball (drawn when first shown)
+            ShortcutFallbackIcons.Attach(shortcut, anchor); // a built-in sprite, but only if the ROM and its metadata give the button no picture at all
             results.Add(shortcut);
          }
          AddEditorShortcuts(gotoViewModel, viewPort, results);
@@ -1424,110 +1425,27 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// </summary>
       private static void AddEditorShortcuts(GotoControlViewModel gotoViewModel, IEditableViewPort viewPort, List<GotoShortcutViewModel> results) {
          var model = viewPort.Model;
-         if (SoundTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Sound")) {
-            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, FindItemIcon(model, "Flute", "Bell", "Harp") ?? DrawIcon(NoteIcon), ViewPort.EditorGotoPrefix + "sound", "Sound"));
+         // every button gets its picture when it is first shown (ShortcutIcons), so preparing the dialog stays as light as it was.
+         // The picture of the loaded ROM wins; ShortcutFallbackIcons gives the button a built-in coloured sprite when the ROM has none (an unedited game has no flute, no Brendan...).
+         GotoShortcutViewModel AddButton(Func<IPixelViewModel> picture, string anchor, string text) {
+            var shortcut = new GotoShortcutViewModel(gotoViewModel, viewPort, picture, anchor, text);
+            ShortcutFallbackIcons.Attach(shortcut, anchor);
+            results.Add(shortcut);
+            return shortcut;
          }
-         // the pictures below are drawn when the button is first shown (ShortcutIcons), so preparing the dialog stays as light as it was
+         if (SoundTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Sound")) {
+            AddButton(() => FindItemIcon(model, "Flute", "Bell", "Harp"), ViewPort.EditorGotoPrefix + "sound", "Sound");
+         }
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
-            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, () => ShortcutIcons.BrendanStanding(model) ?? FindItemIcon(model, "Running", "Mach Bike", "Bike") ?? DrawIcon(GridIcon), HardcodeTablesModel.OverworldSprites, "OW Sprites"));
+            AddButton(() => ShortcutIcons.BrendanStanding(model) ?? FindItemIcon(model, "Running", "Mach Bike", "Bike"), HardcodeTablesModel.OverworldSprites, "OW Sprites");
          }
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
-            var animTiles = new GotoShortcutViewModel(gotoViewModel, viewPort, () => FindItemIcon(model, "Wailmer Pail", "Pail", "Watering") ?? DrawIcon(FilmIcon), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles");
+            var animTiles = AddButton(() => FindItemIcon(model, "Wailmer Pail", "Pail", "Watering"), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles");
             animTiles.SetAnimationSource(() => ShortcutIcons.FlowerAnimation(model)); // the animated flower; the old picture stays if the ROM has no flower
-            results.Add(animTiles);
          }
          if (CharacterCustomizationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Character Customization")) {
-            results.Add(new GotoShortcutViewModel(gotoViewModel, viewPort, () => ShortcutIcons.CharacterFront(model) ?? ShortcutIcons.BrendanStanding(model) ?? DrawIcon(PersonIcon), ViewPort.EditorGotoPrefix + "customization", "Character\nCustomization"));
+            AddButton(() => ShortcutIcons.CharacterFront(model) ?? ShortcutIcons.BrendanStanding(model), ViewPort.EditorGotoPrefix + "customization", "Character\nCustomization");
          }
-      }
-
-      private static readonly string[] PersonIcon = {
-         "................",
-         "......####......",
-         ".....######.....",
-         ".....######.....",
-         ".....######.....",
-         "......####......",
-         "................",
-         "....########....",
-         "...##########...",
-         "..###.####.###..",
-         "..###.####.###..",
-         "..###.####.###..",
-         "......####......",
-         "......#..#......",
-         "......#..#......",
-         ".....###.###....",
-      };
-
-      private static readonly string[] NoteIcon = {
-         "................",
-         "..........####..",
-         "........######..",
-         "......####..##..",
-         "......##....##..",
-         "......##....##..",
-         "......##....##..",
-         "......##....##..",
-         "......##..####..",
-         "......##.#####..",
-         "..######.####...",
-         ".#####.#........",
-         ".######.........",
-         "..####..........",
-         "................",
-         "................",
-      };
-
-      private static readonly string[] GridIcon = {
-         "................",
-         ".####.####.####.",
-         ".#..#.#..#.#..#.",
-         ".#..#.#..#.#..#.",
-         ".####.####.####.",
-         "................",
-         ".####.####.####.",
-         ".#..#.#..#.#..#.",
-         ".#..#.#..#.#..#.",
-         ".####.####.####.",
-         "................",
-         ".####.####.####.",
-         ".#..#.#..#.#..#.",
-         ".#..#.#..#.#..#.",
-         ".####.####.####.",
-         "................",
-      };
-
-      private static readonly string[] FilmIcon = {
-         "################",
-         "#.#..........#.#",
-         "################",
-         "#..####..####..#",
-         "#..####..####..#",
-         "#..####..####..#",
-         "################",
-         "#.#..........#.#",
-         "################",
-         "#..####..####..#",
-         "#..####..####..#",
-         "#..####..####..#",
-         "################",
-         "#.#..........#.#",
-         "################",
-         "................",
-      };
-
-      /// <summary>
-      /// Turn a 16x16 text pattern ('#' = ink) into a tiny icon for a goto shortcut.
-      /// </summary>
-      private static IPixelViewModel DrawIcon(string[] pattern) {
-         int height = pattern.Length, width = pattern[0].Length;
-         var pixels = new short[width * height];
-         const short transparent = 0x7C1F, ink = 0x1084; // magenta is the transparent key, ink is a dark gray
-         for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) pixels[y * width + x] = pattern[y][x] == '#' ? ink : transparent;
-         }
-         return new ReadonlyPixelViewModel(width, height, pixels, transparent);
       }
 
       private static IPixelViewModel FindItemIcon(IDataModel model, params string[] nameHints) {

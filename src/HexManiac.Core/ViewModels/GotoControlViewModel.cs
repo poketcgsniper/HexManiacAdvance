@@ -24,6 +24,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private IPixelViewModel image;
       private Func<IPixelViewModel> imageFactory;       // makes the picture the first time somebody asks for it
+      private Func<IPixelViewModel> fallbackFactory;    // makes the built-in picture, only if the button has no picture of its own (see SetFallbackImage)
       private Func<ShortcutAnimation> animationSource;  // makes the animation the first time the clock starts
       private ShortcutAnimation animation;
       private int frameIndex;
@@ -42,6 +43,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                   var factory = imageFactory;
                   imageFactory = null;
                   try { image = factory(); } catch (Exception) { image = null; } // pictures are decoration: never fail the dialog because of one
+               }
+               if (image == null && fallbackFactory != null) {
+                  var fallback = fallbackFactory;
+                  fallbackFactory = null;
+                  try { image = fallback(); } catch (Exception) { image = null; }
                }
             }
             return image;
@@ -73,6 +79,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          : this(parent, viewPort, (IPixelViewModel)null, anchor, display) {
          this.imageFactory = imageFactory;
       }
+
+      /// <summary>
+      /// The built-in picture for a button that has no picture of its own: the factory is only asked (once, when the button is first shown) if neither the picture the button was made with,
+      /// nor <see cref="PreferImage"/>, nor an animation gave it one. A picture from the ROM therefore always wins, and a button that has one never pays for the fallback.
+      /// Use it before the dialog shows the button.
+      /// </summary>
+      public void SetFallbackImage(Func<IPixelViewModel> factory) => fallbackFactory = factory;
 
       /// <summary>
       /// Use this picture instead of the one the button has, unless the factory has none (then the button keeps its old picture).
