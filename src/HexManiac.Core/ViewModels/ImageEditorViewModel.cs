@@ -917,6 +917,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
          var newRun = spriteRun.SetPixels(model, history.CurrentChange, SpritePage, pixels);
          if (newRun.Start != spriteRun.Start) RaiseMessage("Sprite was moved to " + newRun.Start.ToAddress());
+
+         if (newRun is ITilemapRun map) {
+            // a tilemap can only point at so many different tiles (and the tileset it shares with other tilemaps has only so much room), and every tile uses one palette page:
+            // what does not fit is stored differently, so the picture shown here is not the one that is stored
+            var stored = map.GetPixels(model, SpritePage, -1);
+            var different = 0;
+            if (stored != null && stored.GetLength(0) == pixels.GetLength(0) && stored.GetLength(1) == pixels.GetLength(1)) {
+               for (int y = 0; y < pixels.GetLength(1); y++) for (int x = 0; x < pixels.GetLength(0); x++) if (stored[x, y] != pixels[x, y]) different += 1;
+            }
+            if (different > 0) RaiseMessage($"{different} pixels of this picture do not fit in the tilemap and were stored differently: a tilemap like this one can only use {LzTilemapRun.TileLimit(map.BytesPerTile == 2)} different tiles (fewer if its tileset is shared), and each tile only one palette page. Simplify the picture.");
+         }
       }
 
       /// <summary>

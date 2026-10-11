@@ -335,6 +335,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
             if (model.ReadPointer(entry.FramesAddress + 4 * f) == frameAddress) sources = sources.Add1(entry.FramesAddress + 4 * f);
          }
          if (existing.Start != frameAddress) model.ClearFormat(token, frameAddress, length);
+         else if (existing.Length < length) model.ClearFormat(token, frameAddress + existing.Length, length - existing.Length); // a word elsewhere that looks like a pointer into the frame leaves a run inside it
          model.ObserveRunWritten(token, new TilesetRun(new TilesetFormat(4, entry.TileCount, -1, hint), model, frameAddress, sources));
          return frameAddress;
       }

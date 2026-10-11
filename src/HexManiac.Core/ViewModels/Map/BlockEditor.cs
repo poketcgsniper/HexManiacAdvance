@@ -347,7 +347,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private int blockIndex = 0;
       public int BlockIndex {
          get => blockIndex;
-         set => Set(ref blockIndex, value.LimitToRange(0, blocks.Length - 1), UpdateBlockUI);
+         set {
+            Set(ref blockIndex, value.LimitToRange(0, blocks.Length - 1), UpdateBlockUI);
+            // the editor starts on block 0, so choosing block 0 first changes nothing: its eight pictures still have to be drawn
+            if (images[0] == null) UpdateBlockUI();
+         }
       }
 
       private static readonly List<((int, int), (int, int))> bottomLayerTogether, topLayerTogether, twoSets;
@@ -559,7 +563,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var index = indexForTileImage[tile];
          LzTilemapRun.WriteTileData(blocks[blockIndex], index, drawPalette, drawFlipH, drawFlipV, drawTile);
          var newImage = BlocksetModel.Read(blocks[blockIndex], index, tiles, palettes);
-         images[hoverTile].Fill(newImage.PixelData);
+         images[index].Fill(newImage.PixelData);
          BlocksChanged?.Invoke(this, blocks);
          tutorials.Complete(Tutorial.ClickBlock_DrawTile);
       }

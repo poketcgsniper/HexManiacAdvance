@@ -1,6 +1,7 @@
 using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.ViewModels;
 using HavenSoft.HexManiac.Core.ViewModels.Map;
+using HexManiac.Core.Models.Runs.Sprites;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
@@ -144,6 +145,106 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(Red, editor.LeftTopFront.PixelData[0]);
          Assert.Equal(Red, editor.RightBottomBack.PixelData[0]);
          Assert.Contains(nameof(BlockEditor.LeftTopFront), changes);
+      }
+
+      [Fact]
+      public void BlockPictures_AreDrawnWhenTheFirstBlockChosenIsBlockZero() {
+         var attributes = Enumerable.Range(0, 4).Select(_ => new byte[2]).ToArray();
+         var editor = new BlockEditor(history, model, new MapTutorialsViewModel(), Palettes(), Tiles(2), Blocks(), attributes);
+
+         editor.BlockIndex = 0; // the editor starts on block 0; the map editor chooses it the same way when the block is picked
+
+         Assert.Equal(Green, editor.LeftTopFront.PixelData[0]);
+         Assert.Equal(Green, editor.RightBottomBack.PixelData[0]);
+      }
+
+      [Fact]
+      public void DrawOnTile_ShowsTheNewTileOnThePictureThatWasDrawnOn_NotOnTheOneThatWasHovered() {
+         var editor = Create(Tiles(2), Palettes());
+         editor.ShowTiles = true;
+         editor.TileSelectionX = 7 * 24; // tile 7 is blue
+         editor.EnterTile(editor.LeftTopBack);
+
+         editor.DrawOnTile(editor.RightTopFront); // the click arrives without a new "mouse enter" (touch, pen, a click right after the block changed)
+
+         Assert.Equal(Blue, editor.RightTopFront.PixelData[0]);
+         Assert.Equal(Green, editor.LeftTopBack.PixelData[0]);
+      }
+   }
+
+   /// <summary>
+   /// The block editor edits a copy of the map's blocks and writes the blocks the map uses back to the tileset's tables.
+   /// The highest block in use must be among them (it is the block that was added last, and the one people edit).
+   /// </summary>
+   public class BlockWriteBackTests {
+      private const int Primary = 0x100, Secondary = 0x140, PrimaryBlocks = 0x200, PrimaryAttributes = 0x300, SecondaryBlocks = 0x400, SecondaryAttributes = 0x500;
+      private readonly PokemonModel model = new(new byte[0x1000]);
+      private readonly ModelDelta token = new();
+      private readonly BlocksetModel primary, secondary;
+
+      public BlockWriteBackTests() {
+         token.ChangeData(model, Primary + 0, 0); // not compressed
+         token.ChangeData(model, Secondary + 1, 1); // secondary
+         model.WritePointer(token, Primary + 12, PrimaryBlocks);
+         model.WritePointer(token, Primary + 16, PrimaryAttributes);
+         model.WritePointer(token, Secondary + 12, SecondaryBlocks);
+         model.WritePointer(token, Secondary + 16, SecondaryAttributes);
+         primary = new BlocksetModel(model, Primary);
+         secondary = new BlocksetModel(model, Secondary);
+      }
+
+      private byte[][] AllBlocks(int secondaryCount) => Enumerable.Range(0, primary.PrimaryBlocks + secondaryCount).Select(_ => new byte[16]).ToArray();
+      private byte[][] AllAttributes(int secondaryCount) => Enumerable.Range(0, primary.PrimaryBlocks + secondaryCount).Select(_ => new byte[2]).ToArray();
+
+      [Fact]
+      public void WriteBlocks_HighestSecondaryBlockInUse_IsWritten() {
+         var blocks = AllBlocks(secondaryCount: 4);
+         blocks[primary.PrimaryBlocks + 3] = Enumerable.Range(1, 16).Select(i => (byte)i).ToArray();
+
+         BlockmapRun.WriteBlocks(() => token, maxUsedPrimary: 0, maxUsedSecondary: 3, primary, secondary, blocks);
+
+         Assert.Equal(blocks[primary.PrimaryBlocks + 3], model.RawData.Skip(SecondaryBlocks + 3 * 16).Take(16));
+      }
+
+      [Fact]
+      public void WriteBlocks_OnlyBlockInUseOfThePrimaryBlockset_IsWritten() {
+         var blocks = AllBlocks(secondaryCount: 1);
+         blocks[0] = Enumerable.Range(1, 16).Select(i => (byte)i).ToArray();
+
+         BlockmapRun.WriteBlocks(() => token, maxUsedPrimary: 0, maxUsedSecondary: 0, primary, secondary, blocks);
+
+         Assert.Equal(blocks[0], model.RawData.Skip(PrimaryBlocks).Take(16));
+      }
+
+      [Fact]
+      public void WriteBlocks_BlocksAboveTheHighestInUse_AreLeftAlone() {
+         var blocks = AllBlocks(secondaryCount: 6);
+         for (int i = 0; i < 6; i++) blocks[primary.PrimaryBlocks + i] = Enumerable.Repeat((byte)(i + 1), 16).ToArray();
+
+         BlockmapRun.WriteBlocks(() => token, maxUsedPrimary: 0, maxUsedSecondary: 3, primary, secondary, blocks);
+
+         Assert.All(model.RawData.Skip(SecondaryBlocks + 4 * 16).Take(2 * 16), b => Assert.Equal(0, b));
+         Assert.Equal(4, model.RawData[SecondaryBlocks + 3 * 16]);
+      }
+
+      [Fact]
+      public void WriteBlockAttributes_HighestSecondaryBlockInUse_IsWritten() {
+         var attributes = AllAttributes(secondaryCount: 4);
+         attributes[primary.PrimaryBlocks + 3] = new byte[] { 0x63, 0x01 };
+
+         BlockmapRun.WriteBlockAttributes(() => token, maxUsedPrimary: 0, maxUsedSecondary: 3, primary, secondary, attributes);
+
+         Assert.Equal(new byte[] { 0x63, 0x01 }, model.RawData.Skip(SecondaryAttributes + 3 * 2).Take(2));
+      }
+
+      [Fact]
+      public void WriteBlockAttributes_OnlyBlockInUseOfThePrimaryBlockset_IsWritten() {
+         var attributes = AllAttributes(secondaryCount: 1);
+         attributes[0] = new byte[] { 0x05, 0x02 };
+
+         BlockmapRun.WriteBlockAttributes(() => token, maxUsedPrimary: 0, maxUsedSecondary: 0, primary, secondary, attributes);
+
+         Assert.Equal(new byte[] { 0x05, 0x02 }, model.RawData.Skip(PrimaryAttributes).Take(2));
       }
    }
 }

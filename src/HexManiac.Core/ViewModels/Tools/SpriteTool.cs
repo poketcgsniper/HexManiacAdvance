@@ -783,7 +783,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var image = new short[width * height];
          for (var y = 0; y < height; y++) {
             for (var x = 0; x < width; x++) {
-               if (pixels[x, y].InRange(0, palette.Count - 1)) {
+               if (pixels[x, y].InRange(0, palette.Count)) { // InRange excludes the upper bound: the last color of the palette is a valid color
                   image[y * width + x] = palette[pixels[x, y]];
                }
             }
@@ -811,6 +811,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var relatedPalettes = spriteRun.FindRelatedPalettes(model);
          var relatedImageCount = relatedSprites.Count * relatedPalettes.Count;
          if (pixels.GetLength(0) == PixelWidth && pixels.GetLength(1) == PixelHeight) {
+            if (IsShowingImage(Unindex(pixels, palette).image)) return; // the picture is already there: there is nothing to import
             ImportSinglePageSpriteAndPalette(fileSystem, pixels, palette, spriteRun, paletteRun, importType);
             viewPort.Refresh(); // need to refresh in case the model resized during the import
          } else {
@@ -827,6 +828,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var relatedPalettes = spriteRun.FindRelatedPalettes(model);
          var relatedImageCount = relatedSprites.Count * relatedPalettes.Count;
          if (width == PixelWidth && height == PixelHeight) {
+            if (IsShowingImage(image)) return; // the picture is already there: there is nothing to import
             ImportSinglePageSpriteAndPalette(fileSystem, image, spriteRun, paletteRun, importType);
          } else if (width == PixelWidth * spritePages && height == PixelHeight) {
             ImportWideSpriteAndPalette(fileSystem, image, spriteRun, paletteRun, importType);
@@ -866,6 +868,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             viewPort.RaiseError($"The imported width/height ({width}/{height}) doesn't match the image ({displayWidth}/{displayHeight})!");
          }
          viewPort.Refresh(); // need to refresh in case the model resized during the import
+      }
+
+      /// <summary>
+      /// Importing the picture that the tool already shows must not touch the ROM.
+      /// Otherwise the sprite is recompressed (and moved if HexManiac's compressor does worse than the tool that made it),
+      /// colors that this sprite doesn't use are blacked out, and every other sprite that shares the palette is re-indexed.
+      /// The GBA only has 15 bits of color, so bit 15 is ignored.
+      /// </summary>
+      private bool IsShowingImage(short[] image) {
+         if (image == null || PixelData == null || image.Length == 0 || image.Length != PixelData.Length) return false;
+         for (var i = 0; i < image.Length; i++) {
+            if ((image[i] & 0x7FFF) != (PixelData[i] & 0x7FFF)) return false;
+         }
+         return true;
       }
 
       private short[][] SplitHorizontally(short[] image, int width, int count) {
@@ -1183,6 +1199,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
          // figure out the new palettes, using only the usable palettes. Leave the other palettes alone.
          var palettes = paletteRun.Pages.Range().Select(i => paletteRun.GetPalette(model, i)).ToArray();
+         if (spriteRun.Pages != paletteRun.Pages && EveryTileFitsAPalette(allTiles, palettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel)) {
+            // (a sprite with one palette per page, like Castform, is arranged differently by the code below)
+            // nothing to balance: the new pictures only use colors that the palette already has, so the palette and everything else that uses it can stay exactly as they are.
+            WriteSpritesWithoutPalette(spriteRun, paletteRun, images, usablePalPages);
+            return;
+         }
          var initialBlankPages = paletteRun.PaletteFormat.InitialBlankPages;
          var bits = paletteRun.PaletteFormat.Bits;
 
@@ -1362,11 +1384,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
          var needWriteSpriteData = true;
          var matchPalettes = palettes;
+         var matchingPage = 0; // a sprite that has one page and shares a palette with several pages is matched against the first page
          if (spriteRun.Pages == 1 && palettes != null && palettes.Length > 1) matchPalettes = palettes.Take(1).ToArray();
-         var problemPixel = TryReorderPalettesFromMatchingSprite(matchPalettes, image, spriteRun.GetPixels(model, spritePage, -1));
+         var reorderAllowed = ReferenceEquals(matchPalettes, palettes) || usablePalPages.Contains(matchingPage);
+         var currentPixels = spriteRun.GetPixels(model, spritePage, -1);
+         // the reordering only changes the first page: it can't describe a picture (like a tilemap) whose tiles use the other pages of the palette
+         if (!ReferenceEquals(matchPalettes, palettes) && !UsesOnlyFirstPalettePage(currentPixels, paletteRun?.PaletteFormat.InitialBlankPages ?? 0)) reorderAllowed = false;
+         var problemPixel = reorderAllowed ? TryReorderPalettesFromMatchingSprite(matchPalettes, image, currentPixels) : new Point(-1, -1);
          if (problemPixel.X == PixelWidth && problemPixel.Y == PixelHeight) {
             // palette is reordered, everything matches up with the original data. No need to write sprite data.
             needWriteSpriteData = false;
+            if (!ReferenceEquals(matchPalettes, palettes)) palettes[matchingPage] = matchPalettes[0]; // the reordering was done on a copy of the first page: keep it
          } else if (noSpriteEdits) {
             // we were requested to not make sprite edits, return the pixel that prevents us from safely importing this way
             return problemPixel;
@@ -1439,6 +1467,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          if (spriteRun.Pages == paletteRun.Pages) {
             palettes = new[] { palettes[palPage] };
             usablePalPages = new List<int> { 0 };
+         }
+         if (EveryTileFitsAPalette(tiles, palettes, usablePalPages, spriteRun.SpriteFormat.BitsPerPixel)) {
+            // nothing to balance: the new picture only uses colors that the palette already has, so the palette and everything else that uses it can stay exactly as they are.
+            WriteSpriteWithoutPalette(spriteRun, paletteRun, image, usablePalPages);
+            return;
          }
          var initialBlankPages = paletteRun.PaletteFormat.InitialBlankPages;
          var bits = paletteRun.PaletteFormat.Bits;
@@ -1534,6 +1567,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          ExplainMoves(spriteRun, currentSpriteRun, paletteRun, newPalette);
       }
 
+      /// <summary>
+      /// True if each tile can be drawn with the colors of one of the usable palettes without any difference.
+      /// Uses the same choice of palette (and the same combining of the pages of a 256 color sprite) as <see cref="Index(short[], IReadOnlyList{short}[], IReadOnlyList{int}, int, int, int, bool)"/>.
+      /// </summary>
+      private static bool EveryTileFitsAPalette(short[][] tiles, IReadOnlyList<short>[] palettes, IReadOnlyList<int> usablePalPages, int bitness) {
+         if (bitness < 4 || palettes == null || palettes.Length == 0 || usablePalPages == null) return false;
+         if (bitness == 8 && usablePalPages.Count == palettes.Length) {
+            palettes = new[] { (IReadOnlyList<short>)palettes.SelectMany(pal => pal).ToList() };
+            usablePalPages = new[] { 0 };
+         }
+         var usable = usablePalPages.Where(i => i >= 0 && i < palettes.Length).Distinct().ToList();
+         if (usable.Count == 0) return false;
+         return tiles.All(tile => usable.Any(i => WeightedPalette.CostToUse(tile, palettes[i]) == 0));
+      }
+
       private static IReadOnlyList<short>[] DiscoverPalettes(short[][] tiles, int bitness, int paletteCount, IReadOnlyList<short>[] existingPalettes) {
          if (bitness == 1) return new[] { TileViewModel.CreateDefaultPalette(2) };
          if (bitness == 2) return new[] { TileViewModel.CreateDefaultPalette(4) };
@@ -1577,7 +1625,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       public static int[,] Index(short[] tile, IReadOnlyList<short>[] palettes, IReadOnlyList<int> usablePalPages, int bitness, int initialPageIndex, int palettePage, bool palettePerSprite = false) {
          var cheapestIndex = palettePage;
-         if (bitness == 8 && usablePalPages.Count == palettes.Length) {
+         if (bitness == 8 && (usablePalPages == null || usablePalPages.Count == palettes.Length)) { // no restriction (null) means every page may be used
             palettes = new[] { palettes.SelectMany(pal => pal).ToList() };
             usablePalPages = new[] { 0 };
          } else if (bitness < 4) {
@@ -1664,6 +1712,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          }
 
          return result;
+      }
+
+      /// <summary>True if every pixel is an index into the first page of the palette (tiles that are mapped to no palette count as the first page too).</summary>
+      private static bool UsesOnlyFirstPalettePage(int[,] pixels, int initialBlankPages) {
+         foreach (var pixel in pixels) {
+            var page = pixel >> 4;
+            if (page != 0 && page != initialBlankPages) return false;
+         }
+         return true;
       }
 
       /// <summary>

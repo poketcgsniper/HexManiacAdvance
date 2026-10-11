@@ -59,12 +59,15 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
       }
 
       public IPaletteRun SetPalette(IDataModel model, ModelDelta token, int page, IReadOnlyList<short> colors) {
-         page %= Pages;
          var pageLength = PaletteFormat.ExpectedByteLengthPerPage;
+         // More colors than one page holds are the colors of the whole palette (a 256 color picture shows all 16 pages of 16 colors at once): they start with the first page.
+         page = colors.Count * 2 > pageLength ? 0 : page % Pages;
          var start = Start + page * pageLength;
+         var colorsThatFit = (Pages - page) * pageLength / 2;
+         if (colors.Count > colorsThatFit) colors = colors.Take(colorsThatFit).ToList();
 
          // start from the unused bit of each color that is stored now, so SetPalette keeps it (see UnusedColorBit)
-         var data = new byte[pageLength];
+         var data = new byte[Math.Max(pageLength, colors.Count * 2)];
          for (int i = 1; i < data.Length; i += 2) data[i] = start + i < model.Count ? (byte)(model[start + i] & 0x80) : (byte)0;
          SetPalette(data, 0, colors);
          for (int i = 0; i < data.Length; i++) token.ChangeData(model, start + i, data[i]);

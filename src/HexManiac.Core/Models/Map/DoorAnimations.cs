@@ -172,6 +172,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
          var sources = existing.Start == entry.TilesAddress && existing.PointerSources != null ? existing.PointerSources : SortedSpan<int>.None;
          sources = sources.Add1(entry.EntryAddress + 12);
          if (existing.Start != entry.TilesAddress) model.ClearFormat(token, entry.TilesAddress, entry.TilesLength);
+         else if (existing.Length < entry.TilesLength) model.ClearFormat(token, entry.TilesAddress + existing.Length, entry.TilesLength - existing.Length); // a word elsewhere that looks like a pointer into the tiles leaves a run inside them
          model.ObserveRunWritten(token, new SpriteRun(model, entry.TilesAddress, format, sources));
       }
 
