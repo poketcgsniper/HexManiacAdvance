@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using BlockCollisionDefaults = HavenSoft.HexManiac.Core.Models.Map.BlockCollisionDefaults;
 using Pointer = HavenSoft.HexManiac.Core.ViewModels.DataFormats.Pointer;
 using Xunit;
 
@@ -152,6 +153,111 @@ namespace HavenSoft.HexManiac.Tests {
          var cell = new WaveCell(new List<CollapseProbability> { new(10) { Count = 1 } }, block => 3);
 
          Assert.Equal((3 << 10) | 10, cell.Collapse(new Random(3)));
+      }
+
+      #endregion
+
+      #region block collision defaults (the movement permission of a block that no map uses)
+
+      private const int TilesetHeader = 0x40, BlockData = 0x100, AttributeData = 0x180;
+
+      /// <summary>A primary tileset header (Emerald layout) with 4 blocks whose behaviors are the given numbers, and a behavior list in which the six sideways stairs have the expansion's names.</summary>
+      private void CreateTilesetWithBehaviors(params int[] behaviors) {
+         Data[TilesetHeader] = 1; // compressed
+         Data[TilesetHeader + 1] = 0; // primary
+         Model.WriteMultiByteValue(TilesetHeader + 12, 4, Token, 0x08000000 | BlockData);
+         Model.WriteMultiByteValue(TilesetHeader + 16, 4, Token, 0x08000000 | AttributeData);
+         for (int i = 0; i < behaviors.Length; i++) {
+            Data[AttributeData + i * 2] = (byte)behaviors[i];
+            Data[AttributeData + i * 2 + 1] = 0x10; // layer type: covered
+         }
+         var names = Enumerable.Range(0, 80).Select(i => $"UNUSED_{i:X2}").ToArray();
+         names[0] = "NORMAL";
+         names[73] = "SIDEWAYS_STAIRS_RIGHT_SIDE"; names[74] = "SIDEWAYS_STAIRS_LEFT_SIDE";
+         names[75] = "SIDEWAYS_STAIRS_RIGHT_SIDE_TOP"; names[76] = "SIDEWAYS_STAIRS_LEFT_SIDE_TOP";
+         names[77] = "SIDEWAYS_STAIRS_RIGHT_SIDE_BOTTOM"; names[78] = "SIDEWAYS_STAIRS_LEFT_SIDE_BOTTOM";
+         names[79] = "ROCK_STAIRS";
+         Model.SetList(Token, "MapAttributeBehaviors", names);
+      }
+
+      [Fact]
+      public void SidewaysStairsCollision_IsElevation3Pass() {
+         Assert.Equal(0x0C, BlockCollisionDefaults.SidewaysStairsCollision);
+         Assert.Equal(3, BlockCollisionDefaults.SidewaysStairsCollision >> 2); // elevation
+         Assert.Equal(0, BlockCollisionDefaults.SidewaysStairsCollision & 3);  // collision: pass
+      }
+
+      [Fact]
+      public void IsSidewaysStairsBehavior_RecognizesTheSixStairsByTheirNames() {
+         CreateTilesetWithBehaviors(0, 0, 0, 0);
+
+         for (int behavior = 73; behavior <= 78; behavior++) Assert.True(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, behavior), $"behavior {behavior}");
+         Assert.False(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, 0));
+         Assert.False(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, 72));
+         Assert.False(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, 79)); // rock stairs are not sideways stairs
+         Assert.False(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, -1));
+         Assert.False(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, 200)); // past the list
+      }
+
+      [Fact]
+      public void IsSidewaysStairsBehavior_AcceptsTheOtherSpellingsOfTheName() {
+         Model.SetList(Token, "MapAttributeBehaviors", "Normal", "MB_SIDEWAYS_STAIRS_LEFT_SIDE_TOP", "Sideways Stairs Right Side", "sideways_stairs_left_side");
+
+         Assert.False(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, 0));
+         Assert.True(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, 1));
+         Assert.True(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, 2));
+         Assert.True(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, 3));
+      }
+
+      [Fact]
+      public void IsSidewaysStairsBehavior_GoesByTheNameNotTheNumber() {
+         // a vanilla ROM has other behaviors under the numbers 73 to 78
+         Model.SetList(Token, "MapAttributeBehaviors", Enumerable.Range(0, 80).Select(i => $"UNUSED_{i:X2}").ToArray());
+
+         for (int behavior = 70; behavior < 80; behavior++) Assert.False(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, behavior), $"behavior {behavior}");
+      }
+
+      [Fact]
+      public void IsSidewaysStairsBehavior_WithoutABehaviorList_IsFalse() {
+         Assert.False(BlockCollisionDefaults.IsSidewaysStairsBehavior(Model, 74));
+      }
+
+      [Fact]
+      public void ForUnusedBlock_GivesTheSidewaysStairsElevation3Pass_AndEverythingElseZero() {
+         CreateTilesetWithBehaviors(0, 74, 73, 78); // normal, left side, right side, left side bottom
+
+         Assert.Equal(0, BlockCollisionDefaults.ForUnusedBlock(Model, TilesetHeader, 0));
+         Assert.Equal(0x0C, BlockCollisionDefaults.ForUnusedBlock(Model, TilesetHeader, 1));
+         Assert.Equal(0x0C, BlockCollisionDefaults.ForUnusedBlock(Model, TilesetHeader, 2));
+         Assert.Equal(0x0C, BlockCollisionDefaults.ForUnusedBlock(Model, TilesetHeader, 3));
+      }
+
+      [Fact]
+      public void ForUnusedBlock_FollowsTheBehaviorTheBlockHasNow() {
+         CreateTilesetWithBehaviors(0, 0, 0, 0);
+         Assert.Equal(0, BlockCollisionDefaults.ForUnusedBlock(Model, TilesetHeader, 2));
+
+         Data[AttributeData + 2 * 2] = 75; // the block editor gives block 2 a stairs behavior
+
+         Assert.Equal(0x0C, BlockCollisionDefaults.ForUnusedBlock(Model, TilesetHeader, 2));
+      }
+
+      [Fact]
+      public void ForUnusedBlock_WithoutBehaviorNames_IsAlwaysZero() {
+         CreateTilesetWithBehaviors(0, 74, 73, 78);
+         Model.SetList(Token, "MapAttributeBehaviors", Enumerable.Range(0, 80).Select(i => $"UNUSED_{i:X2}").ToArray());
+
+         for (int block = 0; block < 4; block++) Assert.Equal(0, BlockCollisionDefaults.ForUnusedBlock(Model, TilesetHeader, block));
+      }
+
+      [Fact]
+      public void ForUnusedBlock_BlockWithoutAnAttribute_IsZero() {
+         CreateTilesetWithBehaviors(0, 74, 73, 78);
+
+         Assert.Equal(0, BlockCollisionDefaults.ForUnusedBlock(Model, TilesetHeader, -1));
+         Assert.Equal(0, BlockCollisionDefaults.ForUnusedBlock(Model, TilesetHeader, 600)); // past the end of any tileset
+         Assert.Equal(0, BlockCollisionDefaults.ForUnusedBlock(Model, -1, 1));             // no tileset
+         Assert.Equal(0, BlockCollisionDefaults.ForUnusedBlock(Model, 0x300, 1));          // not a tileset header (no pointers)
       }
 
       #endregion

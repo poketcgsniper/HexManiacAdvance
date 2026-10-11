@@ -2395,6 +2395,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       #endregion
 
+      private const int UnusedBlock = -1; // 'preferred collision' of a block that no map uses (kept apart from the collisions 0-3F so the default can follow the block's behavior as it is edited)
       private Dictionary<long, int[]> preferredCollisionsPrimary;
       private Dictionary<long, int[]> preferredCollisionsSecondary;
       private readonly AutoDictionary<long, AutoDictionary<int, int>> blockUsageCount = new(_ => new(_ => 0)); // for a tileset, for a block, the total number of times that block is used
@@ -2463,7 +2464,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                foreach (var (tile, amount) in histogram[i]) {
                   if (amount > useAmount) (mostUsedCollision, useAmount) = (tile, amount);
                }
-               preference[i] = mostUsedCollision.LimitToRange(0, 0x3F);
+               preference[i] = mostUsedCollision < 0 ? UnusedBlock : mostUsedCollision.LimitToRange(0, 0x3F);
             }
             preferredCollisionsPrimary[blockset] = preference;
          }
@@ -2475,7 +2476,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                foreach (var (tile, amount) in histogram[i]) {
                   if (amount > useAmount) (mostUsedCollision, useAmount) = (tile, amount);
                }
-               preference[i] = mostUsedCollision.LimitToRange(0, 0x3F);
+               preference[i] = mostUsedCollision < 0 ? UnusedBlock : mostUsedCollision.LimitToRange(0, 0x3F);
             }
             preferredCollisionsSecondary[blockset] = preference;
          }
@@ -2520,13 +2521,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          foreach (var map in VisibleMaps) map.ClearCaches();
       }
 
+      /// <summary>
+      /// The movement permission to give a block when it is chosen for painting: the one most of its uses in the maps have.
+      /// A block that no map uses gets 0, except the sideways stairs (see <see cref="BlockCollisionDefaults"/>), or -1 if the block's blockset isn't known.
+      /// </summary>
       private int GetPreferredCollision(int tile) {
          if (preferredCollisionsPrimary == null) CountCollisionForBlocks();
          int[] preference;
          if (tile < PrimaryTiles) {
-            if (preferredCollisionsPrimary.TryGetValue(blockset1, out preference)) return preference[tile];
+            if (preferredCollisionsPrimary.TryGetValue(blockset1, out preference)) return preference[tile] != UnusedBlock ? preference[tile] : BlockCollisionDefaults.ForUnusedBlock(model, blockset1, tile);
          } else {
-            if (preferredCollisionsSecondary.TryGetValue(blockset2, out preference)) return preference[tile];
+            if (preferredCollisionsSecondary.TryGetValue(blockset2, out preference)) return preference[tile] != UnusedBlock ? preference[tile] : BlockCollisionDefaults.ForUnusedBlock(model, blockset2, tile - PrimaryTiles);
          }
          return -1;
       }
