@@ -81,8 +81,11 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
          var data = Decompress(model, Start, allowLengthErrors: true);
          var colorCount = (int)Math.Pow(2, PaletteFormat.Bits);
          var pageLength = colorCount * 2;
-         page %= Pages;
+         // More colors than one page holds are the colors of the whole palette (a 256 color picture shows all 16 pages of 16 colors at once): they start with the first page.
+         page = colors.Count > colorCount ? 0 : page % Pages;
          var dataBefore = (byte[])data.Clone();
+         var colorsThatFit = (data.Length - page * pageLength) / 2;
+         if (colors.Count > colorsThatFit) colors = colors.Take(colorsThatFit).ToList();
          PaletteRun.SetPalette(data, page * pageLength, colors);
          if (data.SequenceEqual(dataBefore)) return this; // the same colors: don't recompress (see LzSpriteRun.SetPixels)
 

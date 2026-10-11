@@ -369,8 +369,11 @@ namespace HavenSoft.HexManiac.Core.Models.Runs.Sprites {
          return result;
       }
 
+      /// <summary>How many different tiles a tilemap can use: 1024 if its entries are two bytes (10 bits), 256 if they are one byte.</summary>
+      public static int TileLimit(bool twoByteEntries) => twoByteEntries ? 0x400 : 0x100;
+
       public static IReadOnlyList<int[,]> GetUniqueTiles((int[,] pixels, int palette)[,] tiles, bool allowFlips) {
-         var tileLimit = allowFlips ? 0x400 : 0x100; // only so many unique tiles are allowed
+         var tileLimit = TileLimit(allowFlips); // only so many unique tiles are allowed
          var tileWidth = tiles.GetLength(0);
          var tileHeight = tiles.GetLength(1);
          var result = new List<int[,]> {
