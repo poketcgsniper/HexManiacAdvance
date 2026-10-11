@@ -1,4 +1,5 @@
 ﻿using HavenSoft.HexManiac.Core.Models;
+using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.ViewModels.Images;
 using HavenSoft.HexManiac.Core.ViewModels.Map;
@@ -53,11 +54,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var info = table[index].GetSubTable("data");
          if (info == null || info.Count == 0 || !info[0].HasField("sprites")) return null;
          if (!(model.GetNextRun(info[0].GetAddress("sprites")) is OverworldSpriteListRun frames) || frames.PointerSources == null) return null;
+         var treeHeight = info[0].HasField("height") ? info[0].GetValue("height") : 32;
          foreach (var source in frames.PointerSources) {
             if (source < berries.Start || source >= berries.Start + berries.Length) continue;
-            var height = info[0].HasField("height") ? info[0].GetValue("height") : 32;
-            return ObjectEventViewModel.RenderBerryStage(model, (source - berries.Start) / berries.ElementLength, height <= 16 ? 1 : 4);
+            return ObjectEventViewModel.RenderBerryStage(model, (source - berries.Start) / berries.ElementLength, treeHeight <= 16 ? 1 : 4);
          }
+
+         // the vanilla games don't list the frame tables in the berry stats: their generic berry tree graphics use the frame table of one berry (Pecha)
+         var berry = BerryTreeGraphics.FindBerryWithPictureTable(model, frames.Start);
+         if (berry >= 0) return ObjectEventViewModel.RenderBerryStage(model, berry, treeHeight <= 16 ? 1 : 4);
          return null;
       }
    }
