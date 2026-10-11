@@ -2755,7 +2755,11 @@ namespace HavenSoft.HexManiac.Core.Models {
          return sourcesDirectlyToThis;
       }
 
-      private T MoveRun<T>(ModelDelta changeToken, T run, int length, int newStart) where T : IFormattedRun {
+      private T MoveRun<T>(ModelDelta changeToken, T run, int length, int newStart) where T : IFormattedRun => MoveRun(changeToken, run, length, newStart, run.Start, length);
+
+      /// <param name="bodyStart">The start of all the data that is moving (a script moves all of its sections at once, and each section is moved as its own run).</param>
+      /// <param name="bodyLength">The length of all the data that is moving.</param>
+      private T MoveRun<T>(ModelDelta changeToken, T run, int length, int newStart, int bodyStart, int bodyLength) where T : IFormattedRun {
          var logName = run.Start.ToAddress();
          if (anchorForAddress.TryGetValue(run.Start, out var existingAnchorName)) logName = existingAnchorName;
          RaiseLogMessage($"Moving {run.GetType().Name} {logName} to {newStart.ToAddress()}");
@@ -2782,13 +2786,19 @@ namespace HavenSoft.HexManiac.Core.Models {
                var nextRun = GetNextRun(run.Start + 1);
                if (nextRun.Start >= run.Start + length) break;
                if (nextRun is IScriptStartRun sRun) {
-                  MoveRun(changeToken, sRun, 1, newStart + sRun.Start - run.Start);
+                  MoveRun(changeToken, sRun, 1, newStart + sRun.Start - run.Start, bodyStart, bodyLength);
                } else {
                   // clear format of any constants/pointers/streams that is considered part of the script
                   ClearFormatAndAnchors(changeToken, nextRun.Start, nextRun.Length);
                }
             }
             while (true);
+
+            // the pointers inside the script (a section that jumps back to the start of the script) were just cleared with the rest of its format:
+            // the script does not move with a record of them, because the old copy is about to be erased and the new copy is formatted again when it is read.
+            foreach (var source in run.PointerSources?.ToList() ?? new()) {
+               if (bodyStart <= source && source < bodyStart + bodyLength) run = (T)run.RemoveSource(source);
+            }
          }
 
          // move data

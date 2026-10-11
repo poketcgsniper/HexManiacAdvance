@@ -1001,6 +1001,24 @@ label2:;goto <000050>;end";
       }
 
       [Fact]
+      public void ScriptWithAPointerBackToItsStart_GrowsUntilItMoves_NoRunListsTheOldCopyOfAPointerAsItsSource() {
+         WriteEventScript(0x10, "end");
+         ViewPort.Goto.Execute(0x10);
+         EventScript = "section0:;nop;goto <section1>;section1:;nop;goto <section0>"; // the second section points back to the start of the script
+         ViewPort.Edit("@04 <010> "); // something outside the script points to it too
+         ViewPort.Edit("@1C ^blocker\"\" "); // the script cannot grow in place
+         ViewPort.Goto.Execute(0x10);
+
+         EventScript = "section0:;nop;goto <section1>;section1:;nop;nop;nop;nop;nop;nop;nop;nop;nop;nop;goto <section0>";
+
+         var runs = Enumerable.Range(0, Model.Count).Select(Model.GetNextRun).Where(run => run.Start < Model.Count).Distinct().ToList();
+         Assert.Contains(runs, run => run is IScriptStartRun && run.Start > 0x20); // the script moved
+         foreach (var run in runs.Where(run => run.PointerSources != null)) {
+            Assert.All(run.PointerSources, source => Assert.True(Model.ReadPointer(source) == run.Start, $"{run.GetType().Name} {run.Start:X2} lists {source:X2}, which points to {Model.ReadPointer(source):X2}"));
+         }
+      }
+
+      [Fact]
       public void EntireScriptSelected_SelectLastByte_ShownScriptUpdated() {
          EventScript = "nop;end";
          ViewPort.SelectionStart = new(0, 0);
