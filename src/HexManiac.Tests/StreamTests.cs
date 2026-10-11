@@ -114,6 +114,19 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(0x34, Model[1]);
       }
 
+      [Theory]
+      [InlineData("@20 @!00(4) @!put(00FE) ")] // a paste of a stream over a pointer cell: the 00 of the same length does not clear a pointer, then put overwrites it
+      [InlineData("@22 @!put(00FE) ")]
+      public void ViewPort_PutMetacommandOverAPointer_DestinationNoLongerListsThePointerAsItsSource(string edit) {
+         ViewPort.Edit("@20 <040> ");
+         Assert.Contains(0x20, (System.Collections.Generic.IEnumerable<int>)Model.GetNextRun(0x40).PointerSources);
+
+         ViewPort.Edit(edit);
+
+         var destination = Model.GetNextRun(0x40);
+         Assert.DoesNotContain(0x20, (destination.PointerSources ?? SortedSpan<int>.None).ToList());
+      }
+
       [Fact]
       public void StreamWithCustomEnd_CutPaste_DataUpdates() {
          SetFullModel(0xFF);

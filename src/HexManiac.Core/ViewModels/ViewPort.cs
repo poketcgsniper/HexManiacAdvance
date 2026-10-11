@@ -3237,7 +3237,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                exitEditEarly = true;
                return;
             }
-            for (int i = 0; i < content.Length / 2; i++) {
+            // the bytes replace whatever is there, including pointers: the destinations of those pointers have to forget them while the cells still hold the pointers
+            var putLength = content.Length / 2;
+            var overwrittenPointers = new List<IFormattedRun>();
+            for (var run = Model.GetNextRun(index); run.Start < index + putLength && run.Start < Model.Count; run = Model.GetNextRun(run.Start + Math.Max(run.Length, 1))) {
+               if (run is PointerRun && run.Start + run.Length > index) overwrittenPointers.Add(run);
+            }
+            foreach (var pointer in overwrittenPointers) Model.ClearFormat(CurrentChange, pointer.Start, pointer.Length);
+            for (int i = 0; i < putLength; i++) {
                var data = byte.Parse(content.Substring(i * 2, 2), NumberStyles.HexNumber);
                CurrentChange.ChangeData(Model, index + i, data);
             }
