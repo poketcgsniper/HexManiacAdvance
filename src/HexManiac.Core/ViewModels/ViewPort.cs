@@ -2417,6 +2417,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             // open tool
             var byteOffset = scroll.ViewPointToDataIndex(new Point(x, y));
             var currentRun = Model.GetNextRun(byteOffset);
+            if (currentRun.Start > byteOffset) return; // GetNextRun also returns a run that starts later: there is nothing under the cursor to open
             if (currentRun is ISpriteRun) {
                tools.SpriteTool.SpriteAddress = currentRun.Start;
                tools.SelectedIndex = Tools.IndexOf(Tools.SpriteTool);

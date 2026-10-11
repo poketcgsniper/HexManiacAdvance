@@ -1596,6 +1596,24 @@ namespace HavenSoft.HexManiac.Tests {
       }
    }
 
+   public class TableFreeSpaceBeforeTableTests : BaseViewModelTestClass {
+      public TableFreeSpaceBeforeTableTests() : base(0x2000) { }
+
+      [Theory]
+      [InlineData(0x103A)]
+      [InlineData(0x102F)]
+      public void FollowLink_ByteInFreeSpaceBeforeATable_DoesNotOpenTheTableToolOnAnElementBeforeTheTable(int address) {
+         ViewPort.Edit("@1040 ^table[a:b:]4 ");
+         ViewPort.Goto.Execute(address.ToString("X4"));
+         ViewPort.Tools.SelectedIndex = ViewPort.Tools.IndexOf(ViewPort.Tools.CodeTool);
+
+         var point = ViewPort.ConvertAddressToViewPoint(address);
+         ViewPort.FollowLink(point.X, point.Y);
+
+         Assert.Same(ViewPort.Tools.CodeTool, ViewPort.Tools.SelectedTool);
+      }
+   }
+
    public static class TableToolTestExtensions {
       public static FieldArrayElementViewModel GetField(this TableTool table, string name) {
          var child = table.Children.Single(vm => vm is FieldArrayElementViewModel fvm && fvm.Name == name);
