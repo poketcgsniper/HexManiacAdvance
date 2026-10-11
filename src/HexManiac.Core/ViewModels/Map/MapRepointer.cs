@@ -693,7 +693,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                error = $"The file has {file.Length / 0x20} tiles, but this map can only use {maxTiles}. The tileset was left as it is.";
                return false;
             }
-            lzData = LZRun.Compress(file, 0, file.Length).ToArray();
+            lzData = TilesetPictureImporter.Compress(file); // (the smallest data the format allows, so the tileset can stay where it is more often)
             return true;
          }
          error = "Expected a tileset file with LZ-compressed tiles (the kind the Export command writes), or plain tile data with a multiple of 32 bytes. The tileset was left as it is.";

@@ -2,6 +2,7 @@
 using HavenSoft.HexManiac.Core.Models.Map;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.Models.Runs.Sprites;
+using HavenSoft.HexManiac.Core.ViewModels.Map;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -635,6 +636,15 @@ namespace HavenSoft.HexManiac.Tests {
 
             Assert.Equal(tiles, LZRun.Decompress(lz, 0));
          }
+      }
+
+      [Fact]
+      public void TilesetFile_PlainTiles_ArePackedAsSmallAsTheImportPacksPictures() {
+         // the old Import .bin takes a file of plain tiles too: it is compressed the same way, so it stays where the tileset is as often as a picture does
+         Assert.True(MapRepointer.TryReadTilesetFile(OriginalTiles, Max, out var data, out var error), error);
+
+         Assert.Equal(OriginalTiles, LZRun.Decompress(data, 0));
+         Assert.True(data.Length < LZRun.Compress(OriginalTiles, 0, OriginalTiles.Length).Count);
       }
 
       [Fact]
