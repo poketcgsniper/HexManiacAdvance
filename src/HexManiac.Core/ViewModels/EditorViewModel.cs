@@ -393,6 +393,31 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private bool animateScroll = true;
       public bool AnimateScroll { get => animateScroll; set => Set(ref animateScroll, value); }
 
+      #region Graphics (View > Graphics)
+
+      // Both settings are read when the program starts (the WPF layer reads them before the first window exists), so changing one only has an effect the next time CUBHMA starts.
+      // GraphicsSettings decides what each one means. The WPF layer listens to PropertyChanged to write the Windows graphics card choice as soon as the menu item is clicked.
+
+      private bool useDedicatedGraphics = true;
+      /// <summary>Ask Windows to run this program on the dedicated (high performance) graphics card instead of the one built into the processor. On by default. Needs a restart.</summary>
+      public bool UseDedicatedGraphics {
+         get => useDedicatedGraphics;
+         set => Set(ref useDedicatedGraphics, value, old => ShowStatus(GraphicsSettings.RestartNoteForGraphicsCard));
+      }
+
+      private bool useHardwareAcceleration = true;
+      /// <summary>Let the graphics card draw the program's windows. Turn it off if the graphics driver causes problems: the processor draws everything then. On by default. Needs a restart.</summary>
+      public bool UseHardwareAcceleration {
+         get => useHardwareAcceleration;
+         set => Set(ref useHardwareAcceleration, value, old => ShowStatus(GraphicsSettings.RestartNoteForRendering));
+      }
+
+      private string graphicsStatus = string.Empty;
+      /// <summary>One line that says how the program is drawing right now (graphics card or processor). The WPF layer fills it in at startup.</summary>
+      public string GraphicsStatus { get => graphicsStatus; set => Set(ref graphicsStatus, value ?? string.Empty); }
+
+      #endregion
+
       /// <summary>The View menu's choices for the opacity of the movement-permission grid in the map editor, in percent.</summary>
       public static IReadOnlyList<int> CollisionGridOpacityChoices { get; } = new[] { 10, 25, BlockMapViewModel.DefaultCollisionGridOpacity, 50, 75, 100 };
 
@@ -616,6 +641,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          ShowMatrix = !metadata.Contains("ShowMatrixGrid = False");
          FocusOnGotoShortcuts = !metadata.Contains("FocusOnGotoShortcuts = False");
          AnimateScroll = !metadata.Contains("AnimateScroll = False");
+         useDedicatedGraphics = GraphicsSettings.IsEnabled(metadata, GraphicsSettings.UseDedicatedGraphicsSetting); // the fields, not the properties: loading a setting says nothing to the user
+         useHardwareAcceleration = GraphicsSettings.IsEnabled(metadata, GraphicsSettings.UseHardwareAccelerationSetting);
          var collisionGridLine = metadata.FirstOrDefault(line => line.StartsWith("CollisionGridOpacity = "));
          if (collisionGridLine != null && int.TryParse(collisionGridLine.Split('=').Last().Trim(), out var collisionGridOpacity)) BlockMapViewModel.CollisionGridOpacity = collisionGridOpacity;
          AutoAdjustDataWidth = !metadata.Contains("AutoAdjustDataWidth = False");
@@ -663,6 +690,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             $"MaximumSearchResults = {MaximumSearchResults}",
             $"CopyLimit = {Singletons.CopyLimit}",
             $"AnimateScroll = {AnimateScroll}",
+            GraphicsSettings.SettingLine(GraphicsSettings.UseDedicatedGraphicsSetting, UseDedicatedGraphics),
+            GraphicsSettings.SettingLine(GraphicsSettings.UseHardwareAccelerationSetting, UseHardwareAcceleration),
             $"CollisionGridOpacity = {CollisionGridOpacity}",
             $"AutoAdjustDataWidth = {AutoAdjustDataWidth}",
             $"StretchData = {StretchData}",

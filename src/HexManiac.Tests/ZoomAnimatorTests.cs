@@ -227,60 +227,37 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.InRange(scale, 1, 2);
       }
 
-      #region Frame pacing
+      #region Frame pacing (there is no frame rate limit: every refresh of the display draws a frame)
 
       [Fact]
-      public void TheTargetCadence_IsSixtyFramesPerSecond() {
-         Assert.InRange(ZoomAnimator.FrameInterval.TotalMilliseconds, 16.6, 16.7);
-         // a frame that comes a little early (the render loop wobbles) must not be held back to the next display refresh: that would make 30 frames a second
-         Assert.True(ZoomAnimator.MinimumFrameInterval < ZoomAnimator.FrameInterval - TimeSpan.FromMilliseconds(3));
-         Assert.True(ZoomAnimator.MinimumFrameInterval > TimeSpan.FromMilliseconds(6), "but a 144 Hz display should still be held to about 60 to 80 frames a second");
+      public void ThereIsNoMinimumTimeBetweenFrames() {
+         // the old limiter (frames closer than 12 ms were skipped) held 120, 144 and 240 Hz displays to about 80 frames a second
+         var members = typeof(ZoomAnimator).GetMembers().Select(member => member.Name).ToList();
+         Assert.DoesNotContain("MinimumFrameInterval", members);
+         Assert.DoesNotContain("FrameInterval", members);
       }
 
       [Fact]
-      public void IsFrameDue_RightAfterStart_IsNotDue_ButTheFirstFrameDoesNotWaitForTheInterval() {
+      public void IsFrameDue_WhileTheZoomRuns_IsAlwaysTrue() {
          var animator = Create();
          animator.Start(1, 2);
-         Assert.False(animator.IsFrameDue); // no time has passed: the scale would not have changed
-         Wait(0.002);
-         Assert.True(animator.IsFrameDue);  // the first frame is drawn at the first display refresh: the zoom starts moving right away
-         var scale = animator.Update();
-         Assert.InRange(scale, 1.001, 1.5);
-      }
-
-      [Fact]
-      public void IsFrameDue_AfterAFrameWasDrawn_WaitsAgain() {
-         var animator = Create();
-         animator.Start(1, 2);
-         Wait(0.04);
+         Assert.True(animator.IsFrameDue); // the first frame doesn't wait for time to pass
+         animator.Update();
+         Assert.True(animator.IsFrameDue); // and a frame doesn't wait for the last one to get old
+         Wait(0.0001);
          Assert.True(animator.IsFrameDue);
          animator.Update();
-         Assert.False(animator.IsFrameDue);
-         Wait(0.01);
-         Assert.False(animator.IsFrameDue);
-         Wait(0.025);
-         Assert.True(animator.IsFrameDue);
-      }
-
-      [Fact]
-      public void IsFrameDue_Is12MillisecondsAfterTheLastFrame() {
-         var animator = Create();
-         animator.Start(1, 2);
          Wait(0.002);
-         animator.Update();
-         Wait(0.0115);
-         Assert.False(animator.IsFrameDue);
-         Wait(0.001);
          Assert.True(animator.IsFrameDue);
       }
 
       [Fact]
-      public void IsFrameDue_WhenTheTimeIsUp_TheExactTargetIsNotHeldBack() {
+      public void IsFrameDue_WhenTheTimeIsUp_TheExactTargetIsDue() {
          var animator = Create(0.25);
          animator.Start(1, 2);
          Wait(0.24);
-         animator.Update(); // drawn at 0.24 seconds
-         Wait(0.011);       // 11 ms later: less than the minimum interval, but the zoom is over
+         animator.Update();
+         Wait(0.011);
          Assert.True(animator.IsFrameDue);
          Assert.Equal(2, animator.Update());
          Assert.False(animator.IsAnimating);
@@ -296,13 +273,18 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.False(animator.IsFrameDue);
       }
 
-      // Plays one zoom on a display that refreshes at the given rate (or at the given gaps between refreshes) and returns the scale of every frame that was drawn.
-      private List<(double time, double scale)> Play(ZoomAnimator animator, params double[] refreshGapsInSeconds) {
+      // Plays one zoom on a display that refreshes at the given rate (or at the given gaps between refreshes) and returns the scale of every frame that was drawn,
+      // and how many times the display refreshed.
+      private List<(double time, double scale)> Play(ZoomAnimator animator, params double[] refreshGapsInSeconds) => Play(animator, out _, refreshGapsInSeconds);
+
+      private List<(double time, double scale)> Play(ZoomAnimator animator, out int refreshes, params double[] refreshGapsInSeconds) {
          var frames = new List<(double time, double scale)>();
          var start = now; // the clock is exact to 100 nanoseconds, so the time of a frame is read from it, not added up
+         refreshes = 0;
          for (int i = 0; animator.IsAnimating && i < 10000; i++) {
             var gap = refreshGapsInSeconds[i % refreshGapsInSeconds.Length];
             Wait(gap);
+            refreshes++;
             var time = (now - start).TotalSeconds;
             Assert.False(animator.IsFallingBehind, "frames that come on time are never too slow");
             if (!animator.IsFrameDue) continue;
@@ -312,15 +294,19 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Theory]
+      [InlineData(30, 7, 9)]
       [InlineData(60, 15, 17)]
-      [InlineData(75, 17, 20)]
-      [InlineData(120, 15, 17)]
-      [InlineData(144, 17, 20)]
-      [InlineData(240, 17, 21)]
-      public void Display_OfAnyRefreshRate_DrawsSixtyToEightyFramesPerSecond_AndEndsOnTheExactTarget(int hertz, int least, int most) {
+      [InlineData(75, 18, 20)]
+      [InlineData(120, 30, 32)]
+      [InlineData(144, 36, 38)]
+      [InlineData(165, 41, 43)]
+      [InlineData(240, 60, 62)]
+      [InlineData(360, 90, 92)]
+      public void Display_OfAnyRefreshRate_DrawsAFrameOnEveryRefresh_AndEndsOnTheExactTarget(int hertz, int least, int most) {
          var animator = Create(0.25);
          animator.Start(1, 2);
-         var frames = Play(animator, 1.0 / hertz);
+         var frames = Play(animator, out var refreshes, 1.0 / hertz);
+         Assert.Equal(refreshes, frames.Count); // not a single refresh is skipped
          Assert.InRange(frames.Count, least, most);
          Assert.Equal(2, frames.Last().scale);
          Assert.Equal(frames.Select(frame => frame.scale).OrderBy(scale => scale), frames.Select(frame => frame.scale));
@@ -328,20 +314,25 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void Display_At60Hz_EveryRefreshDrawsAFrame_SoTheZoomRunsAtAFull60FramesPerSecond() {
-         var animator = Create(0.25);
-         animator.Start(1, 2);
-         var refreshes = 0;
-         var drawn = 0;
-         while (animator.IsAnimating) {
-            Wait(1.0 / 60);
-            refreshes++;
-            if (!animator.IsFrameDue) continue;
-            animator.Update();
-            drawn++;
+      public void FasterDisplays_GetSmallerSteps_AndTheZoomStillTakesTheSameTime() {
+         double LargestStep(int hertz, out double endTime) {
+            var animator = Create(0.25);
+            animator.Start(1, 2);
+            var frames = Play(animator, 1.0 / hertz);
+            endTime = frames.Last().time;
+            var steps = frames.Zip(frames.Skip(1), (a, b) => b.scale - a.scale).ToList();
+            return steps.Max();
          }
-         Assert.Equal(refreshes, drawn);
-         Assert.InRange(drawn, 15, 16); // a quarter of a second
+
+         var step60 = LargestStep(60, out var end60);
+         var step144 = LargestStep(144, out var end144);
+         var step240 = LargestStep(240, out var end240);
+         Assert.True(step144 < step60 * 0.6, $"{step144} should be well below {step60}");
+         Assert.True(step240 < step144 * 0.8, $"{step240} should be below {step144}");
+         // the zoom ends within one refresh of the same moment on every display
+         Assert.InRange(end60, 0.25, 0.25 + 1.0 / 60 + 0.001);
+         Assert.InRange(end144, 0.25, 0.25 + 1.0 / 144 + 0.001);
+         Assert.InRange(end240, 0.25, 0.25 + 1.0 / 240 + 0.001);
       }
 
       [Fact]
@@ -350,27 +341,22 @@ namespace HavenSoft.HexManiac.Tests {
          var gaps = new[] { 0.0135, 0.0195, 0.0160, 0.0185, 0.0140, 0.0175, 0.0150, 0.0195, 0.0140, 0.0165 };
          var animator = Create(0.25);
          animator.Start(1, 2);
-         var refreshes = 0;
-         var drawn = 0;
-         for (int i = 0; animator.IsAnimating && i < 1000; i++) {
-            Wait(gaps[i % gaps.Length]);
-            refreshes++;
-            if (!animator.IsFrameDue) continue;
-            animator.Update();
-            drawn++;
-         }
-         Assert.Equal(refreshes, drawn);
-         Assert.InRange(drawn, 14, 18);
+         var frames = Play(animator, out var refreshes, gaps);
+         Assert.Equal(refreshes, frames.Count);
+         Assert.InRange(frames.Count, 14, 18);
       }
 
       [Fact]
-      public void Display_At30Hz_DrawsEveryRefresh_AndStillTakesTheSameTime() {
+      public void Display_ThatDeliversTwoFramesAlmostAtOnce_DrawsBoth_AndTheZoomDoesNotSpeedUp() {
+         // WPF can raise its Rendering event twice in quick succession: the second call must not make the zoom jump ahead
          var animator = Create(0.25);
          animator.Start(1, 2);
-         var frames = Play(animator, 1.0 / 30);
-         Assert.InRange(frames.Count, 7, 9);
+         var frames = Play(animator, 0.0167, 0.0002);
          Assert.Equal(2, frames.Last().scale);
-         Assert.InRange(frames.Last().time, 0.25, 0.25 + 1.0 / 30 + 0.001);
+         Assert.Equal(frames.Select(frame => frame.scale).OrderBy(scale => scale), frames.Select(frame => frame.scale));
+         foreach (var (time, scale) in frames.Take(frames.Count - 1)) {
+            Assert.Equal(1 + ZoomAnimator.EaseOut(time / 0.25), scale, 6);
+         }
       }
 
       [Theory]
@@ -378,6 +364,8 @@ namespace HavenSoft.HexManiac.Tests {
       [InlineData(40)]
       [InlineData(20)]
       [InlineData(15)]
+      [InlineData(144)]
+      [InlineData(240)]
       public void TheZoom_IsAnimatedByTime_SoItEndsAtTheSameMomentWhateverTheFrameRate(int framesPerSecond) {
          var animator = Create(0.25);
          animator.Start(1, 2);
@@ -413,16 +401,19 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void Retarget_AtTheMomentOfAFrame_ContinuesWithTheNextFrameOnTheNextRefresh() {
+      public void Retarget_AtTheMomentOfAFrame_ContinuesWithTheNextFrame() {
          var animator = Create(0.25);
          animator.Start(1, 2);
          Wait(1.0 / 60);
          animator.Update();
          Wait(0.004);
+         var onScreen = animator.Current;
          animator.Retarget(3);
-         Assert.False(animator.IsFrameDue); // nothing has passed since the zoom was redirected
-         Wait(1.0 / 60);
          Assert.True(animator.IsFrameDue);
+         Assert.Equal(onScreen, animator.Update()); // nothing has passed since the zoom was redirected: the picture stays where it is
+         Wait(1.0 / 144);
+         Assert.True(animator.IsFrameDue);
+         Assert.True(animator.Update() > onScreen);
       }
 
       [Fact]

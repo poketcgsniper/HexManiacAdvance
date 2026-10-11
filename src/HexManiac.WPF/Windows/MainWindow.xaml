@@ -216,6 +216,42 @@
                      <MenuItem Header="75%" Tag="75" IsCheckable="True" Click="CollisionGridOpacityClick"/>
                      <MenuItem Header="100%" Tag="100" IsCheckable="True" Click="CollisionGridOpacityClick"/>
                   </MenuItem>
+                  <MenuItem Header="_Graphics">
+                     <MenuItem Header="Use _dedicated graphics card (restart needed)" IsCheckable="True" IsChecked="{Binding UseDedicatedGraphics}">
+                        <MenuItem.ToolTip>
+                           <ToolTip BorderThickness="0" Background="{DynamicResource Backlight}">
+                              <TextBlock>
+                                 On a computer with two graphics cards (most gaming laptops), ask Windows to run CUBHMA on the faster, dedicated one.
+                                 <LineBreak/>
+                                 That makes the map editor smoother. Turn it off if you have trouble with it.
+                                 <LineBreak/>
+                                 It is used the next time CUBHMA starts. You can also pick the card yourself in
+                                 <LineBreak/>
+                                 Windows: Settings &gt; System &gt; Display &gt; Graphics.
+                              </TextBlock>
+                           </ToolTip>
+                        </MenuItem.ToolTip>
+                     </MenuItem>
+                     <MenuItem Header="Hardware _accelerated rendering (restart needed)" IsCheckable="True" IsChecked="{Binding UseHardwareAcceleration}">
+                        <MenuItem.ToolTip>
+                           <ToolTip BorderThickness="0" Background="{DynamicResource Backlight}">
+                              <TextBlock>
+                                 Let the graphics card draw CUBHMA. Turn this off only if the graphics driver causes problems
+                                 <LineBreak/>
+                                 (flickering, black areas, crashes): the processor draws everything then, which is slower.
+                                 <LineBreak/>
+                                 It is used the next time CUBHMA starts.
+                              </TextBlock>
+                           </ToolTip>
+                        </MenuItem.ToolTip>
+                     </MenuItem>
+                     <Separator/>
+                     <MenuItem IsEnabled="False">
+                        <MenuItem.Header>
+                           <TextBlock Text="{Binding GraphicsStatus}" TextWrapping="Wrap" MaxWidth="340"/>
+                        </MenuItem.Header>
+                     </MenuItem>
+                  </MenuItem>
                   <Separator/>
                   <MenuItem Header="Reset _Zoom" Command="{Binding ResetZoom}">
                      <MenuItem.ToolTip>
