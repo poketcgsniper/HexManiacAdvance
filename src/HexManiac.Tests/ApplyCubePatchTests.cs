@@ -8,11 +8,13 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace HavenSoft.HexManiac.Tests {
    /// <summary>
-   /// Utilities > Misc > "Apply CUBE to a vanilla Emerald ROM...", run against a tiny stand-in for Emerald (0x200 bytes) and for CUBE (0x300 bytes),
+   /// Utilities > Misc > "Apply CUBE": it patches the ROM that is open in the current tab (like "Apply HUBOL DPE CFRU"), is grayed out unless that ROM is the
+   /// unmodified Emerald, and leaves the saving to the user. Run against a tiny stand-in for Emerald (0x200 bytes) and for CUBE (0x300 bytes),
    /// with a file system that only exists in memory.
    /// </summary>
    public class ApplyCubePatchTests {
@@ -27,11 +29,33 @@ namespace HavenSoft.HexManiac.Tests {
          public string[] ReadToml() => Toml;
       }
 
+      /// <summary>Runs everything at once, but lets a test change the world just before the patch is built in the background.</summary>
+      private class HookedDispatcher : IWorkDispatcher {
+         public Action BeforeBackgroundWork { get; set; }
+         /// <summary>When set, work for the UI thread waits in <see cref="Queued"/> until the test runs it.</summary>
+         public bool QueueUiWork { get; set; }
+         public List<Action> Queued { get; } = new List<Action>();
+         public Task WaitForRenderingAsync() => Task.CompletedTask;
+         public void BlockOnUIWork(Action action) => action();
+         public Task DispatchWork(Action action) {
+            if (QueueUiWork) Queued.Add(action); else action?.Invoke();
+            return Task.CompletedTask;
+         }
+         public Task RunBackgroundWork(Action action) {
+            var hook = BeforeBackgroundWork;
+            BeforeBackgroundWork = null; // only the first piece of background work (the patch itself), not the model that loads afterwards
+            hook?.Invoke();
+            action?.Invoke();
+            return Task.CompletedTask;
+         }
+         public IDelayWorkTimer CreateDelayTimer() => new ImmediateWorkTimer();
+      }
+
       private readonly StubFileSystem fs = new StubFileSystem();
-      private readonly HashSet<string> existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
       private readonly List<string> savedRoms = new List<string>();
       private readonly Dictionary<string, byte[]> romContents = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
       private readonly Dictionary<string, string[]> savedToml = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+      private readonly HookedDispatcher dispatcher = new HookedDispatcher();
 
       private readonly byte[] vanilla = new byte[VanillaLength];
       private readonly byte[] cube = new byte[CubeLength];
@@ -39,8 +63,6 @@ namespace HavenSoft.HexManiac.Tests {
       private readonly TestResources resources;
       private readonly EditorViewModel editor;
       private readonly ApplyCubePatch item;
-
-      private bool folderIsReadOnly, tomlCannotBeSaved;
 
       public static readonly string[] CubeToml = {
          "[General]",
@@ -53,8 +75,6 @@ namespace HavenSoft.HexManiac.Tests {
       };
 
       private static string VanillaPath => Path.Combine(TestDirectory, "Emerald.gba");
-      private static string CubePath => Path.Combine(TestDirectory, "Emerald CUBE.gba");
-      private static string CubeTomlPath => Path.Combine(TestDirectory, "Emerald CUBE.toml");
 
       public ApplyCubePatchTests() {
          for (int i = 0; i < vanilla.Length; i++) vanilla[i] = (byte)(i * 7 + i / 13);
@@ -77,26 +97,22 @@ namespace HavenSoft.HexManiac.Tests {
          using (var zip = new GZipStream(gz, CompressionMode.Compress, leaveOpen: true)) zip.Write(patch, 0, patch.Length);
 
          resources = new TestResources { Patch = gz.ToArray(), Toml = CubeToml };
-         spec = new VanillaRomSpec { Name = "Test Emerald", Length = VanillaLength, GameCode = "BPEE", Sha1 = EmeraldRomCheck.ComputeSha1(vanilla) };
+         spec = new VanillaRomSpec { Name = "Test Emerald", Length = VanillaLength, GameCode = "BPEE", Sha1 = EmeraldRomCheck.ComputeSha1(vanilla), Crc32 = (uint)Patcher.CalcCRC32(vanilla) };
 
-         fs.Exists = name => existing.Contains(name);
+         fs.Exists = name => romContents.ContainsKey(name) || savedToml.ContainsKey(name);
          fs.Save = file => {
-            if (folderIsReadOnly) return false;
             savedRoms.Add(file.Name);
             romContents[file.Name] = file.Contents;
-            existing.Add(file.Name);
             return true;
          };
          fs.SaveMetadata = (name, lines) => {
-            if (tomlCannotBeSaved) return false;
             savedToml[Path.ChangeExtension(name, ".toml")] = lines;
-            existing.Add(Path.ChangeExtension(name, ".toml"));
             return true;
          };
          fs.MetadataFor = name => savedToml.TryGetValue(Path.ChangeExtension(name, ".toml"), out var lines) ? lines : null;
          fs.LoadFile = name => romContents.TryGetValue(name, out var data) ? new LoadedFile(name, data) : null;
 
-         editor = new EditorViewModel(fs, InstantDispatch.Instance);
+         editor = new EditorViewModel(fs, dispatcher);
          item = new ApplyCubePatch(editor, resources, spec);
       }
 
@@ -113,21 +129,29 @@ namespace HavenSoft.HexManiac.Tests {
          return copy;
       }
 
+      private static byte[] WithGameCode(byte[] data, string code) {
+         var copy = (byte[])data.Clone();
+         Encoding.ASCII.GetBytes(code).CopyTo(copy, CodeAddress);
+         return copy;
+      }
+
+      private ViewPort SelectedViewPort => Assert.IsType<ViewPort>(editor.SelectedTab);
+
       // ---- registration -------------------------------------------------------------------------------------------
 
       [Fact]
-      public void UtilitiesMisc_ListsTheCubeCommand_ThatWorksWithoutAnOpenTab() {
+      public void UtilitiesMisc_ListsApplyCube_ThatNeedsAnOpenTabLikeHubol() {
          var command = editor.QuickEditsMisc.OfType<ApplyCubePatch>().Single();
 
-         Assert.Equal("Apply CUBE to a vanilla Emerald ROM...", command.Name);
-         Assert.IsAssignableFrom<IStandaloneQuickEdit>(command);
-         Assert.True(command.CanRun(null));
+         Assert.Equal("Apply CUBE", command.Name);
+         Assert.False(command is IStandaloneQuickEdit);
          Assert.False(string.IsNullOrWhiteSpace(command.Description));
+         Assert.Contains("Save", command.Description);
+         Assert.Single(editor.QuickEditsMisc.Where(edit => edit is ApplyCFRUPatch)); // the built-in HUBOL item it copies is still there
       }
 
       [Fact]
-      public void RunQuickEdit_WithNoTabOpen_DoesNotCrash() {
-         fs.OpenFile = (description, extensions) => null; // the user cancels the "choose a ROM" dialog
+      public void RunQuickEdit_WithNoTabOpen_DoesNothing() {
          var command = editor.QuickEditsMisc.OfType<ApplyCubePatch>().Single();
 
          editor.RunQuickEdit(command);
@@ -135,148 +159,303 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(0, editor.Count);
       }
 
+      // ---- when it is available ---------------------------------------------------------------------------------------------
+
+      [Fact]
+      public void NoTab_CanRun_IsFalse() {
+         Assert.False(item.CanRun(null));
+      }
+
+      [Fact]
+      public void VanillaTab_CanRun_IsTrue() {
+         Assert.True(item.CanRun(AddTab(VanillaPath, vanilla)));
+      }
+
+      [Fact]
+      public void VanillaTab_CanRunWithoutAKnownCrc_IsTrueAndOtherFilesStillFalse() {
+         var withoutCrc = new ApplyCubePatch(editor, resources, new VanillaRomSpec { Name = "Test Emerald", Length = VanillaLength, GameCode = "BPEE", Sha1 = spec.Sha1 });
+
+         Assert.True(withoutCrc.CanRun(AddTab(VanillaPath, vanilla)));
+         Assert.False(withoutCrc.CanRun(AddTab(VanillaPath, WithByte(vanilla, 0x150, 0x99))));
+      }
+
+      [Fact]
+      public void CubeTab_CanRun_IsFalse() {
+         Assert.False(item.CanRun(AddTab(VanillaPath, cube)));
+      }
+
+      [Fact]
+      public void TabsThatAreNotTheOriginalEmerald_CanRun_IsFalse() {
+         var expanded = new byte[VanillaLength + 0x300];
+         Array.Copy(vanilla, expanded, vanilla.Length);
+         var headered = new byte[VanillaLength + 0x200];
+         Array.Copy(vanilla, 0, headered, 0x200, vanilla.Length);
+         Encoding.ASCII.GetBytes("BPEE").CopyTo(headered, CodeAddress);
+
+         Assert.False(item.CanRun(AddTab(VanillaPath, WithGameCode(vanilla, "BPRE"))), "FireRed");
+         Assert.False(item.CanRun(AddTab(VanillaPath, WithGameCode(vanilla, "AXVE"))), "Ruby");
+         Assert.False(item.CanRun(AddTab(VanillaPath, WithGameCode(vanilla, "BPED"))), "another language of Emerald");
+         Assert.False(item.CanRun(AddTab(VanillaPath, WithByte(vanilla, 0x1F0, 0x99))), "edited Emerald");
+         Assert.False(item.CanRun(AddTab(VanillaPath, expanded)), "expanded Emerald");
+         Assert.False(item.CanRun(AddTab(VanillaPath, headered)), "Emerald with a copier header");
+         Assert.False(item.CanRun(AddTab(VanillaPath, new byte[0x40])), "a tiny file");
+         Assert.False(item.CanRun(AddTab(VanillaPath, new byte[0])), "an empty file");
+      }
+
+      [Fact]
+      public void VanillaTabIsEditedAndUndone_CanRun_FollowsTheContent() {
+         var tab = AddTab(VanillaPath, vanilla);
+         Assert.True(item.CanRun(tab));
+
+         tab.Edit("FF");
+         Assert.False(item.CanRun(tab));
+
+         tab.Undo.Execute();
+         Assert.True(item.CanRun(tab));
+      }
+
+      [Fact]
+      public void VanillaTabIsEdited_TheMenuItemIsAskedAgain() {
+         var command = editor.QuickEditsMisc.OfType<ApplyCubePatch>().Single();
+         var tab = AddTab(VanillaPath, vanilla);
+         var asked = 0;
+         command.CanRunChanged += (sender, e) => asked++;
+
+         tab.Edit("FF"); // the tab becomes "Emerald*"
+         var askedAfterEdit = asked;
+         tab.Undo.Execute(); // and "Emerald" again
+
+         Assert.True(askedAfterEdit > 0);
+         Assert.True(asked > askedAfterEdit);
+      }
+
+      [Fact]
+      public void RealEmeraldSpec_HasAKnownCrc32_ThatIsCheapToCheck() {
+         Assert.Equal(0x1F1C08FBu, VanillaRomSpec.EmeraldUsV10.Crc32);
+      }
+
       // ---- the normal flow ------------------------------------------------------------------------------------------------
 
       [Fact]
-      public void VanillaTabIsOpen_Run_WritesNewRomAndTomlNextToIt() {
+      public void VanillaTab_Run_ReplacesTheTabWithCubeAndItsMetadata() {
          var tab = AddTab(VanillaPath, vanilla);
 
          var result = item.Run(tab).Result;
 
          Assert.True(result.IsWarning, result.ErrorMessage);
-         Assert.Contains("Emerald CUBE.gba", result.ErrorMessage);
-         Assert.Equal(new[] { CubePath }, savedRoms);
-         Assert.Equal(cube, romContents[CubePath]);
-         Assert.Equal(CubeToml, savedToml[CubeTomlPath]);
-      }
-
-      [Fact]
-      public void VanillaTabIsOpen_Run_NeverTouchesTheOriginalRomOrItsToml() {
-         var tab = AddTab(VanillaPath, vanilla);
-
-         item.Run(tab).Wait();
-
-         Assert.DoesNotContain(VanillaPath, savedRoms);
-         Assert.DoesNotContain(Path.ChangeExtension(VanillaPath, ".toml"), savedToml.Keys);
-         Assert.Equal(vanilla, tab.Model.RawData);
-      }
-
-      [Fact]
-      public void VanillaTabIsOpen_Run_OpensTheNewRomInANewTabWithTheCubeMetadata() {
-         var tab = AddTab(VanillaPath, vanilla);
-
-         item.Run(tab).Wait();
-
-         Assert.Equal(2, editor.Count);
-         var cubeTab = Assert.IsType<ViewPort>(editor.SelectedTab);
-         Assert.Equal(Path.GetFullPath(CubePath), cubeTab.FullFileName);
+         Assert.Contains("Applied CUBE to Emerald.gba", result.ErrorMessage);
+         Assert.Equal(1, editor.Count);
+         var cubeTab = SelectedViewPort;
+         Assert.NotSame(tab, cubeTab);
+         Assert.Equal(Path.GetFullPath(VanillaPath), cubeTab.FullFileName);
          cubeTab.Model.InitializationWorkload.Wait();
          Assert.Equal(cube, cubeTab.Model.RawData);
          Assert.Equal(0x100, cubeTab.Model.GetAddressFromAnchor(new ModelDelta(), -1, "cube.test.anchor"));
-         Assert.Same(tab, editor[0]); // the vanilla tab is still there, unchanged
       }
 
       [Fact]
-      public void NoTabIsOpen_Run_AsksForTheRomAndBuildsCube() {
-         string asked = null;
-         fs.OpenFile = (description, extensions) => { asked = description; return new LoadedFile(VanillaPath, vanilla); };
+      public void VanillaTab_Run_MarksTheTabChangedButOffersNoUndo() {
+         var tab = AddTab(VanillaPath, vanilla);
 
-         var result = item.Run(null).Result;
+         item.Run(tab).Wait();
 
-         Assert.NotNull(asked);
-         Assert.True(result.IsWarning, result.ErrorMessage);
-         Assert.Equal(cube, romContents[CubePath]);
+         var cubeTab = SelectedViewPort;
+         Assert.Equal("Emerald*", cubeTab.Name);
+         Assert.False(cubeTab.ChangeHistory.IsSaved);
+         Assert.True(cubeTab.ChangeHistory.HasDataChange);
+         Assert.True(cubeTab.Save.CanExecute(fs));
+         Assert.False(cubeTab.Undo.CanExecute(null));
+      }
+
+      [Fact]
+      public void VanillaTab_Run_OffersSaveOnlyOnceTheNewRomHasLoaded() {
+         var tab = AddTab(VanillaPath, vanilla);
+         dispatcher.QueueUiWork = true; // the UI thread is busy: what is dispatched to it waits
+
+         item.Run(tab).Wait();
+         var cubeTab = SelectedViewPort;
+
+         Assert.True(cubeTab.ChangeHistory.IsSaved); // saving now would write the metadata of a model that is still being built
+         Assert.False(cubeTab.Save.CanExecute(fs));
+
+         dispatcher.QueueUiWork = false;
+         foreach (var work in dispatcher.Queued.ToList()) work?.Invoke();
+
+         Assert.False(cubeTab.ChangeHistory.IsSaved);
+         Assert.True(cubeTab.Save.CanExecute(fs));
+         Assert.Equal("Emerald*", cubeTab.Name);
+      }
+
+      [Fact]
+      public void VanillaTab_Run_WritesNothingUntilTheUserSaves() {
+         var tab = AddTab(VanillaPath, vanilla);
+
+         item.Run(tab).Wait();
+
+         Assert.Empty(savedRoms);
+         Assert.Empty(savedToml);
+         Assert.Equal(vanilla, tab.Model.RawData); // the model of the old tab is untouched too
+      }
+
+      [Fact]
+      public void VanillaTab_RunThenSave_WritesCubeAndItsTomlOverTheSameFile() {
+         var tab = AddTab(VanillaPath, vanilla);
+         item.Run(tab).Wait();
+         var cubeTab = SelectedViewPort;
+         cubeTab.Model.InitializationWorkload.Wait();
+
+         editor.Save.Execute(null);
+
+         Assert.Equal(new[] { VanillaPath }, savedRoms);
+         Assert.Equal(cube, romContents[VanillaPath]);
+         var tomlPath = Path.ChangeExtension(VanillaPath, ".toml");
+         Assert.True(savedToml.ContainsKey(tomlPath));
+         Assert.Contains("cube.test.anchor", string.Join(Environment.NewLine, savedToml[tomlPath]));
+         Assert.True(cubeTab.ChangeHistory.IsSaved);
+         Assert.Equal("Emerald", cubeTab.Name);
+      }
+
+      [Fact]
+      public void VanillaTab_RunThenEdit_UndoStopsAtTheCubeTab() {
+         var tab = AddTab(VanillaPath, vanilla);
+         item.Run(tab).Wait();
+         var cubeTab = SelectedViewPort;
+
+         cubeTab.Edit("FF");
+         Assert.True(cubeTab.Undo.CanExecute(null));
+         cubeTab.Undo.Execute();
+
+         Assert.False(cubeTab.Undo.CanExecute(null));
+         Assert.False(cubeTab.ChangeHistory.IsSaved); // the file on disk still is the original ROM
+         Assert.Equal(cube, cubeTab.Model.RawData);
+      }
+
+      [Fact]
+      public void VanillaTabBetweenOthers_Run_KeepsThePlaceInTheTabRow() {
+         var left = AddTab(Path.Combine(TestDirectory, "Left.gba"), new byte[0x40]);
+         var tab = AddTab(VanillaPath, vanilla);
+         var right = AddTab(Path.Combine(TestDirectory, "Right.gba"), new byte[0x40]);
+         editor.SelectedIndex = 1;
+
+         item.Run(tab).Wait();
+
+         Assert.Equal(3, editor.Count);
+         Assert.Same(left, editor[0]);
+         Assert.Same(right, editor[2]);
+         Assert.Equal("Emerald*", editor[1].Name);
+         Assert.Equal(1, editor.SelectedIndex);
+      }
+
+      [Fact]
+      public void OtherTabsOfTheSameRom_Run_AreClosedWithIt() {
+         var tab = AddTab(VanillaPath, vanilla);
+         var second = new ViewPort(VanillaPath, tab.Model, InstantDispatch.Instance, BaseViewModelTestClass.Singletons);
+         editor.Add(second);
+         Assert.Equal(2, editor.Count);
+
+         item.Run(tab).Wait();
+
+         Assert.Equal(1, editor.Count);
+         Assert.Equal("Emerald*", editor[0].Name);
+      }
+
+      [Fact]
+      public void AfterRun_TheCubeTabIsNotCompatibleAnymore() {
+         var tab = AddTab(VanillaPath, vanilla);
+
+         item.Run(tab).Wait();
+
+         Assert.False(item.CanRun(SelectedViewPort));
+      }
+
+      [Fact]
+      public void CubeTab_Run_SaysThereIsNothingToApply() {
+         var tab = AddTab(VanillaPath, vanilla);
+         item.Run(tab).Wait();
+
+         var result = item.Run(SelectedViewPort).Result;
+
+         Assert.False(result.IsWarning);
+         Assert.Contains("already is CUBE", result.ErrorMessage);
          Assert.Equal(1, editor.Count);
       }
 
       [Fact]
-      public void TabIsNotVanilla_Run_AsksForTheRomInstead() {
-         var tab = AddTab(Path.Combine(TestDirectory, "Edited.gba"), WithByte(vanilla, 0x150, 0x99));
-         var asked = false;
-         fs.OpenFile = (description, extensions) => { asked = true; return new LoadedFile(VanillaPath, vanilla); };
+      public void TabWithUnsavedNames_Run_RefusesInsteadOfThrowingThemAway() {
+         var tab = AddTab(VanillaPath, vanilla);
+         tab.Edit("^my.anchor ");
+         Assert.False(tab.ChangeHistory.IsSaved);
+         Assert.False(tab.ChangeHistory.HasDataChange);
+         Assert.True(item.CanRun(tab)); // the bytes are still the original Emerald
 
          var result = item.Run(tab).Result;
 
-         Assert.True(asked);
-         Assert.True(result.IsWarning, result.ErrorMessage);
-         Assert.Equal(new[] { CubePath }, savedRoms);
+         Assert.False(result.IsWarning);
+         Assert.Contains("not saved yet", result.ErrorMessage);
+         Assert.Same(tab, editor[0]);
+         Assert.Equal(1, editor.Count);
+      }
+
+      // ---- the tab changes while CUBE is being built -----------------------------------------------------------------------
+
+      [Fact]
+      public void TabIsEditedWhileBuilding_Run_AppliesNothing() {
+         var tab = AddTab(VanillaPath, vanilla);
+         dispatcher.BeforeBackgroundWork = () => tab.Edit("FF");
+
+         var result = item.Run(tab).Result;
+
+         Assert.False(result.IsWarning);
+         Assert.Contains("changed while CUBE was being built", result.ErrorMessage);
+         Assert.Same(tab, editor[0]);
+         Assert.Equal(1, editor.Count);
       }
 
       [Fact]
-      public void DialogCancelled_Run_DoesNothing() {
-         fs.OpenFile = (description, extensions) => null;
+      public void TabIsClosedWhileBuilding_Run_AppliesNothing() {
+         var tab = AddTab(VanillaPath, vanilla);
+         dispatcher.BeforeBackgroundWork = () => tab.Close.Execute(fs);
 
-         var result = item.Run(null).Result;
+         var result = item.Run(tab).Result;
 
-         Assert.False(result.HasError);
-         Assert.Empty(savedRoms);
-         Assert.Empty(savedToml);
+         Assert.False(result.IsWarning);
+         Assert.Contains("closed while CUBE was being built", result.ErrorMessage);
          Assert.Equal(0, editor.Count);
       }
 
-      [Fact]
-      public void OutputNameAlreadyExists_Run_PicksTheNextFreeName() {
-         existing.Add(CubePath); // an earlier CUBE (maybe with the user's edits)
-         var tab = AddTab(VanillaPath, vanilla);
+      // ---- inputs that are not a vanilla Emerald (the menu item is grayed out, but the menu can be a moment behind) ---------
 
+      private ErrorInfo RunOnTabWith(byte[] contents) {
+         var tab = AddTab(VanillaPath, contents);
          var result = item.Run(tab).Result;
-
-         var expected = Path.Combine(TestDirectory, "Emerald CUBE (2).gba");
-         Assert.True(result.IsWarning, result.ErrorMessage);
-         Assert.Equal(new[] { expected }, savedRoms);
-         Assert.True(savedToml.ContainsKey(Path.Combine(TestDirectory, "Emerald CUBE (2).toml")));
-      }
-
-      [Fact]
-      public void OnlyTheTomlAlreadyExists_Run_StillPicksTheNextFreeName() {
-         existing.Add(CubeTomlPath); // a stray .toml must not be overwritten either
-         var tab = AddTab(VanillaPath, vanilla);
-
-         item.Run(tab).Wait();
-
-         Assert.Equal(new[] { Path.Combine(TestDirectory, "Emerald CUBE (2).gba") }, savedRoms);
-         Assert.DoesNotContain(CubeTomlPath, savedToml.Keys);
-      }
-
-      // ---- inputs that are not a vanilla Emerald --------------------------------------------------------------------------
-
-      private ErrorInfo RunWithPickedFile(byte[] contents) {
-         fs.OpenFile = (description, extensions) => new LoadedFile(VanillaPath, contents);
-         return item.Run(null).Result;
+         Assert.Same(tab, editor[0]); // nothing was replaced
+         Assert.Equal(1, editor.Count);
+         Assert.Empty(savedRoms);
+         return result;
       }
 
       [Fact]
       public void OtherGame_Run_SaysWhichGameItIs() {
-         var firered = (byte[])vanilla.Clone();
-         Encoding.ASCII.GetBytes("BPRE").CopyTo(firered, CodeAddress);
-
-         var result = RunWithPickedFile(firered);
+         var result = RunOnTabWith(WithGameCode(vanilla, "BPRE"));
 
          Assert.False(result.IsWarning);
          Assert.Contains("FireRed", result.ErrorMessage);
-         Assert.Empty(savedRoms);
-         Assert.Equal(0, editor.Count);
       }
 
       [Fact]
       public void OtherLanguageOfEmerald_Run_SaysSo() {
-         var german = (byte[])vanilla.Clone();
-         Encoding.ASCII.GetBytes("BPED").CopyTo(german, CodeAddress);
-
-         var result = RunWithPickedFile(german);
+         var result = RunOnTabWith(WithGameCode(vanilla, "BPED"));
 
          Assert.Contains("BPED", result.ErrorMessage);
          Assert.Contains("language", result.ErrorMessage);
-         Assert.Empty(savedRoms);
       }
 
       [Fact]
       public void ModifiedEmerald_Run_SaysItIsNotTheOriginal() {
-         var result = RunWithPickedFile(WithByte(vanilla, 0x1F0, 0x99));
+         var result = RunOnTabWith(WithByte(vanilla, 0x1F0, 0x99));
 
          Assert.False(result.IsWarning);
          Assert.Contains("modified", result.ErrorMessage);
-         Assert.Empty(savedRoms);
       }
 
       [Fact]
@@ -284,10 +463,9 @@ namespace HavenSoft.HexManiac.Tests {
          var expanded = new byte[VanillaLength + 0x300];
          Array.Copy(vanilla, expanded, vanilla.Length);
 
-         var result = RunWithPickedFile(expanded);
+         var result = RunOnTabWith(expanded);
 
          Assert.Contains("expanded", result.ErrorMessage);
-         Assert.Empty(savedRoms);
       }
 
       [Fact]
@@ -296,43 +474,35 @@ namespace HavenSoft.HexManiac.Tests {
          Array.Copy(vanilla, 0, headered, 0x200, vanilla.Length);
          Encoding.ASCII.GetBytes("BPEE").CopyTo(headered, CodeAddress); // the game code is where a headerless ROM has it, the length is off
 
-         var result = RunWithPickedFile(headered);
+         var result = RunOnTabWith(headered);
 
          Assert.Contains("header", result.ErrorMessage);
-         Assert.Empty(savedRoms);
       }
 
       [Fact]
       public void FileThatIsNotARom_Run_SaysSo() {
-         var result = RunWithPickedFile(new byte[0x40]);
+         var result = RunOnTabWith(new byte[0x40]);
 
          Assert.Contains("too small", result.ErrorMessage);
-         Assert.Empty(savedRoms);
-      }
-
-      [Fact]
-      public void AlreadyCube_Run_SaysThereIsNothingToApply() {
-         var cubeCopy = (byte[])cube.Clone();
-         Assert.Equal("BPEE", EmeraldRomCheck.ReadGameCode(cubeCopy)); // the stand-in CUBE has Emerald's game code, like the real one
-
-         var result = RunWithPickedFile(cubeCopy);
-
-         Assert.False(result.IsWarning);
-         Assert.Contains("already is CUBE", result.ErrorMessage);
-         Assert.Empty(savedRoms);
       }
 
       [Fact]
       public void ChangedCube_Run_SaysItIsProbablyCube() {
-         var changedCube = WithByte(cube, 0x250, 0x77);
-
-         var result = RunWithPickedFile(changedCube);
+         var result = RunOnTabWith(WithByte(cube, 0x250, 0x77));
 
          Assert.Contains("probably already CUBE", result.ErrorMessage);
-         Assert.Empty(savedRoms);
       }
 
-      // ---- the patch files and the disk ---------------------------------------------------------------------------------------
+      [Fact]
+      public void NoTab_Run_ExplainsWhatToDo() {
+         var result = item.Run(null).Result;
+
+         Assert.False(result.IsWarning);
+         Assert.Contains("open in the current tab", result.ErrorMessage);
+         Assert.Equal(0, editor.Count);
+      }
+
+      // ---- the patch files ------------------------------------------------------------------------------------------------
 
       [Fact]
       public void PatchFilesMissing_Run_ExplainsWhatIsMissingAndWhere() {
@@ -344,8 +514,7 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.False(result.IsWarning);
          Assert.Contains(ShippedCubeResources.PatchFileName, result.ErrorMessage);
          Assert.Contains("test-resources", result.ErrorMessage);
-         Assert.Empty(savedRoms);
-         Assert.Equal(1, editor.Count);
+         Assert.Same(tab, editor[0]);
       }
 
       [Fact]
@@ -356,11 +525,11 @@ namespace HavenSoft.HexManiac.Tests {
          var result = item.Run(tab).Result;
 
          Assert.Contains(ShippedCubeResources.TomlFileName, result.ErrorMessage);
-         Assert.Empty(savedRoms);
+         Assert.Same(tab, editor[0]);
       }
 
       [Fact]
-      public void DamagedPatchFile_Run_ReportsItAndWritesNothing() {
+      public void DamagedPatchFile_Run_ReportsItAndChangesNothing() {
          var damaged = BpsPatch.DecompressIfGzip(resources.Patch);
          damaged[damaged.Length - 20] ^= 0x10;
          resources.Patch = damaged;
@@ -370,12 +539,12 @@ namespace HavenSoft.HexManiac.Tests {
 
          Assert.False(result.IsWarning);
          Assert.Contains("damaged", result.ErrorMessage);
-         Assert.Empty(savedRoms);
+         Assert.Same(tab, editor[0]);
          Assert.Equal(1, editor.Count);
       }
 
       [Fact]
-      public void PatchForAnotherRom_Run_ReportsItAndWritesNothing() {
+      public void PatchForAnotherRom_Run_ReportsItAndChangesNothing() {
          // a patch whose source is not what the "vanilla" spec describes: same length, other content, so the ROM check passes but the BPS source checksum does not
          var otherSource = (byte[])vanilla.Clone();
          otherSource[0x1F0] ^= 0xFF;
@@ -386,78 +555,117 @@ namespace HavenSoft.HexManiac.Tests {
 
          Assert.False(result.IsWarning);
          Assert.Contains("Could not build CUBE", result.ErrorMessage);
-         Assert.Empty(savedRoms);
+         Assert.Same(tab, editor[0]);
       }
 
       [Fact]
-      public void FolderIsReadOnly_Run_OffersAnotherPlace() {
-         folderIsReadOnly = true;
-         var elsewhere = Path.Combine(TestDirectory, "elsewhere", "My CUBE.gba");
-         string offered = null;
-         fs.RequestNewName = (name, description, extensions) => {
-            offered = name;
-            folderIsReadOnly = false; // the other folder can be written
-            return elsewhere;
-         };
-         var tab = AddTab(VanillaPath, vanilla);
-
-         var result = item.Run(tab).Result;
-
-         Assert.Equal("Emerald CUBE.gba", offered);
-         Assert.True(result.IsWarning, result.ErrorMessage);
-         Assert.Equal(cube, romContents[elsewhere]);
-         Assert.True(savedToml.ContainsKey(Path.ChangeExtension(elsewhere, ".toml")));
-         Assert.DoesNotContain(CubeTomlPath, savedToml.Keys);
-      }
-
-      [Fact]
-      public void FolderIsReadOnly_UserCancelsTheOtherPlace_ReportsAndWritesNothing() {
-         folderIsReadOnly = true;
-         fs.RequestNewName = (name, description, extensions) => null;
+      public void PatchWhoseResultHasTheWrongChecksum_Run_ChangesNothing() {
+         // the patch ran, but what it made is not what its author recorded: the tab must keep the original ROM
+         resources.Patch = new BpsPatchTests.BpsBuilder(vanilla, cube).SourceRead(0x100).TargetRead(new byte[CubeLength - 0x100]).Build(targetCrc: 0x12345678);
          var tab = AddTab(VanillaPath, vanilla);
 
          var result = item.Run(tab).Result;
 
          Assert.False(result.IsWarning);
-         Assert.Contains("could not be written", result.ErrorMessage);
+         Assert.Contains("Could not build CUBE", result.ErrorMessage);
+         Assert.Same(tab, editor[0]);
+         Assert.Equal(vanilla, tab.Model.RawData);
          Assert.Empty(savedRoms);
-         Assert.Empty(savedToml);
+      }
+
+      [Fact]
+      public void BrokenToml_Run_NeverLosesTheTab() {
+         resources.Toml = new[] { "[[NamedAnchors]]", "Name = '''broken'''", "Address = 0x5", "Format = '''[a: b:'''", "[[[[" };
+         var tab = AddTab(VanillaPath, vanilla);
+
+         var result = item.Run(tab).Result;
+
+         // however the metadata reader reacts to the garbage (an error message, or a tab without anchors), there still is exactly one tab for the file
+         Assert.Equal(1, editor.Count);
+         Assert.True(result.HasError);
+      }
+
+      [Fact]
+      public void RunTwiceInARow_SecondRunIsRefusedWhileTheFirstIsRunning() {
+         var tab = AddTab(VanillaPath, vanilla);
+         Task<ErrorInfo> second = null;
+         dispatcher.BeforeBackgroundWork = () => second = item.Run(tab);
+
+         var first = item.Run(tab).Result;
+
+         Assert.True(first.IsWarning, first.ErrorMessage);
+         Assert.Contains("already being applied", second.Result.ErrorMessage);
          Assert.Equal(1, editor.Count);
       }
+   }
 
-      [Fact]
-      public void FolderIsReadOnly_UserPicksTheOriginal_IsRefused() {
-         folderIsReadOnly = true;
-         fs.RequestNewName = (name, description, extensions) => VanillaPath;
-         var tab = AddTab(VanillaPath, vanilla);
+   /// <summary>The 'unsaved' tag of the change history that a rebuilt tab (Apply CUBE) uses.</summary>
+   public class ChangeHistoryUnsavedTagTests {
+      private readonly PokemonModel model = new PokemonModel(new byte[0x20], singletons: BaseViewModelTestClass.Singletons);
+      private readonly ChangeHistory<ModelDelta> history;
 
-         var result = item.Run(tab).Result;
-
-         Assert.False(result.IsWarning);
-         Assert.Contains("never overwritten", result.ErrorMessage);
-         Assert.Empty(savedRoms);
+      public ChangeHistoryUnsavedTagTests() {
+         history = new ChangeHistory<ModelDelta>(change => change.Revert(model));
       }
 
       [Fact]
-      public void TomlCannotBeWritten_Run_ReportsItAndDoesNotOpenTheRomWithoutMetadata() {
-         tomlCannotBeSaved = true;
-         var tab = AddTab(VanillaPath, vanilla);
-
-         var result = item.Run(tab).Result;
-
-         Assert.False(result.IsWarning);
-         Assert.Contains(".toml", result.ErrorMessage);
-         Assert.Equal(1, editor.Count);
+      public void FreshHistory_IsSaved() {
+         Assert.True(history.IsSaved);
+         Assert.False(history.HasDataChange);
       }
 
       [Fact]
-      public void RunTwice_SecondRunUsesTheNextName() {
-         var tab = AddTab(VanillaPath, vanilla);
+      public void TagAsUnsaved_MakesTheHistoryUnsavedWithADataChangeButNothingToUndo() {
+         history.TagAsUnsaved();
 
-         item.Run(tab).Wait();
-         item.Run(tab).Wait();
+         Assert.False(history.IsSaved);
+         Assert.True(history.HasDataChange);
+         Assert.False(history.Undo.CanExecute(null));
+      }
 
-         Assert.Equal(new[] { CubePath, Path.Combine(TestDirectory, "Emerald CUBE (2).gba") }, savedRoms);
+      [Fact]
+      public void TagAsUnsaved_NotifiesListeners() {
+         var notified = new List<string>();
+         history.PropertyChanged += (sender, e) => notified.Add(e.PropertyName);
+
+         history.TagAsUnsaved();
+
+         Assert.Contains(nameof(history.IsSaved), notified);
+         Assert.Contains(nameof(history.HasDataChange), notified);
+      }
+
+      [Fact]
+      public void TagAsSaved_AfterTagAsUnsaved_IsSavedAgain() {
+         history.TagAsUnsaved();
+
+         history.TagAsSaved();
+
+         Assert.True(history.IsSaved);
+         Assert.False(history.HasDataChange);
+      }
+
+      [Fact]
+      public void EditThenUndo_AfterTagAsUnsaved_StaysUnsaved() {
+         history.TagAsUnsaved();
+         history.CurrentChange.ChangeData(model, 2, 0x55);
+         history.ChangeCompleted();
+         Assert.True(history.Undo.CanExecute(null));
+
+         history.Undo.Execute(null);
+
+         Assert.Equal(0, model[2]);
+         Assert.False(history.Undo.CanExecute(null));
+         Assert.False(history.IsSaved); // the content on disk is still not what is in the tab
+      }
+
+      [Fact]
+      public void TagAsUnsavedTwice_IsTheSameAsOnce() {
+         history.TagAsUnsaved();
+         history.TagAsUnsaved();
+
+         Assert.False(history.IsSaved);
+         history.TagAsSaved();
+         Assert.True(history.IsSaved);
       }
    }
 
