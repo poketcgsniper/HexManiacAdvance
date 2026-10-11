@@ -407,6 +407,13 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void ViewPortNotInAnEditor_FindAllSources_DoesNotThrow() {
+         ViewPort.Edit("@100 ^table^[a::]4 @20 <104> <104> ");
+
+         ViewPort.FindAllSources(0x104);
+      }
+
+      [Fact]
       public void NewAnchorWithSameNameDoesNotMovePointersToNewAnchor() {
          var viewPort = ViewPort;
 

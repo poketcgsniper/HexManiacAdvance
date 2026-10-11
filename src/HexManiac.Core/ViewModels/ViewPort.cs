@@ -1097,7 +1097,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          selection.OnError += (sender, e) => RaiseError(e);
          selection.RequestTabChanged += (sender, e) => {
             var request = new TabChangeRequestedEventArgs(e.Tab);
-            RequestTabChange(this, request);
+            RequestTabChange?.Invoke(this, request);
             if (request.RequestAccepted && request.NewTab == mapper) {
                if (e.IsBackArrow) {
                   mapper.AddForwardNavigation(-1);
@@ -2540,7 +2540,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (run is ArrayRun array && array.SupportsInnerPointers && address > run.Start && address < run.Start + run.Length) sources = array.PointerSourcesForInnerElements[(address - run.Start) / array.ElementLength];
          foreach (var source in sources ?? SortedSpan<int>.None) newTab.Add(CreateChildView(source, source), source, source);
 
-         RequestTabChange(this, new(newTab));
+         RequestTabChange?.Invoke(this, new(newTab));
          RequestMenuClose?.Invoke(this, EventArgs.Empty);
       }
 
