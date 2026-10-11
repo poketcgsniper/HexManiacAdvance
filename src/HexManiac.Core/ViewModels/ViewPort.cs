@@ -2947,7 +2947,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                if (completeEditOperation.Result) {
                   // if the data we just changed was in a table, notify children of that table about the change
                   var previousRun = Model.GetNextRun(dataIndex);
-                  if (previousRun is ITableRun tableRun) {
+                  if (previousRun is ITableRun tableRun && tableRun.Start <= dataIndex) { // GetNextRun also returns a table that starts after the edit: nothing in that table changed
                      var offsets = tableRun.ConvertByteOffsetToArrayOffset(dataIndex);
                      var errorInfo = tableRun.NotifyChildren(Model, history.CurrentChange, offsets.ElementIndex, offsets.SegmentIndex);
                      HandleErrorInfo(errorInfo);
@@ -3003,6 +3003,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (currentText.StartsWith(GotoMarker.ToString())) {
             if (currentText.Length == 2 && currentText[1] == '{') {
                var currentAddress = scroll.ViewPointToDataIndex(point);
+               if (currentAddress + 4 > Model.Count) { // a pointer does not fit in the last bytes of the file
+                  ClearEdits(point);
+                  RaiseError($"Could not jump using pointer at {currentAddress:X6}");
+                  RequestMenuClose?.Invoke(this, EventArgs.Empty);
+                  result = true;
+                  return true;
+               }
                var destination = Model.ReadPointer(currentAddress);
                if (destination == Pointer.NULL) {
                   if (CreateNewData(currentAddress)) {

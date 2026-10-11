@@ -1245,6 +1245,40 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(0, Model.ReadMultiByteValue(child.Start, 2));
       }
 
+      [Theory]
+      [InlineData(0x80, 0x7E)] // one element of the table away from the byte that is typed
+      [InlineData(0x40, 0x00)] // several elements away: the "element" is before the table, and its pointer cell is not a pointer segment of the table
+      public void ChildPointerNullAndLengthSet_ByteTypedInFreeSpaceBeforeTheTable_NothingElseChanges(int tableStart, int typedAt) {
+         SetFullModel(0xFF);
+         Model.FreeSpaceBuffer = 0;
+         ViewPort.Edit($"@{tableStart:X3} 02 00 00 00 <null> @{tableStart:X3} ^parent[count:: child<[a. b.]/count>]1 @004 00 00 00 00 ");
+         var before = Model.RawData.ToArray();
+         var tableBefore = Model.GetNextRun(tableStart);
+
+         ViewPort.Edit($"@{typedAt:X3} 12 ");
+
+         Assert.Empty(Errors);
+         Assert.Equal(0x12, Model[typedAt]);
+         before[typedAt] = 0x12;
+         Assert.Equal(before, Model.RawData.ToArray());
+         Assert.Equal(Pointer.NULL, Model.ReadPointer(tableStart + 4));
+         Assert.Equal(tableBefore.FormatString, Model.GetNextRun(tableStart).FormatString);
+      }
+
+      [Theory]
+      [InlineData(1)]
+      [InlineData(2)]
+      [InlineData(3)]
+      public void JumpMarkerTypedWithinThreeBytesOfTheEndOfTheFile_RaisesAnErrorInsteadOfReadingPastTheEnd(int bytesFromEnd) {
+         SetFullModel(0xFF);
+         var before = Model.RawData.ToArray();
+
+         ViewPort.Edit($"@{Model.Count - bytesFromEnd:X} @{{ ");
+
+         Assert.NotEmpty(Errors);
+         Assert.Equal(before, Model.RawData.ToArray());
+      }
+
       [Fact]
       public void DataBeforeChildTable_ChangeChildLengthToNegative_DataNotDeleted() {
          SetFullModel(0xFF);
