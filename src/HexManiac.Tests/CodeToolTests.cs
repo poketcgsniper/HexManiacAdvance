@@ -1019,6 +1019,24 @@ label2:;goto <000050>;end";
       }
 
       [Fact]
+      public void ScriptWithAPointerToUnformattedMovementData_GrowsUntilItMoves_StreamNoLongerListsTheOldCopyOfThePointerAsItsSource() {
+         ViewPort.Edit("^some.script`xse` 4F 00 00 <008> 02 01 02 03 FE @008 ^[move.movementtypes]!FE ");
+         Model.ClearFormat(ViewPort.ChangeHistory.CurrentChange, 3, 4); // the pointer in the script and the stream it points to have no format, like a script that was loaded from a rom
+         Model.ClearFormat(ViewPort.ChangeHistory.CurrentChange, 8, 4);
+         Assert.IsNotType<TableStreamRun>(Model.GetNextRun(8));
+         ViewPort.Goto.Execute(0);
+
+         EventScript = "nop;nop;nop;nop;nop;nop;nop;nop;applymovement 0 <008>;end"; // the movement data is right after the script, so the script moves to grow
+
+         var runs = Enumerable.Range(0, Model.Count).Select(Model.GetNextRun).Where(run => run.Start < Model.Count).Distinct().ToList();
+         Assert.Contains(runs, run => run is IScriptStartRun && run.Start > 0); // the script moved
+         Assert.Contains(runs, run => run is TableStreamRun && run.Start == 8); // the movement data was formatted as a stream because the script points to it
+         foreach (var run in runs.Where(run => run.PointerSources != null)) {
+            Assert.All(run.PointerSources, source => Assert.True(Model.ReadPointer(source) == run.Start, $"{run.GetType().Name} {run.Start:X2} lists {source:X2}, which points to {Model.ReadPointer(source):X2}"));
+         }
+      }
+
+      [Fact]
       public void EntireScriptSelected_SelectLastByte_ShownScriptUpdated() {
          EventScript = "nop;end";
          ViewPort.SelectionStart = new(0, 0);
