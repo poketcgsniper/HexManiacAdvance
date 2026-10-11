@@ -104,7 +104,7 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
       /// <returns>Where the tiles are now.</returns>
       public int Write(ModelDelta token, TilesetPictureImport picture) {
          var start = TilesStart;
-         if (IsCompressed) return WriteCompressed(model, token, header, LZRun.Compress(picture.TileData, 0, picture.TileData.Length).ToArray());
+         if (IsCompressed) return WriteCompressed(model, token, header, Compress(picture.TileData));
          ForgetPointersTheTilesOverwrite(token, start, picture.TileData);
          token.ChangeData(model, start, picture.TileData);
          return start;
@@ -124,6 +124,17 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
             if (changed) overwritten.Add(run);
          }
          foreach (var run in overwritten) model.ClearFormat(token, run.Start, run.Length);
+      }
+
+      /// <summary>
+      /// The tiles as LZ data. It is the smallest data the format allows (<see cref="TilesetLz"/>), which is usually smaller than the data the tileset has now:
+      /// then a tileset whose picture changed a little stays where it is. The program's own compression takes over if that data would not decompress to exactly the tiles.
+      /// </summary>
+      public static byte[] Compress(byte[] tiles) {
+         var smallest = TilesetLz.Compress(tiles);
+         var check = LZRun.Decompress(smallest, 0);
+         if (check != null && check.Length == tiles.Length && check.SequenceEqual(tiles)) return smallest;
+         return LZRun.Compress(tiles, 0, tiles.Length).ToArray();
       }
 
       /// <summary>

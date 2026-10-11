@@ -157,6 +157,80 @@ namespace HavenSoft.HexManiac.Tests {
       }
    }
 
+   /// <summary>The smallest LZ data: has to decompress to the same bytes, stay inside what the BIOS decompressor accepts, and be smaller than the older compression.</summary>
+   public class TilesetLzTests {
+      private static IEnumerable<(string name, byte[] data)> Samples() {
+         var random = new Random(3);
+         yield return ("one byte", new byte[] { 7 });
+         yield return ("two bytes", new byte[] { 7, 7 });
+         yield return ("zeros", new byte[256]);
+         yield return ("zeros, 4 tiles", new byte[128]);
+         yield return ("noise", Enumerable.Range(0, 2000).Select(i => (byte)random.Next(256)).ToArray());
+         yield return ("tiles", Enumerable.Range(0, 32 * 40).Select(i => (byte)(((i / 32 + i % 32 / 4 + 1) % 15) | ((((i / 32) * 3 + i % 4 + 1) % 16) << 4))).ToArray());
+         yield return ("pattern of 3 (distance 3: odd)", Enumerable.Range(0, 300).Select(i => (byte)(10 + i % 3)).ToArray());
+         yield return ("pattern of 5 starting on an odd byte", new byte[] { 99 }.Concat(Enumerable.Range(0, 300).Select(i => (byte)(10 + i % 5))).ToArray());
+         yield return ("runs of 17, 18, 19 and 20", new byte[] { 1 }.Concat(new byte[17]).Concat(new byte[] { 2 }).Concat(new byte[18]).Concat(new byte[] { 3 }).Concat(Enumerable.Repeat((byte)4, 19)).Concat(new byte[] { 5 }).Concat(Enumerable.Repeat((byte)6, 20)).ToArray());
+         var block = Enumerable.Range(0, 4096).Select(i => (byte)random.Next(256)).ToArray();
+         yield return ("copies from exactly 4096 bytes back, from 3139 back and from 4129 back (too far)", block.Concat(block.Take(40)).Concat(new byte[] { 1, 2, 3 }).Concat(block.Skip(1000).Take(40)).Concat(new byte[] { 4 }).Concat(block.Skip(10).Take(40)).ToArray());
+         yield return ("16 KB of tiles", Enumerable.Range(0, 512 * 32).Select(i => (byte)((i / 64) % 3 == 0 ? random.Next(4) : (i * 7) & 0xFF)).ToArray());
+      }
+
+      [Fact]
+      public void Compress_DecompressesToTheSameBytes() {
+         foreach (var (name, data) in Samples()) {
+            var lz = TilesetLz.Compress(data);
+
+            Assert.Equal(data, LZRun.Decompress(lz, 0));
+            Assert.True(LZRun.IsCompressedLzData(lz, 0) == lz.Length, name);
+         }
+      }
+
+      [Fact]
+      public void Compress_NeverCopiesFromTheByteJustWritten() {
+         // a copy at distance 1 would be "write the same byte again": the BIOS decompressor for picture memory can't do that
+         foreach (var (name, data) in Samples()) {
+            var lz = TilesetLz.Compress(data);
+            var at = 4;
+            var written = 0;
+            while (written < data.Length) {
+               var flags = lz[at++];
+               for (int i = 0; i < 8 && written < data.Length; i++, flags <<= 1) {
+                  if ((flags & 0x80) == 0) { at++; written++; continue; }
+                  var length = (lz[at] >> 4) + 3;
+                  var distance = (((lz[at] & 0xF) << 8) | lz[at + 1]) + 1;
+                  at += 2;
+                  Assert.True(distance >= 2 && distance <= 4096, name + ": distance " + distance);
+                  Assert.True(distance <= written, name + ": copies from before the start");
+                  written += length;
+               }
+            }
+            Assert.Equal(data.Length, written);
+         }
+      }
+
+      [Fact]
+      public void Compress_IsNeverBiggerThanTheOlderCompression() {
+         foreach (var (name, data) in Samples()) {
+            var older = LZRun.Compress(data, 0, data.Length).Count;
+
+            Assert.True(TilesetLz.Compress(data).Length <= older, name);
+         }
+      }
+
+      [Fact]
+      public void Compress_OddDistancesAndPositions_AreUsed() {
+         // the older compression only copies from an even distance at an even position: 3 bytes back is out of its reach
+         var data = Enumerable.Range(0, 300).Select(i => (byte)(10 + i % 3)).ToArray();
+
+         Assert.True(TilesetLz.Compress(data).Length < LZRun.Compress(data, 0, data.Length).Count);
+      }
+
+      [Fact]
+      public void Compress_NoData_IsJustTheHeader() {
+         Assert.Equal(new byte[] { 0x10, 0, 0, 0 }, TilesetLz.Compress(new byte[0]));
+      }
+   }
+
    /// <summary>
    /// Tileset pictures: one ordinary PNG, 128 pixels wide, 16 tiles per row. Importing one changes tiles only, never a palette.
    /// </summary>
@@ -536,6 +610,31 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(before.Skip(Header + 8).Take(16).ToArray(), Model.RawData.Skip(Header + 8).Take(16).ToArray());
          var newPixels = ExportedPixels(Importer(), out _);
          for (int y = 0; y < 24; y++) for (int x = 0; x < 128; x++) Assert.Equal(pixels[x, y], newPixels[x, y]);
+      }
+
+      [Fact]
+      public void Write_SmallEdit_StaysWhereTheTilesetIs() {
+         // the tiles in the ROM were made by the older (bigger) compression, as most of the game's data is bigger than what the import writes
+         var importer = Importer();
+         var pixels = ExportedPixels(importer, out var palette);
+         pixels[10, 10] = (pixels[10, 10] + 3) % 16;
+         importer.TryRead(Picture(pixels, palette), out var picture, out _);
+
+         var newStart = importer.Write(new ModelDelta(), picture);
+
+         Assert.Equal(Tiles, newStart);
+         Assert.Equal(Tiles, Model.ReadPointer(Header + 4));
+         Assert.Equal(picture.TileData, ReadTilesNow());
+         Assert.True(Model.GetNextRun(Tiles) is LzTilesetRun);
+      }
+
+      [Fact]
+      public void Compress_GivesDataThatDecompressesToTheTiles() {
+         foreach (var tiles in new[] { OriginalTiles, MakeTiles(1, 4), MakeTiles(512, 9), new byte[64] }) {
+            var lz = TilesetPictureImporter.Compress(tiles);
+
+            Assert.Equal(tiles, LZRun.Decompress(lz, 0));
+         }
       }
 
       [Fact]
