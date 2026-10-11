@@ -181,13 +181,14 @@ namespace HavenSoft.HexManiac.Core.Models.Map {
       /// </summary>
       public static bool? IsDoorBehavior(IDataModel model, int behavior) {
          if (behavior < 0 || !model.TryGetList("MapAttributeBehaviors", out var list) || behavior >= list.Count) return null;
+         if (list[behavior] == null) return false; // (a behavior without a name: the list can have holes)
          var name = list[behavior].ToUpperInvariant().Replace(" ", "_");
          if (name.StartsWith("MB_")) name = name.Substring(3);
          return name == "ANIMATED_DOOR" || name == "PETALBURG_GYM_DOOR";
       }
 
       public static string BehaviorName(IDataModel model, int behavior) {
-         if (behavior >= 0 && model.TryGetList("MapAttributeBehaviors", out var list) && behavior < list.Count) return list[behavior];
+         if (behavior >= 0 && model.TryGetList("MapAttributeBehaviors", out var list) && behavior < list.Count && list[behavior] != null) return list[behavior];
          return behavior.ToString();
       }
 

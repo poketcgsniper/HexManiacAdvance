@@ -305,7 +305,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private void ExecuteRepointPrimaryBlocks() {
          var layout = GetLayout();
          var attributeSize = model.IsFRLG() ? 4 : 2;
-         var (blockCount, _) = EstimateBlockCount(layout, true);
+         var (blockCount, _) = BlockCountToCopy(layout, true);
          RepointBlocksetMember(Format.PrimaryBlockset, Format.Blocks, blockCount * 16);
          RepointBlocksetMember(Format.PrimaryBlockset, Format.BlockAttributes, blockCount * attributeSize, repointPrimaryBlocks);
       }
@@ -317,7 +317,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       private void ExecuteRepointSecondaryBlocks() {
          var layout = GetLayout();
          var attributeSize = model.IsFRLG() ? 4 : 2;
-         var (blockCount, _) = EstimateBlockCount(layout, false);
+         var (blockCount, _) = BlockCountToCopy(layout, false);
          RepointBlocksetMember(Format.SecondaryBlockset, Format.Blocks, blockCount * 16);
          RepointBlocksetMember(Format.SecondaryBlockset, Format.BlockAttributes, blockCount * attributeSize, repointSecondaryBlocks);
       }
@@ -363,24 +363,72 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          // neither have any formatting, so here's the plan:
          var token = history.CurrentChange;
          var layout = GetLayout();
-         var (blockCount, maxBlockCount) = EstimateBlockCount(layout, primary);
+         var (blockCount, maxBlockCount) = BlockCountToCopy(layout, primary);
          var attributeSize = model.IsFRLG() ? 4 : 2;
          var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
 
          // (1) copy/repoint/paste the blocks
+         // (the old data is only read: how long the old table is is a guess, and the bytes after it belong to something else)
          var blockStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.Blocks);
-         var blockData = Cut(blockStart, blockCount * 16);
+         var blockData = ReadBytes(blockStart, blockCount * 16);
          blockStart = model.RelocateForExpansion(token, model.GetNextRun(blockStart), maxBlockCount * 16).Start;
          Paste(blockStart, blockData, maxBlockCount * 16);
 
          // (2) copy/repoint/paste the attributes
          var attributeStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.BlockAttributes);
-         var attributeData = Cut(attributeStart, blockCount * attributeSize);
+         var attributeData = ReadBytes(attributeStart, blockCount * attributeSize);
          attributeStart = model.RelocateForExpansion(token, model.GetNextRun(attributeStart), maxBlockCount * attributeSize).Start;
          Paste(attributeStart, attributeData, maxBlockCount * attributeSize);
 
          DataMoved.Raise(this, new("Block", blockStart));
          history.ChangeCompleted();
+      }
+
+      /// <summary>
+      /// How many blocks to carry over when a blockset is copied, moved or exported.
+      /// The estimate stops at anything that looks like something else, and it can be too small: but every block that some map draws certainly exists.
+      /// </summary>
+      private (int count, int maxCount) BlockCountToCopy(ModelArrayElement layout, bool primary) {
+         var (count, maxCount) = EstimateBlockCount(layout, primary);
+         return (Math.Max(count, Math.Min(maxCount, CountBlocksUsedByAnyMap(layout, primary))), maxCount);
+      }
+
+      /// <summary>The highest block (plus one) that any map of the game draws from the blockset of this layout. Blocks of the secondary blockset are counted from its own start.</summary>
+      private int CountBlocksUsedByAnyMap(ModelArrayElement layout, bool primary) {
+         if (layout == null) return 0;
+         var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
+         var blockset = layout.GetSubTable(blocksetName);
+         if (blockset == null) return 0;
+         var target = blockset[0].Start;
+         var primaryBlocks = model.IsFRLG() ? 640 : 512;
+         var banks = model.GetTableModel(HardcodeTablesModel.MapBankTable);
+         if (banks == null) return 0;
+         var seen = new System.Collections.Generic.HashSet<int>();
+         int result = 0;
+         for (int i = 0; i < banks.Count; i++) {
+            var maps = banks[i]?.GetSubTable("maps");
+            if (maps == null) continue;
+            for (int j = 0; j < maps.Count; j++) {
+               var mapTable = maps[j]?.GetSubTable("map");
+               if (mapTable == null) continue;
+               var mapLayout = new MapModel(mapTable[0], i, j).Layout;
+               if (mapLayout.Element == null || !seen.Add(mapLayout.Element.Start)) continue;
+               var mapBlockset = primary ? mapLayout.PrimaryBlockset : mapLayout.SecondaryBlockset;
+               if (mapBlockset == null || mapBlockset.Start != target) continue;
+               var blockMap = mapLayout.BlockMap;
+               if (blockMap.Start < 0 || blockMap.Width <= 0 || blockMap.Height <= 0) continue;
+               var highest = BlockmapRun.GetMaxUsedBlock(model, blockMap.Start, blockMap.Width, blockMap.Height, primary ? primaryBlocks : 1024);
+               var count = primary ? highest + 1 : highest - primaryBlocks + 1;
+               if (count > result) result = count;
+            }
+         }
+         return result;
+      }
+
+      private byte[] ReadBytes(int start, int length) {
+         var result = new byte[length];
+         for (int i = 0; i < length && start + i >= 0 && start + i < model.Count; i++) result[i] = model[start + i];
+         return result;
       }
 
       public (int currentCount, int maxCount) EstimateBlockCount(ModelArrayElement layout, bool primary) {
@@ -408,11 +456,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       private void ExportBlocks(bool primary) {
          var layout = GetLayout();
-         var (blockCount, maxBlockCount) = EstimateBlockCount(layout, primary);
+         var (blockCount, maxBlockCount) = BlockCountToCopy(layout, primary);
          var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
          var blockStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.Blocks);
          var attributeStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.BlockAttributes);
-         var attributeSize = model.IsFRLG() ? 2 : 1;
+         var attributeSize = model.IsFRLG() ? 4 : 2; // bytes per block attribute (the same as BlocksetModel.BytesPerAttribute)
 
          var exportData = new byte[(16 + attributeSize) * blockCount];
          Array.Copy(model.RawData, blockStart, exportData, 0, blockCount * 16);
@@ -422,11 +470,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       private void ImportBlocks(bool primary) {
          var layout = GetLayout();
-         var (blockCount, maxBlockCount) = EstimateBlockCount(layout, primary);
+         var (blockCount, maxBlockCount) = BlockCountToCopy(layout, primary); // (the same count Export uses: a file made by Export replaces the table in place)
          var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
          var blockStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.Blocks);
          var attributeStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.BlockAttributes);
-         var attributeSize = model.IsFRLG() ? 2 : 1;
+         var attributeSize = model.IsFRLG() ? 4 : 2; // bytes per block attribute (the same as BlocksetModel.BytesPerAttribute)
 
          var file = fileSystem.OpenFile("Byte File", "bin");
          if (file == null) return;
@@ -616,6 +664,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             var file = fileSystem.OpenFile("Byte File", "bin");
             if (file == null) return;
             var existingRun = model.GetNextRun(start);
+            // anything that is not a compressed stream would turn the tileset into garbage (and leave a run without a length behind)
+            var allowLengthErrors = existingRun is LZRun existingLz && existingLz.AllowLengthErrors;
+            if (LZRun.IsCompressedLzData(file.Contents, 0, allowLengthErrors) < 1) {
+               viewPort.RaiseError("This tileset is compressed. The file has to hold LZ-compressed tile data, like the file 'Export tileset' writes. Nothing was imported.");
+               return;
+            }
             var newRun = model.RelocateForExpansion(history.CurrentChange, model.GetNextRun(start), file.Contents.Length);
             history.CurrentChange.ChangeData(model, newRun.Start, file.Contents);
             if (newRun is LzTilesetRun tsRun) {
@@ -693,8 +747,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          content.AppendLine("0100");
          content.AppendLine("16");
          for (int i = 0; i < 16; i++) {
-            var color = model.ReadMultiByteValue(start + i * 2, 2);
-            var (r, g, b) = UncompressedPaletteColor.ToRGB((short)color);
+            // the rom stores red in the low five bits, ToRGB expects it in the high bits
+            var color = PaletteRun.FlipColorChannels((short)model.ReadMultiByteValue(start + i * 2, 2));
+            var (r, g, b) = UncompressedPaletteColor.ToRGB(color);
             r = r * 255 / 31;
             g = g * 255 / 31;
             b = b * 255 / 31;
@@ -719,17 +774,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var file = fileSystem.LoadFile(folder + "/" + nameIndex.ToString("X2") + ".pal");
          if (file == null) return;
          var lines = Encoding.ASCII.GetString(file.Contents).SplitLines();
+         int colorCount = 0;
          foreach (var line in lines) {
+            if (colorCount == 16) break; // a palette has 16 colors, a longer file (256 colors from an image editor) must not spill into the next palette
             var parts = line.Split(' ');
             if (parts.Length != 3) continue;
             if (!parts[0].TryParseInt(out var r)) continue;
             if (!parts[1].TryParseInt(out var g)) continue;
             if (!parts[2].TryParseInt(out var b)) continue;
-            r /= 8;
-            g /= 8;
-            b /= 8;
-            PaletteRun.WriteStoredColor(model, history.CurrentChange, start, UncompressedPaletteColor.Pack(r, g, b)); // keeps bit 15 of the stored color
+            r = Math.Clamp(r / 8, 0, 31);
+            g = Math.Clamp(g / 8, 0, 31);
+            b = Math.Clamp(b / 8, 0, 31);
+            PaletteRun.WriteColor(model, history.CurrentChange, start, UncompressedPaletteColor.Pack(r, g, b)); // turns it into the order of the rom and keeps bit 15 of the stored color
             start += 2;
+            colorCount++;
          }
       }
 
@@ -783,7 +841,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var mapBanks = new ModelTable(model, model.GetTable(HardcodeTablesModel.MapBankTable).Start, tokenFactory);
          var options = mapBanks.Count.Range(i => i.ToString()).ToList();
          options.Add("Create New Bank");
-         var enumViewModel = new EnumViewModel(options.ToArray()) { Choice = format.RecentBank.LimitToRange(0, options.Count) };
+         var enumViewModel = new EnumViewModel(options.ToArray()) { Choice = format.RecentBank.LimitToRange(0, mapBanks.Count - 1) }; // (an existing bank: the last entry, 'Create New Bank', has to be asked for)
          var option = fileSystem.ShowOptions(
             "Pick a bank",
             prompt,

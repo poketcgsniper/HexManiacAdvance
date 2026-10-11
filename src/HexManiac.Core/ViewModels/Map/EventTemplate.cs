@@ -481,6 +481,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       private void WriteExpansionTrainer(ModelDelta token, ModelArrayElement trainer, int trainerIndex, TrainerPreference pref, int teamSize, int teamStart) {
          // start from a clean record: ai flags, items, starting status, mugshot, ... are all 0
+         ClearPointerFields(trainer); // (the old team must stop counting this record as a pointer to it)
          for (int i = 0; i < trainer.Length; i++) token.ChangeData(model, trainer.Start + i, 0);
          trainer.SetStringValue("name", "Name Me");
          trainer.SetValue("class", pref.TrainerClass);
@@ -494,11 +495,22 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             var table = model.GetTable(other);
             if (table == null || table.ElementLength != trainer.Length || trainerIndex >= table.ElementCount) continue;
             var start = table.Start + table.ElementLength * trainerIndex;
+            ClearPointerFields(new ModelArrayElement(model, table.Start, trainerIndex, () => token, table));
             for (int i = 0; i < trainer.Length; i++) token.ChangeData(model, start + i, model[trainer.Start + i]);
             if (trainer.Table.ElementContent.Any(segment => segment.Name == "pokemon" && segment.Type == ElementContentType.Pointer)) {
                var otherElement = new ModelArrayElement(model, table.Start, trainerIndex, () => token, table);
                otherElement.SetAddress("pokemon", teamStart);
             }
+         }
+      }
+
+      /// <summary>
+      /// Overwriting a record byte by byte leaves the model thinking the old destinations of its pointers are still pointed to by it.
+      /// Pointing the fields at nothing first lets the model forget them.
+      /// </summary>
+      private void ClearPointerFields(ModelArrayElement element) {
+         foreach (var segment in element.Table.ElementContent) {
+            if (segment.Type == ElementContentType.Pointer) element.SetAddress(segment.Name, Pointer.NULL, false);
          }
       }
 

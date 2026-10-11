@@ -306,6 +306,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       protected void RaiseEventVisualUpdated() => EventVisualUpdated.Raise(this);
 
+      /// <summary>the segment as it is for the element at this address: a switch field (like the argument of a signpost) is a pointer or a number, depending on another field. Null if it is not a pointer.</summary>
+      private static ArrayRunElementSegment GetPointerSegment(IDataModel model, ITableRun table, ArrayRunElementSegment segment, int address) {
+         if (segment is ArrayRunRecordSegment record) segment = record.CreateConcrete(model, table, address);
+         return segment.Type == ElementContentType.Pointer ? segment : null;
+      }
+
       protected bool DeleteElement(string parentCountField) {
          var table = element.Table;
          var model = element.Model;
@@ -313,12 +319,35 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var offset = table.ConvertByteOffsetToArrayOffset(element.Start);
          var editCount = table.ElementCount - offset.ElementIndex - 1;
          for (int i = 0; i < editCount; i++) {
+            // switch fields depend on another field of their element: find out what they are before that other field gets overwritten
+            var destinationStart = element.Start + i * element.Length;
+            var sourceStart = destinationStart + element.Length;
+            var oldPointer = new ArrayRunElementSegment[table.ElementContent.Count];
+            var newPointer = new ArrayRunElementSegment[table.ElementContent.Count];
+            int segmentStart = 0;
+            for (int j = 0; j < table.ElementContent.Count; j++) {
+               if (table.ElementContent[j] is ArrayRunRecordSegment) {
+                  oldPointer[j] = GetPointerSegment(model, table, table.ElementContent[j], destinationStart + segmentStart);
+                  newPointer[j] = GetPointerSegment(model, table, table.ElementContent[j], sourceStart + segmentStart);
+               }
+               segmentStart += table.ElementContent[j].Length;
+            }
+
             int segmentOffset = 0;
             for (int j = 0; j < table.ElementContent.Count; j++) {
                var source = element.Start + (i + 1) * element.Length + segmentOffset;
                var destination = source - element.Length;
                var length = table.ElementContent[j].Length;
-               if (table.ElementContent[j].Type == ElementContentType.Pointer) {
+               if (table.ElementContent[j] is ArrayRunRecordSegment) {
+                  // the one that is moved over is no longer pointing at its script: its pointer source goes away
+                  if (oldPointer[j] != null) model.UpdateArrayPointer(token, null, null, 0, destination, Pointer.NULL);
+                  var pointer = newPointer[j] == null ? Pointer.NULL : model.ReadPointer(source);
+                  if (pointer >= 0) {
+                     model.UpdateArrayPointer(token, newPointer[j], table.ElementContent, offset.ElementIndex, destination, pointer);
+                  } else {
+                     model.WriteMultiByteValue(destination, length, token, model.ReadMultiByteValue(source, length));
+                  }
+               } else if (table.ElementContent[j].Type == ElementContentType.Pointer) {
                   model.UpdateArrayPointer(token, table.ElementContent[j], table.ElementContent, offset.ElementIndex, destination, model.ReadPointer(source));
                } else {
                   model.WriteMultiByteValue(destination, length, token, model.ReadMultiByteValue(source, length));
@@ -327,6 +356,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             }
          }
          if (table.ElementCount > 1) {
+            // the last element falls off the table. Its switch fields are cleared without knowing what they were, so let go of its pointers first.
+            var lastStart = table.Start + (table.ElementCount - 1) * table.ElementLength;
+            int segmentStart = 0;
+            foreach (var segment in table.ElementContent) {
+               if (segment is ArrayRunRecordSegment && GetPointerSegment(model, table, segment, lastStart + segmentStart) != null) {
+                  model.UpdateArrayPointer(token, null, null, 0, lastStart + segmentStart, Pointer.NULL);
+               }
+               segmentStart += segment.Length;
+            }
             var shorterTable = table.Append(token, -1);
             model.ObserveRunWritten(token, shorterTable);
          } else {
@@ -684,7 +722,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public int RangeX {
          get => element.GetValue("range") & 0xF;
          set {
-            element.SetValue("range", (RangeY << 4) | value);
+            element.SetValue("range", (RangeY << 4) | (value & 0xF)); // (each is 4 bits: a bigger number must not spill into the other)
             rangeXY = null;
             NotifyPropertyChanged(nameof(RangeXY));
             RaiseEventVisualUpdated();
@@ -694,7 +732,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public int RangeY {
          get => element.GetValue("range") >> 4;
          set {
-            element.SetValue("range", (value << 4) | RangeX);
+            element.SetValue("range", ((value & 0xF) << 4) | RangeX);
             rangeXY = null;
             NotifyPropertyChanged(nameof(RangeXY));
             RaiseEventVisualUpdated();
@@ -711,7 +749,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             rangeXY = value;
             var parts = value.Split(new[] { ',', ' ', '(', ')' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length != 2) return;
-            if (parts[0].TryParseInt(out int x) && parts[1].TryParseInt(out int y)) element.SetValue("range", (y << 4) | x);
+            if (parts[0].TryParseInt(out int x) && parts[1].TryParseInt(out int y)) element.SetValue("range", ((y & 0xF) << 4) | (x & 0xF));
             NotifyPropertyChanged(nameof(RangeX));
             NotifyPropertyChanged(nameof(RangeY));
             NotifyPropertyChanged();
@@ -1207,7 +1245,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       public void ReplaceRematchScript() {
          // TODO replace script with simple trainer script (keep before/during/after battle text if we can)
          var content = EventTemplate.GetRematchTrainerContent(element.Model, parser, this);
-         string before = "<auto>", win = "<auto", after = "<auto>";
+         if (content == null) return; // not a rematch trainer: there is nothing to replace
+         string before = "<auto>", win = "<auto>", after = "<auto>";
          if (content.BeforeTextPointer != Pointer.NULL) before = $"<{content.BeforeTextPointer:X6}>";
          if (content.WinTextPointer != Pointer.NULL) win = $"<{content.WinTextPointer:X6}>";
          if (content.AfterTextPointer != Pointer.NULL) after = $"<{content.AfterTextPointer:X6}>";
@@ -1765,7 +1804,9 @@ show:
          showGraphicsAsText = Graphics >= sprites.Count; // the lists of dynamic graphics are filled when the event panel first asks for them
          objectEvent.Model.TryGetList("FacingOptions", out var list);
          FacingOptions.Update(ComboOption.Convert(list), MoveType);
-         FacingOptions.Bind(nameof(FacingOptions.SelectedIndex), (sender, e) => MoveType = FacingOptions.ModelValue);
+         FacingOptions.Bind(nameof(FacingOptions.SelectedIndex), (sender, e) => {
+            if (FacingOptions.SelectedIndex >= 0) MoveType = FacingOptions.ModelValue; // (a movement type without a name selects nothing: keep the number it has)
+         });
 
          tutorContent = new Lazy<TutorEventContent>(() => EventTemplate.GetTutorContent(element.Model, parser, this));
          martContent = new Lazy<MartEventContent>(() => EventTemplate.GetMartContent(element.Model, parser, this));
@@ -2043,6 +2084,7 @@ show:
          if (!model.TryGetList("MapAttributeBehaviors", out var list)) return false;
 
          int primaryBlockCount = model.IsFRLG() ? 640 : 512;
+         if (X < 0 || Y < 0 || X >= layout.Width || Y >= layout.Height) return false; // outside the map there is no block to warp from (and no cell to read)
          var cell = layout.BlockMap[X, Y];
          if (cell == null) return true; // failure to read layout, this warp rendering doesn't matter.
          var tile = cell.Tile;
@@ -2052,9 +2094,13 @@ show:
             blockset = layout.SecondaryBlockset;
          }
 
-         var behavior = blockset.Attribute(tile).Behavior;
-         if (list.Count <= behavior) return false;
-         return new[] { "Warp", "Door", "Stairs", "Ladder", "Escalator" }.Any(list[behavior].Contains);
+         var attribute = blockset?.Attribute(tile);
+         if (attribute == null) return true; // failure to read the attributes, this warp rendering doesn't matter.
+         var behavior = attribute.Behavior;
+         if (behavior < 0 || list.Count <= behavior) return false;
+         var behaviorName = list[behavior];
+         if (behaviorName == null) return false; // a behavior without a name (the list has holes) is not a warp behavior
+         return new[] { "Warp", "Door", "Stairs", "Ladder", "Escalator" }.Any(behaviorName.Contains);
       }
    }
 
@@ -2175,17 +2221,21 @@ show:
          if (ShowPointer) UpdateScriptError(Pointer);
       }
 
-      public void SetDestinationFormat() {
+      public void SetDestinationFormat() => SetDestinationFormat(new ModelDelta()); // don't track this change: showing a signpost is not an edit
+
+      private void SetDestinationFormat(ModelDelta token) {
          if (!ShowPointer) return;
+         if (Pointer < 0 || Pointer >= element.Model.Count) return; // a null (or out of file) pointer has nowhere to format
          var destinationRun = new XSERun(Pointer, SortedSpan<int>.None);
          var existingRun = element.Model.GetNextRun(destinationRun.Start);
          if (existingRun.Start < destinationRun.Start) return; // don't erase existing runs for this
          if (existingRun.Start == destinationRun.Start && existingRun is not NoInfoRun) return;
-         element.Model.ObserveRunWritten(new ModelDelta(), destinationRun); // don't track this change
+         element.Model.ObserveRunWritten(token, destinationRun);
       }
 
       public void ClearDestinationFormat() {
          if (!ShowPointer) return;
+         if (Pointer < 0 || Pointer >= element.Model.Count) return;
          var destination = Pointer;
          var run = element.Model.GetNextRun(Pointer);
          if (run.Start != destination || (run.PointerSources != null && run.PointerSources.Count > 0)) return;
@@ -2199,9 +2249,12 @@ show:
          set {
             ClearDestinationFormat();
             var old = element.GetValue("kind");
-            element.SetValue("kind", value);
             var wasPointer = old < 5;
             var isPointer = value < 5;
+            // a signpost that stops showing a script is no longer a pointer to it: the script must not keep it as a source
+            // (otherwise moving the script later would write its address over the hidden item)
+            if (wasPointer && !isPointer) element.SetAddress("arg", DataFormats.Pointer.NULL, false);
+            element.SetValue("kind", value);
             NotifyPropertiesChanged(nameof(ShowArg), nameof(ShowPointer), nameof(ShowHiddenItemProperties));
             if (ShowHiddenItemProperties) NotifyPropertyChanged(nameof(ItemID));
             SetDestinationFormat();
@@ -2240,7 +2293,11 @@ show:
          // 0F 00 <start+9> 09 03 02 FF
          var textStart = start + 9;
          Token.ChangeData(element.Model, start, new byte[] { 0x0F, 0, (byte)textStart, (byte)(textStart >> 8), (byte)(textStart >> 16), (byte)((textStart >> 24) + 8), 9, 3, 2, 0xFF });
-         Pointer = start;
+         // the script is part of this change, so is its format (the script, the pointer in it, the text it points to):
+         // going to the script formats it too, but that is not tracked, and undo would leave the format behind over the erased bytes
+         element.Model.ObserveRunWritten(Token, new PointerRun(start + 2));
+         element.Model.ObserveRunWritten(Token, new PCSRun(element.Model, textStart, 1, SortedSpan.One(start + 2)));
+         SetPointer(start, Token);
          gotoAddress(start);
       }
 
@@ -2248,15 +2305,17 @@ show:
 
       public int Pointer {
          get => element.GetAddress("arg");
-         set {
-            ClearDestinationFormat();
-            element.SetAddress("arg", value, false);
-            var run = element.Model.GetNextRun(Pointer);
-            if (run.Start == Pointer && run is NoInfoRun && !IsValidScriptFreespace(Pointer)) SetDestinationFormat();
-            UpdateScriptError(element.GetAddress("arg"));
-            pointerText = argText = null;
-            NotifyPropertiesChanged(nameof(PointerText), nameof(ArgText), nameof(CanGotoScript), nameof(CanCreateScript));
-         }
+         set => SetPointer(value, new ModelDelta()); // (the format of a script that is already there is not tracked, like when the signpost is shown)
+      }
+
+      private void SetPointer(int value, ModelDelta formatToken) {
+         ClearDestinationFormat();
+         element.SetAddress("arg", value, false);
+         var run = element.Model.GetNextRun(Pointer);
+         if (run.Start == Pointer && run is NoInfoRun && !IsValidScriptFreespace(Pointer)) SetDestinationFormat(formatToken);
+         UpdateScriptError(element.GetAddress("arg"));
+         pointerText = argText = null;
+         NotifyPropertiesChanged(nameof(PointerText), nameof(ArgText), nameof(CanGotoScript), nameof(CanCreateScript));
       }
 
       private string pointerText;

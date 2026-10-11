@@ -381,7 +381,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       public int GotoNameIndex {
-         get => SortedAvailableNames.IndexOf(AvailableNames[SelectedNameIndex]);
+         get {
+            var index = SelectedNameIndex; // (a map can name a region section that the name table does not have)
+            return index < 0 || index >= AvailableNames.Count ? -1 : SortedAvailableNames.IndexOf(AvailableNames[index]);
+         }
          set {
             if (!value.InRange(0, SortedAvailableNames.Count)) return;
             var name = sortedAvailableNames[value];
@@ -510,7 +513,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                surfConnection.ConnectNewMap += (sender, e) => ConnectNewMap(e);
                surfConnection.ConnectExistingMap += (sender, e) => ConnectExistingMap(e);
                surfConnection.RequestRemoveConnection += (sender, e) => {
-                  var connections = AllMapsModel.Create(model, tokenFactory)[group][map].Connections;
+                  var connections = AllMapsModel.Create(model, tokenFactory)[group]?[map]?.Connections;
+                  if (connections == null) return; // (nothing to remove: for example, undo already took the connection away)
                   var toRemove = connections.Count.Range().Where(i => connections[i].Direction.IsAny(MapDirection.Dive, MapDirection.Emerge)).ToList();
                   RemoveConnections(toRemove);
                };
@@ -644,6 +648,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          Header.UpdateFromModel();
          ClearPixelCache();
          if (!MapScriptCollection.Unloaded) MapScriptCollection.Load(GetMapModel());
+         surfConnection?.RefreshFromModel(); // undo/redo may have added or removed the dive/emerge connection
          NotifyPropertiesChanged(nameof(BlockRenders), nameof(BlockPixels), nameof(BerryInfo));
          if (SelectedEvent != null) CycleActiveEvent(default, EventCycleDirection.None);
       }
@@ -939,7 +944,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          for (int y = 0; y < 9; y++) {
             for (int x = 0; x < 9; x++) {
                var blockIndex = blockMap[x, y] & 0x3FF;
-               var blockRender = blockIndex < viewModel.BlockRenders.Count ? viewModel.BlockRenders[0] : null;
+               var blockRender = blockIndex < viewModel.BlockRenders.Count ? viewModel.BlockRenders[blockIndex] : null;
                canvas.Draw(blockRender, x * 16, y * 16);
             }
          }
@@ -973,7 +978,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var (width, height) = (layout.GetValue("width"), layout.GetValue("height"));
          var border = GetBorderThickness(layout);
          var (xx, yy) = ((int)x - border.West, (int)y - border.North);
-         if (xx < 0 || yy < 0 || xx > width || yy > height) return (-1, -1);
+         if (xx < 0 || yy < 0 || xx >= width || yy >= height) return (-1, -1);
          var start = layout.GetAddress("blockmap");
 
          var modelAddress = start + (yy * width + xx) * 2;
@@ -982,6 +987,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       private int lastDrawVal, lastDrawX, lastDrawY;
+
+      /// <summary>
+      /// Drawing the same tile twice in a row is skipped (a drag over one tile draws it once).
+      /// A new click is always drawn, also when it is on the tile that was drawn last: after undo, or with another collision.
+      /// </summary>
+      public void StartNewStroke() => (lastDrawX, lastDrawY) = (-1, -1);
 
       /// <summary>
       /// If collisionIndex is not valid, it's ignored.
@@ -1009,7 +1020,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var high = data >> 10;
          var low = data & 0x3FF;
          if (blockIndex >= 0 && blockIndex < blockRenders.Count) low = blockIndex;
-         if (collisionIndex >= 0 && collisionIndex < 0x3F) high = collisionIndex;
+         if (collisionIndex >= 0 && collisionIndex <= 0x3F) high = collisionIndex;
          lastDrawVal = model.ReadMultiByteValue(modelAddress, 2);
          (lastDrawX, lastDrawY) = (xx, yy);
          model.WriteMultiByteValue(modelAddress, 2, token, (high << 10) | low);
@@ -1060,9 +1071,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
          // use maps in the game to figure out the corners
          foreach (var map in GetAllMaps()) {
+            if (map?.Layout?.PrimaryBlockset == null || map.Layout.SecondaryBlockset == null) continue; // a map whose tilesets cannot be found has nothing to teach
             if (map.Layout.PrimaryBlockset.Start != layout.PrimaryBlockset.Start && map.Layout.SecondaryBlockset.Start != layout.SecondaryBlockset.Start) continue;
 
             var blockMap = map.Layout.BlockMap;
+            if (blockMap.Model == null || blockMap.Start < 0 || blockMap.Width <= 0 || blockMap.Height <= 0) continue;
             for (int y = 0; y < blockMap.Height; y++) {
                bool topEdge = y == 0, bottomEdge = y == blockMap.Height - 1;
                for (int x = 0; x < blockMap.Width; x++) {
@@ -1271,7 +1284,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                   var address = start + ((yy + y) * width + xx + x) * 2;
                   var block = blockValues == null ? -1 : blockValues[xx % blockValues.GetLength(0), yy % blockValues.GetLength(1)];
                   if (block == -1 && collisionHighlight >= 0) {
-                     var existingBlock = (model.ReadMultiByteValue(address, 2) & 0x3F);
+                     var existingBlock = (model.ReadMultiByteValue(address, 2) & 0x3FF);
                      block = (existingBlock | (collisionHighlight << 10));
                   }
                   if (block != -1 && model.ReadMultiByteValue(address, 2) != block) {
@@ -1315,25 +1328,27 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          if (collisionIndex < 0) collisionIndex = lastDrawVal >> 10;
          var (before, after) = (lastDrawVal, (collisionIndex << 10) | blockIndex);
          lock (pixelWriteLock) {
-            PaintBlock(token, new(xx - 1, yy), size, start, before, after);
-            PaintBlock(token, new(xx + 1, yy), size, start, before, after);
-            PaintBlock(token, new(xx, yy - 1), size, start, before, after);
-            PaintBlock(token, new(xx, yy + 1), size, start, before, after);
+            PaintBlock(token, new[] { new Point(xx - 1, yy), new Point(xx + 1, yy), new Point(xx, yy - 1), new Point(xx, yy + 1) }, size, start, before, after);
          }
          ClearPixelCache();
       }
 
-      private void PaintBlock(ModelDelta token, Point p, Point size, int start, int before, int after) {
+      // (a work list instead of a recursive call per block: a big map made of one block would not fit on the stack)
+      private void PaintBlock(ModelDelta token, Point[] firstPoints, Point size, int start, int before, int after) {
          waveFunctionActive?.Cancel();
          if (before == after) return;
-         if (p.X < 0 || p.Y < 0 || p.X >= size.X || p.Y >= size.Y) return;
-         var address = start + (p.Y * size.X + p.X) * 2;
-         if (model.ReadMultiByteValue(address, 2) != before) return;
-         model.WriteMultiByteValue(address, 2, token, after);
-         PaintBlock(token, p + new Point(-1, 0), size, start, before, after);
-         PaintBlock(token, p + new Point(1, 0), size, start, before, after);
-         PaintBlock(token, p + new Point(0, -1), size, start, before, after);
-         PaintBlock(token, p + new Point(0, 1), size, start, before, after);
+         var pending = new Stack<Point>(firstPoints);
+         while (pending.Count > 0) {
+            var p = pending.Pop();
+            if (p.X < 0 || p.Y < 0 || p.X >= size.X || p.Y >= size.Y) continue;
+            var address = start + (p.Y * size.X + p.X) * 2;
+            if (model.ReadMultiByteValue(address, 2) != before) continue;
+            model.WriteMultiByteValue(address, 2, token, after);
+            pending.Push(p + new Point(-1, 0));
+            pending.Push(p + new Point(1, 0));
+            pending.Push(p + new Point(0, -1));
+            pending.Push(p + new Point(0, 1));
+         }
       }
 
       public void PaintBlockBag(ModelDelta token, List<int> blockIndexes, int collisionIndex, double x, double y) {
@@ -1408,14 +1423,19 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          var (width, height) = (layout.GetValue("width"), layout.GetValue("height"));
          var border = GetBorderThickness(layout);
          var (xx, yy) = ((int)x - border.West, (int)y - border.North);
-         if (xx < 0 || yy < 0 || xx > width || yy > height) return;
+         if (xx < 0 || yy < 0 || xx >= width || yy >= height) return;
          var start = layout.GetAddress("blockmap");
 
          Point right = new(1, 0), down = new(0, 1);
          var rnd = new Random();
          var toDraw = new Dictionary<Point, WaveCell>();
          var allCells = GetAllMatchingConnectedBlocks(xx, yy).ToList();
+         var originalValue = model.ReadMultiByteValue(start + (yy * width + xx) * 2, 2); // (every cell of allCells has this value)
          void Fill(Point p, int value) => model.WriteMultiByteValue(start + (p.Y * width + p.X) * 2, 2, token, value);
+         // the cells that were blanked but never got a block go back to what they were (unless something else was drawn on them since)
+         void RestoreBlankCells(IEnumerable<Point> cells) {
+            lock (pixelWriteLock) foreach (var p in cells) if (model.ReadMultiByteValue(start + (p.Y * width + p.X) * 2, 2) == 0) Fill(p, originalValue);
+         }
 
          lock (pixelWriteLock) {
             // set all effected spaces to 0 so they won't count toward eachother's wave-function
@@ -1432,7 +1452,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          if (toDraw.Count < 300) attemptLimit *= 2;
          while (toDraw.Count > 0) {
             var cellsWithRestrictions = toDraw.Values.Where(cell => cell.HasRestrictions);
-            var smallest = cellsWithRestrictions.Select(v => v.Probabilities.Count).Min(); // what is the smallest number of options
+            var smallest = cellsWithRestrictions.Select(v => v.Probabilities.Count).DefaultIfEmpty(0).Min(); // what is the smallest number of options (0 when nothing around these cells says what belongs there, like a map nobody has drawn on)
 
             if (smallest > 0 && (stack.Count == 0 || stack.Sum(item => item.AttemptCount) < attemptLimit) && !cancelToken.IsCancellationRequested) {
                // good case: we have a cell to callapse
@@ -1443,7 +1463,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                var attempt = cell.Collapse(rnd);
                var uncollapsedNeighbors = GetUncollapsedNeighbors(point, toDraw);
                stack.Add(new(new(point, cell), attempt & 0x3FF, uncollapsedNeighbors));
-               lock (pixelWriteLock) Fill(point, cell.Collapse(rnd));
+               lock (pixelWriteLock) Fill(point, attempt); // (the block that is remembered as chosen has to be the block that is drawn)
 
                toDraw.Remove(point);
                foreach (var neighbor in new List<Point> { point - right, point + right, point - down, point + down, point - right - down, point + right - down, point - right + down, point + right + down }) {
@@ -1455,7 +1475,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                //  (1) last collapse caused a contradiction - need to backtrack
                //      or
                //  (2) we've been backtracking too much along this line, we need to back out and try something else.
+               if (cancelToken.IsCancellationRequested) {
+                  // the user went on to something else: keep what was drawn so far, and don't overwrite what they draw now
+                  RestoreBlankCells(toDraw.Keys.ToList());
+                  break;
+               }
                if (stack.Count == 0) {
+                  // nothing has been collapsed: put the area back the way it was, instead of leaving it blank
+                  RestoreBlankCells(toDraw.Keys.ToList());
                   viewPort.RaiseError("Wave Function Collapse failed: no valid options remain.");
                   break;
                }
@@ -1841,6 +1868,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
          // select which map to add
          var keys = options.Keys.ToList();
+         if (keys.Count == 0) {
+            viewPort.RaiseError("There is no map that this map can be connected to in that direction.");
+            return;
+         }
          var enumViewModel = new EnumViewModel(keys.Select(key => MapIDToText(model, key)).ToArray());
 
          tutorials.Complete(Tutorial.RightClick_CreateConnection);
