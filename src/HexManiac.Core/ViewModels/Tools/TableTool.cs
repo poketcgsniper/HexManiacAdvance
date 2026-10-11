@@ -514,14 +514,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             }
 
             if (Groups.Count == 1) {
+               streamGroup.Close(); // before the view hears about the group, so it gets all of the group at once
                Groups.Add(streamGroup);
-               streamGroup.Close();
                childIndexGroup++;
             } else if (streamGroup != null) {
                while (Groups.Count <= childIndexGroup) AddGroup();
+               streamGroup.Close();
                // putting the very same group back would still tell the view that the group was replaced, and it would rebuild everything in it
                if (!ReferenceEquals(Groups[childIndexGroup], streamGroup)) Groups[childIndexGroup] = streamGroup;
-               streamGroup.Close();
                childIndexGroup++;
             }
             if (array is not ArrayRun && streamGroup != null) streamGroup.GroupName = NameForStreamGroup(streamGroup);
