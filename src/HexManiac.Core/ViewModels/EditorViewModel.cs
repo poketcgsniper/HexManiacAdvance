@@ -820,6 +820,60 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <summary>Lets a long-running utility tell the user what it is doing (shown like any other information message).</summary>
       public void ShowStatus(string message) => InformationMessage = message;
 
+      /// <summary>
+      /// Swaps the ROM of an open tab for new data with new metadata (used by "Apply CUBE"):
+      /// a new tab for the same file name opens in the place of the old one, and the old tab and every tab that works on the same ROM close without asking.
+      /// Nothing is written to disk: the new tab is tagged as having unsaved changes, so saving (over the same file, or with Save As) stays the user's choice.
+      /// Returns the new tab, or null if the old tab is not open. Throws, before anything has been changed, if the metadata can not be read.
+      /// </summary>
+      public ViewPort ReplaceRomTab(ViewPort oldTab, byte[] newData, string[] metadataLines) {
+         var index = tabs.IndexOf(oldTab);
+         if (index < 0) return null;
+         var oldModel = oldTab.Model;
+         var fileName = oldTab.FileName ?? string.Empty;
+         var insertAt = tabs.Take(index).Count(tab => ModelOf(tab) != oldModel); // where the new tab goes once the old tabs are gone
+
+         // the same kind of model that File > Open makes for a .gba file with a .toml next to it
+         var metadata = new StoredMetadata(metadataLines);
+         IDataModel model = fileName.ToLower().EndsWith(".gba") ?
+            new HardcodeTablesModel(Singletons, newData, metadata) :
+            new PokemonModel(newData, metadata, Singletons);
+         var viewPort = new ViewPort(fileName, model, workDispatcher, Singletons, MapTutorials, FileSystem, PythonTool);
+
+         Add(viewPort); // selects the new tab, so closing the old ones below does not change the selection
+         viewPort.ChangeHistory.TagAsUnsaved();
+         foreach (var tab in tabs.ToList()) {
+            if (tab == viewPort) continue;
+            if (ModelOf(tab) == oldModel) RemoveTab(tab, EventArgs.Empty);
+         }
+
+         var newIndex = tabs.IndexOf(viewPort);
+         while (newIndex > insertAt) {
+            SwapTabs(newIndex - 1, newIndex);
+            newIndex -= 1;
+         }
+         return viewPort;
+      }
+
+      /// <summary>The ROM that a tab shows or edits, or null for tabs that do not belong to one ROM.</summary>
+      private static IDataModel ModelOf(ITabContent tab) => tab switch {
+         IViewPort viewPort => viewPort.Model,
+         MapEditorViewModel map => map.ViewPort?.Model,
+         DexReorderTab dex => dex.Model,
+         SpriteGalleryTab gallery => gallery.Model,
+         SoundTab sound => sound.Model,
+         TilesetAnimationTab animations => animations.Model,
+         CharacterCustomizationTab customization => customization.Model,
+         _ => null,
+      };
+
+      /// <summary>Asks the "Apply CUBE" menu item again whether it can run: the open ROM may just have been edited, or saved, or restored by undo.</summary>
+      private void RefreshApplyCubeAvailability() {
+         foreach (var edit in QuickEditsMisc) {
+            if (edit is ApplyCubePatch) edit.TabChanged();
+         }
+      }
+
       public void CopyError() => fileSystem.CopyText = ErrorMessage;
 
       private async void ExecuteOpen(object arg) {
@@ -1571,6 +1625,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (e.PropertyName == nameof(IViewPort.Name)) {
             // the file's display name changes whenever it's edited or saved (trailing *)
             workDispatcher.DispatchWork(runFile.RaiseCanExecuteChanged);
+            if (sender == SelectedTab) workDispatcher.DispatchWork(RefreshApplyCubeAvailability);
          }
 
          // when one tab's height updates, update other tabs by the same amount.

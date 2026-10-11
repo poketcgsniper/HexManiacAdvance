@@ -11,6 +11,11 @@ namespace HavenSoft.HexManiac.Core {
       public string GameCode { get; init; }
       /// <summary>Lowercase hex, 40 characters.</summary>
       public string Sha1 { get; init; }
+      /// <summary>
+      /// CRC32 of the whole file, or 0 if it is not known. Together with the length and the game code this recognises the ROM in a few
+      /// milliseconds (the SHA-1 takes a tenth of a second), which matters for a menu item that is asked about every tab each time the tab changes.
+      /// </summary>
+      public uint Crc32 { get; init; }
 
       /// <summary>Pokemon Emerald, USA/Europe, v1.0. The only English Emerald release that exists.</summary>
       public static VanillaRomSpec EmeraldUsV10 { get; } = new VanillaRomSpec {
@@ -18,6 +23,7 @@ namespace HavenSoft.HexManiac.Core {
          Length = 0x1000000,
          GameCode = "BPEE",
          Sha1 = "f3ae088181bf583e55daf962a92bb46f4f1d07b7",
+         Crc32 = 0x1F1C08FB,
       };
    }
 
@@ -80,8 +86,7 @@ namespace HavenSoft.HexManiac.Core {
 
          if (patched != null && rom.Length == patched.TargetSize && (uint)Patcher.CalcCRC32(rom) == patched.TargetCrc32) {
             return new RomCheckResult(RomCheckKind.AlreadyPatched,
-               "This ROM already is CUBE (it is identical to the ROM this patch builds), so there is nothing to apply." + Environment.NewLine +
-               "Open it with File > Open instead, together with its .toml file.");
+               "This ROM already is CUBE (it is identical to the ROM this patch builds), so there is nothing to apply.");
          }
 
          if (rom.Length != spec.Length) {
