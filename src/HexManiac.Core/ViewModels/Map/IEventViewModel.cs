@@ -529,7 +529,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
             var spot = spots.FirstOrDefault();
             if (spot is null) continue;
-            var categoryIndex = DynamicOverworldGraphicsCategories.SelectedIndex;
+            var categoryIndex = dynamicCategories.SelectedIndex;
             var dynamicValue = element.Model.ReadMultiByteValue(spot.Address + 3, 2);
             return dynamicValue;
          }
@@ -553,7 +553,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
       }
       public void UpdateDynamicOverworldGraphicsInScript() {
-         if (DynamicOverworldGraphicsSelectedIndex == -1) return;
+         if (!dynamicGraphicsLoaded || dynamicGraphicsIndex == -1) return;
          var scripts = new MapScriptCollection(parent.ViewPort, eventTemplate);
          scripts.Load(parent.GetMapModel());
          foreach (var script in scripts.Scripts) {
@@ -564,18 +564,19 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
             var spot = spots.FirstOrDefault();
             if (spot is null) continue;
-            var categoryIndex = DynamicOverworldGraphicsCategories.SelectedIndex;
+            var categoryIndex = dynamicCategories.SelectedIndex;
             var dynamicOffset = 0;
-            if (DynamicOverworldGraphicsCategories.FilteredOptions[categoryIndex].Text == "Pokemon Icons") dynamicOffset = 10000;
-            if (DynamicOverworldGraphicsCategories.FilteredOptions[categoryIndex].Text == "Expanded Overworld Sprites") dynamicOffset = 20000;
+            if (dynamicCategories.FilteredOptions[categoryIndex].Text == "Pokemon Icons") dynamicOffset = 10000;
+            if (dynamicCategories.FilteredOptions[categoryIndex].Text == "Expanded Overworld Sprites") dynamicOffset = 20000;
             var existingValue = Element.Model.ReadMultiByteValue(spot.Address + 3, 2);
-            if (existingValue == DynamicOverworldGraphicsSelectedIndex + dynamicOffset) continue;
-            Element.Model.WriteMultiByteValue(spot.Address + 3, 2, Token, DynamicOverworldGraphicsSelectedIndex + dynamicOffset);
+            if (existingValue == dynamicGraphicsIndex + dynamicOffset) continue;
+            Element.Model.WriteMultiByteValue(spot.Address + 3, 2, Token, dynamicGraphicsIndex + dynamicOffset);
             RaiseEventVisualUpdated();
          }
       }
       private IDisposable previousCategoryListener;
       private void LoadDynamicOverworldGraphicsCategories() {
+         dynamicGraphicsLoaded = true;
          var options = new List<string>();
          if (Element.Model.GetTable("graphics.overworld.sprites") != null) options.Add("Overworld Sprites");
          if (Element.Model.GetTable("graphics.overworld.pokemon") != null) options.Add("Pokemon Icons");
@@ -598,34 +599,34 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          }
 
          previousCategoryListener?.Dispose();
-         DynamicOverworldGraphicsCategories.Update(options.Select((option, i) => new ComboOption(option, i)), selectedIndex);
+         dynamicCategories.Update(options.Select((option, i) => new ComboOption(option, i)), selectedIndex);
          LoadDynamicOverworldGraphicsOptions();
-         previousCategoryListener = DynamicOverworldGraphicsCategories.Bind(nameof(FilteringComboOptions.SelectedIndex), (options, args) => LoadDynamicOverworldGraphicsOptions());
+         previousCategoryListener = dynamicCategories.Bind(nameof(FilteringComboOptions.SelectedIndex), (options, args) => LoadDynamicOverworldGraphicsOptions());
       }
 
       // depending on the selected category, load the sprites
       private void LoadDynamicOverworldGraphicsOptions() {
          var model = element.Model;
-         var categoryText = DynamicOverworldGraphicsCategories.FilteredOptions[DynamicOverworldGraphicsCategories.SelectedIndex].Text;
+         var categoryText = dynamicCategories.FilteredOptions[dynamicCategories.SelectedIndex].Text;
          if (categoryText == "Overworld Sprites") {
-            DynamicOverworldOptions.Clear();
-            foreach (var option in Options) DynamicOverworldOptions.Add(VisualComboOption.CreateFromSprite(option.Text, option.PixelData, option.PixelWidth, option.Index, 2, true));
+            dynamicOptions.Clear();
+            foreach (var option in Options) dynamicOptions.Add(VisualComboOption.CreateFromSprite(option.Text, option.PixelData, option.PixelWidth, option.Index, 2, true));
             DynamicOverworldGraphicsSelectedIndex = PullValueFromTransitionScript();
          } else if (categoryText == "Pokemon Icons") {
             int index = -1;
-            DynamicOverworldOptions.Clear();
+            dynamicOptions.Clear();
             foreach (var mon in new ModelTable(model, model.GetTable("graphics.overworld.pokemon"))) {
                index += 1;
                var run = model.GetNextRun(mon.GetAddress("sprite")) as ISpriteRun;
                if (run is null) continue;
                var sprite = ReadonlyPixelViewModel.Create(model, run);
                sprite = ReadonlyPixelViewModel.Crop(sprite, 0, 0, sprite.PixelWidth, sprite.PixelWidth);
-               DynamicOverworldOptions.Add(VisualComboOption.CreateFromSprite(index.ToString(), sprite.PixelData, sprite.PixelWidth, index, 2, true));
+               dynamicOptions.Add(VisualComboOption.CreateFromSprite(index.ToString(), sprite.PixelData, sprite.PixelWidth, index, 2, true));
             }
             DynamicOverworldGraphicsSelectedIndex = PullValueFromTransitionScript() - 10000;
          } else if (categoryText == "Expanded Overworld Sprites") {
             int index = -1;
-            DynamicOverworldOptions.Clear();
+            dynamicOptions.Clear();
             foreach (var item in new ModelTable(model, model.GetTable("graphics.overworld.sprites20k"))) {
                index += 1;
                var sprites = item.GetSubTable("sprites");
@@ -633,15 +634,24 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
                var run = model.GetNextRun(sprites[0].GetAddress("sprite")) as ISpriteRun;
                if (run is null) continue;
                var sprite = ReadonlyPixelViewModel.Create(model, run);
-               DynamicOverworldOptions.Add(VisualComboOption.CreateFromSprite(index.ToString(), sprite.PixelData, sprite.PixelWidth, index, 2, true));
+               dynamicOptions.Add(VisualComboOption.CreateFromSprite(index.ToString(), sprite.PixelData, sprite.PixelWidth, index, 2, true));
             }
             DynamicOverworldGraphicsSelectedIndex = PullValueFromTransitionScript() - 20000;
          }
       }
-      public FilteringComboOptions DynamicOverworldGraphicsCategories { get; } = new();
+      // Filling these means rendering every sprite of a category (hundreds of pictures at twice the size), and the object events of a map are made again whenever the map's data
+      // changes (every tile an event is dragged over, every property of a new event). Only the event whose panel is open needs them, so they are filled when the panel first asks.
+      private readonly FilteringComboOptions dynamicCategories = new();
+      private readonly ObservableCollection<VisualComboOption> dynamicOptions = new();
+      private bool dynamicGraphicsLoaded;
       private int dynamicGraphicsIndex;
-      public int DynamicOverworldGraphicsSelectedIndex { get => dynamicGraphicsIndex; set => Set(ref dynamicGraphicsIndex, value, old => UpdateDynamicOverworldGraphicsInScript()); }
-      public ObservableCollection<VisualComboOption> DynamicOverworldOptions { get; } = new();
+      private void EnsureDynamicGraphicsLoaded() {
+         if (dynamicGraphicsLoaded || !showGraphicsAsText) return;
+         LoadDynamicOverworldGraphicsCategories();
+      }
+      public FilteringComboOptions DynamicOverworldGraphicsCategories { get { EnsureDynamicGraphicsLoaded(); return dynamicCategories; } }
+      public int DynamicOverworldGraphicsSelectedIndex { get { EnsureDynamicGraphicsLoaded(); return dynamicGraphicsIndex; } set => Set(ref dynamicGraphicsIndex, value, old => UpdateDynamicOverworldGraphicsInScript()); }
+      public ObservableCollection<VisualComboOption> DynamicOverworldOptions { get { EnsureDynamicGraphicsLoaded(); return dynamicOptions; } }
 
       #endregion
 
@@ -1300,6 +1310,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          set {
             if (tutorContent.Value == null) return;
             element.Model.WriteMultiByteValue(tutorContent.Value.TutorAddress, 2, Token, value);
+            EventTemplate.UpdateTutorMoveName(element.Model, tutorContent.Value, value, Token); // the question names the move
          }
       }
 
@@ -1751,7 +1762,7 @@ show:
          this.berries = berries;
          overworldSprites = sprites;
          DefaultOW = defaultSprite;
-         ShowGraphicsAsText = Graphics >= sprites.Count;
+         showGraphicsAsText = Graphics >= sprites.Count; // the lists of dynamic graphics are filled when the event panel first asks for them
          objectEvent.Model.TryGetList("FacingOptions", out var list);
          FacingOptions.Update(ComboOption.Convert(list), MoveType);
          FacingOptions.Bind(nameof(FacingOptions.SelectedIndex), (sender, e) => MoveType = FacingOptions.ModelValue);

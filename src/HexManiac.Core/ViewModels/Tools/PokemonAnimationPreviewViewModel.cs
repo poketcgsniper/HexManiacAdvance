@@ -92,6 +92,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       public PokemonAnimationTimeline Timeline => timeline;
 
       public bool HasAnimation => timeline != null;
+      private bool lastHasAnimation;
 
       private string status = string.Empty;
       public string Status { get => status; private set => Set(ref status, value); }
@@ -108,14 +109,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       /// <summary>Set by the view: true while the preview is actually on screen (loaded, shown, in the active window).</summary>
       public bool IsDisplayed {
          get => isDisplayed;
-         set => Set(ref isDisplayed, value, old => { if (isDisplayed) RequestUpdate(); else { debounce.Reset(); Unwatch(); } UpdateWantsTicks(); });
+         set => Set(ref isDisplayed, value, old => { if (isDisplayed) RequestShowing(); else { debounce.Reset(); Unwatch(); } UpdateWantsTicks(); });
       }
 
       private bool visible = true;
       public bool Visible {
          get => visible;
-         set => Set(ref visible, value, old => { if (visible) RequestUpdate(); else { debounce.Reset(); Unwatch(); } UpdateWantsTicks(); });
+         set => Set(ref visible, value, old => { if (visible) { if (copying) RequestUpdate(); else RequestShowing(); } else { debounce.Reset(); Unwatch(); } UpdateWantsTicks(); });
       }
+
+      /// <summary>True while the table tool copies a freshly made preview into this one: nothing is built before it has finished (see <see cref="UpdateNow"/>).</summary>
+      private bool copying;
 
       /// <summary>True while the view should deliver ticks: something is on screen and playing, and there is more than one picture to show.</summary>
       public bool WantsTicks => isPlaying && isDisplayed && visible && timeline != null && starts.Length > 1 && totalMilliseconds > 0;
@@ -136,18 +140,18 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       public bool TryCopy(IArrayElementViewModel other) {
          if (other is not PokemonAnimationPreviewViewModel that || !ReferenceEquals(that.model, model)) return false;
          if (that.speciesIndex != speciesIndex) {
-            // the old pokemon's pictures stop right away (they would be wrong), the new ones follow after the debounce
             dirty = true;
             speciesIndex = that.speciesIndex;
-            timeline = null;
-            Status = string.Empty;
-            NotifyPropertyChanged(nameof(HasAnimation));
-            UpdateWantsTicks();
+            // While the preview is on screen, the old pokemon's pictures stay exactly where they are (nothing collapses, nothing blanks) until the table tool
+            // has finished the sprites next to it and calls UpdateNow: the new animation then replaces the old one in the same step as the new sprites.
+            // If nobody can see the preview, there is nothing to keep steady, and the old pictures must not be what shows up the next time it is displayed.
+            if (!isDisplayed || !visible) DropTimeline();
          }
          paletteProvider = that.paletteProvider;
          pictureToken = that.pictureToken;
          pictureSource = that.pictureSource;
-         Visible = that.visible;
+         copying = true;
+         try { Visible = that.visible; } finally { copying = false; }
          RequestUpdate();
          return true;
       }
@@ -209,6 +213,24 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       public void RequestUpdate() {
          if (!isDisplayed || !visible) { dirty = true; return; }
          debounce.DelayCall(TimeSpan.FromMilliseconds(DebounceMilliseconds), Update);
+      }
+
+      /// <summary>
+      /// The preview just came on screen. If what it holds is stale or missing, that must not be seen even for a debounce interval, so it is built right now;
+      /// if it is just being checked (the pictures are very likely still right), the check waits for the debounce like every other change.
+      /// </summary>
+      private void RequestShowing() {
+         if (!isDisplayed || !visible) { dirty = true; return; }
+         if (dirty || timeline == null) UpdateNow(); else RequestUpdate();
+      }
+
+      /// <summary>
+      /// Brings the pictures up to date right now, without waiting for the debounce. The table tool calls this once the sprites next to the preview are done
+      /// when it has switched to another pokemon: the animation of the new pokemon then appears in the very same step as its sprites.
+      /// </summary>
+      public void UpdateNow() {
+         debounce.Reset();
+         Update();
       }
 
       /// <summary>Rebuilds now (if something relevant changed). The debounced work ends up here.</summary>
@@ -308,8 +330,27 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                ? $"As in battle: {(built.TotalMilliseconds - IdleMilliseconds) / 1000.0:0.0} seconds."
                : "Approximation: this animation does something the preview cannot follow exactly.";
          }
-         NotifyPropertyChanged(nameof(HasAnimation));
+         NotifyHasAnimation();
          UpdateWantsTicks();
+      }
+
+      /// <summary>Forgets the pictures of the last pokemon (only done while nobody sees them).</summary>
+      private void DropTimeline() {
+         if (timeline == null) return;
+         timeline = null;
+         starts = Array.Empty<int>();
+         totalMilliseconds = 0;
+         elapsed = 0;
+         frameIndex = 0;
+         Status = string.Empty;
+         NotifyHasAnimation();
+         UpdateWantsTicks();
+      }
+
+      private void NotifyHasAnimation() {
+         if (lastHasAnimation == HasAnimation) return;
+         lastHasAnimation = HasAnimation;
+         NotifyPropertyChanged(nameof(HasAnimation));
       }
 
       #endregion

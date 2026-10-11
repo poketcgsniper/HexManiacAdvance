@@ -927,7 +927,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
             tutor = model.ReadMultiByteValue(tutorMoves[0].Start, 2);
             if (tutor < 0 || tutor >= 0xFFFF) tutor = 0;
          }
-         int infoStart = WriteText(token, "Want to learn a cool move?");
+         int move = GetTutorMove(model, tutor);
+         int infoStart = WriteText(token, TutorInfoText);
          int warningStart = WriteText(token, "This move can be learned only\\nonce. Is that okay?");
          int whichStart = WriteText(token, "Which POKéMON wants to learn\\nthe move?");
          int doneStart = WriteText(token, "Enjoy the move!");
@@ -939,6 +940,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
    faceplayer
    checkflag {tutorFlag}
    if1 = <success>
+   bufferattack 0 {move}
    loadpointer 0 <{infoStart:X6}>
    callstd 5
    compare 0x800D 0
@@ -973,13 +975,13 @@ failed:
    release
    end
 ";
-         // script length = 109
+         // script length = 101 for Emerald and 108 for FireRed/LeafGreen (4 bytes less before it named the move): leave some room
          // note that the condition for recognizing the `warningStart` message is different in
          // the Emerald case, since there's no `signmsg` command to use for reference
          // instead, it's just 0 or 1 pointers, and has `callstd 5` after it.
          // maybe just expect a `callstd 5` after it, since it's the only one after infoStart that has that in both FR and Em
 
-         var scriptStart = model.FindFreeSpace(model.FreeSpaceStart, 109);
+         var scriptStart = model.FindFreeSpace(model.FreeSpaceStart, TutorScriptSpace);
          var content = parser.CompileWithoutErrors(token, model, scriptStart, ref script);
          token.ChangeData(model, scriptStart, content);
 
@@ -995,6 +997,36 @@ failed:
          parser.FormatScript<XSERun>(token, model, scriptStart);
       }
 
+      /// <summary>The room that the tutor script looks for in the free space: more than the script needs in any game (see the tests).</summary>
+      public const int TutorScriptSpace = 140;
+
+      /// <summary>
+      /// What the tutor asks. [buffer1] (\\02, written as an escape like the trade messages do, so that it does not depend on the text macros of the ROM)
+      /// is the name of the tutor's move: the script puts it there (bufferattack) before it asks.
+      /// It stays on one line with the move names of the vanilla games (13 letters at most); the longest names that a tutor can teach in the expansion
+      /// (16 letters, like "Stomping Tantrum") fill the box exactly, as seen in the emulator. Z-moves and G-Max moves are longer, but nobody teaches those.
+      /// </summary>
+      public const string TutorInfoText = "Want to learn the move \\\\02?";
+
+      /// <summary>The move that a tutor teaches. The expansion's scripts hand the special the move itself, the vanilla scripts the tutor's index in the table of tutor moves.</summary>
+      public static int GetTutorMove(IDataModel model, int tutor) {
+         if (Flags.IsExpansion(model)) return tutor;
+         if (model.GetTableModel(HardcodeTablesModel.MoveTutors) is not { } tutorMoves || tutor < 0 || tutor >= tutorMoves.Count) return 0;
+         return model.ReadMultiByteValue(tutorMoves[tutor].Start, 2);
+      }
+
+      /// <summary>
+      /// The tutor of the script is a different one now: the question that the tutor asks names the move that is taught, so it has to follow.
+      /// Scripts that were not made by the template (no buffered move, or one that comes from a variable) are left alone.
+      /// </summary>
+      public static void UpdateTutorMoveName(IDataModel model, TutorEventContent content, int tutor, ModelDelta token) {
+         if (content == null || content.MoveBufferAddress == Pointer.NULL) return;
+         if (model.ReadMultiByteValue(content.MoveBufferAddress, 2) >= 0x4000) return; // a variable: it follows on its own
+         var move = GetTutorMove(model, tutor);
+         if (move < 0 || move >= 0x4000) return;
+         model.WriteMultiByteValue(content.MoveBufferAddress, 2, token, move);
+      }
+
       public TutorEventContent GetTutorContent(ScriptParser parser, ObjectEventViewModel eventModel) => GetTutorContent(model, parser, eventModel);
       public static TutorEventContent GetTutorContent(IDataModel model, ScriptParser parser, ObjectEventViewModel eventViewModel) {
          // tutors must have a `special ChooseMonForMoveTutor`
@@ -1008,9 +1040,14 @@ failed:
          ) return null;
 
          var content = new TutorEventContent(Pointer.NULL, Pointer.NULL, Pointer.NULL, Pointer.NULL, Pointer.NULL);
-         var spots = Flags.GetAllScriptSpots(model, parser, new[] { eventViewModel.ScriptAddress }, 0x16, 0x0F); // setvar, loadpointer
+         var spots = Flags.GetAllScriptSpots(model, parser, new[] { eventViewModel.ScriptAddress }, 0x16, 0x0F, 0x82); // setvar, loadpointer, bufferattack
 
          foreach (var spot in spots) {
+            if (model[spot.Address] == 0x82) {
+               // the move that the question names: `bufferattack buffer1 <move>`. Tutors made before the template named the move have none.
+               if (model[spot.Address + 1] == 0 && content.MoveBufferAddress == Pointer.NULL) content = content with { MoveBufferAddress = spot.Address + 2 };
+               continue;
+            }
             if (model[spot.Address] == 0x16) {
                if (content.TutorAddress != Pointer.NULL) return null;
                if (model.ReadMultiByteValue(spot.Address + 1, 2) != 0x8005) return null;
@@ -1485,7 +1522,7 @@ end
 
    public record MartEventContent(int HelloPointer, int MartPointer, int GoodbyePointer);
 
-   public record TutorEventContent(int InfoPointer, int WhichPokemonPointer, int FailedPointer, int SuccessPointer, int TutorAddress);
+   public record TutorEventContent(int InfoPointer, int WhichPokemonPointer, int FailedPointer, int SuccessPointer, int TutorAddress, int MoveBufferAddress = Pointer.NULL);
 
    public record TradeEventContent(int InfoPointer, int ThanksPointer, int SuccessPointer, int FailedPointer, int WrongSpeciesPointer, int TradeAddress);
 

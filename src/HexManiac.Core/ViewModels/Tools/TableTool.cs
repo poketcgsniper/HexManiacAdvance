@@ -356,7 +356,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             UsageChildren[usageChildInsertionIndex] = child;
          }
          usageChildInsertionIndex++;
-         NotifyPropertyChanged(nameof(HasUsageOptions));
       }
 
       private bool dataForCurrentRunChangeUpdate;
@@ -415,6 +414,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             using (Scope(ref dataForCurrentRunChangeUpdate, true, val => dataForCurrentRunChangeUpdate = val)) {
                NotifyPropertyChanged(nameof(TableSections));
             }
+            NotifyPropertyChanged(nameof(HasUsageOptions));
             return;
          }
 
@@ -552,7 +552,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             if (child is SplitterArrayElementViewModel splitter) splitter.UpdateCollapsed(fieldFilter);
          }
 
+         // an animation preview shows what the sprites next to it show: now that they are done, it can catch up, so a new pokemon's animation
+         // replaces the old one in the same step as the new sprites (without this, it would catch up after its debounce, a visible moment later)
+         foreach (var child in Children) {
+            if (child is PokemonAnimationPreviewViewModel preview) preview.UpdateNow();
+         }
+
          foreach (var group in Groups) Debug.Assert(!group.IsOpen, "You forgot to close a group! " + group.GroupName);
+         NotifyPropertyChanged(nameof(HasUsageOptions)); // once, when all the usage buttons are in place (not after each one)
          NotifyPropertyChanged(nameof(Children));
       }
 

@@ -11,6 +11,7 @@
    <UserControl.Resources>
       <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
       <hsi:BooleanConverter x:Key="InverseBoolToVisibility" True="Collapsed" False="Visible" />
+      <hsi:BooleanConverter x:Key="BoolToHidden" True="Visible" False="Hidden" />
       <hsi:DoubleGridLengthConverter x:Key="DoubleToGridLength" />
       <hsg3hv:IntegerToHexConverter x:Key="Hex" />
       <hsg3hv:EqualityToBooleanConverter x:Key="Equality" />
@@ -677,10 +678,11 @@
                                           <hsg3hv:PokemonAnimationHost>
                                              <StackPanel Margin="0,4" Visibility="{Binding Visible, Converter={StaticResource BoolToVisibility}}">
                                                 <hsg3hv:AngleBorder Content="{Binding Header}" FontSize="10" Direction="Out" HorizontalAlignment="Center" />
-                                                <Grid HorizontalAlignment="Center" Visibility="{Binding HasAnimation, Converter={StaticResource BoolToVisibility}}">
+                                                <!-- this area keeps its size whatever the preview shows (a picture, nothing, one line or two of text), so switching to another pokemon never moves the sprites below it -->
+                                                <Grid HorizontalAlignment="Center" MinWidth="96" MinHeight="96" Visibility="{Binding HasAnimation, Converter={StaticResource BoolToHidden}}">
                                                    <hsg3hv:PixelImage SnapsToDevicePixels="True" DataContext="{Binding Surface}" />
                                                 </Grid>
-                                                <TextBlock Text="{Binding Status}" HorizontalAlignment="Center" TextWrapping="Wrap" FontSize="10" Foreground="{DynamicResource Secondary}" />
+                                                <TextBlock Text="{Binding Status}" HorizontalAlignment="Center" TextWrapping="Wrap" FontSize="10" MinHeight="27" Foreground="{DynamicResource Secondary}" />
                                                 <Grid HorizontalAlignment="Stretch" Margin="0,5" Height="22" TextBlock.FontSize="10">
                                                    <Grid.ColumnDefinitions>
                                                       <ColumnDefinition Width="*"/>

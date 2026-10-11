@@ -207,6 +207,25 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          NotifyPropertyChanged(nameof(ColorHeight));
       }
 
+      /// <summary>
+      /// Shows another palette. If it has as many colors as the current one, the color boxes stay and only change their color
+      /// (the view repaints the boxes that changed, instead of throwing every box away and making a new one).
+      /// Otherwise this is the same as <see cref="SetContents"/>.
+      /// Unlike SetContents, nobody that watches a color box sees it get replaced: only use this where nobody watches the boxes (the table tool).
+      /// </summary>
+      public void UpdateContents(IReadOnlyList<short> colors) {
+         if (Elements.Count != colors.Count) {
+            SetContents(colors);
+            return;
+         }
+         var (left, right) = (Math.Min(SelectionStart, SelectionEnd), Math.Max(SelectionStart, SelectionEnd));
+         for (int i = 0; i < colors.Count; i++) {
+            var element = Elements[i];
+            element.Color = colors[i];
+            element.Selected = left <= i && i <= right;
+         }
+      }
+
       public void PushColorsToModel() {
          if (model == null) {
             // a collection that holds spare colors has no data to write: whoever uses it decides what the colors mean
