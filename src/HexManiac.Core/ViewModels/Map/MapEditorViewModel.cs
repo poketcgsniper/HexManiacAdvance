@@ -545,6 +545,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
          if (blockset == Pointer.NULL) return;
          // update the primary map
          map.IsSelected = true;
+         map.ZIndex = 0; // the map being edited is on top: a map that was seen beneath another one (dive/emerge) keeps its negative z index otherwise, and no click would reach it
          if (VisibleMaps.FirstOrDefault(existing => existing.UpdateFrom(map)) is BlockMapViewModel loadedMap) map = loadedMap;
          if (primaryMap != map) {
             if (primaryMap != null) {
