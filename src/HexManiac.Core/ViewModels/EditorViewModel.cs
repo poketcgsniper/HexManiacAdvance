@@ -1489,10 +1489,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             return shortcut;
          }
          if (SoundTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Sound")) {
-            AddButton(() => FindItemIcon(model, "Flute", "Bell", "Harp"), ViewPort.EditorGotoPrefix + "sound", "Sound");
+            AddButton(() => ShortcutIcons.PokeFlute(model), ViewPort.EditorGotoPrefix + "sound", "Sound"); // the Poke Flute item picture (the built-in picture is a Poke Flute too)
          }
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
-            AddButton(() => ShortcutIcons.BrendanStanding(model) ?? FindItemIcon(model, "Running", "Mach Bike", "Bike"), HardcodeTablesModel.OverworldSprites, "OW Sprites");
+            AddButton(() => ShortcutIcons.FirstOverworldSprite(model) ?? ShortcutIcons.BrendanStanding(model), HardcodeTablesModel.OverworldSprites, "OW Sprites"); // sprite 0, first picture: the player
          }
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
             var animTiles = AddButton(() => FindItemIcon(model, "Wailmer Pail", "Pail", "Watering"), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles");

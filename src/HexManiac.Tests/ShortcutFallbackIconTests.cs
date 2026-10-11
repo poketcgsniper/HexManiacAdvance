@@ -80,6 +80,17 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void TheSoundPicture_IsAPokeFlute() {
+         // the Sound button shows the Poke Flute item of the ROM; the built-in picture (a ROM without the item) is a Poke Flute too: cream tube, gold fittings, red bulb
+         var pixels = ShortcutFallbackIcons.Create(ShortcutKind.Sound).PixelData.Where(pixel => pixel != ShortcutFallbackIcons.Transparent).Select(Rgb).ToList();
+
+         Assert.Contains(pixels, c => c.red >= 200 && c.green <= 90 && c.blue <= 90);       // the red bulb
+         Assert.Contains(pixels, c => c.red >= 220 && c.green >= 170 && c.blue <= 80);      // the gold ring and mouthpiece
+         Assert.Contains(pixels, c => c.red >= 220 && c.green >= 220 && c.blue >= 200);     // the cream tube
+         Assert.DoesNotContain(pixels, c => c.blue > c.red + 60);                            // and no longer the blue music note
+      }
+
+      [Fact]
       public void ThePicturesAreMadeOfGbaColours_AndNeverOfTheTransparentKey() {
          foreach (var kind in ShortcutFallbackIcons.AllKinds) {
             foreach (var pixel in ShortcutFallbackIcons.Create(kind).PixelData) {
@@ -381,6 +392,309 @@ namespace HavenSoft.HexManiac.Tests {
          CreateTextTable(HardcodeTablesModel.OverworldSprites, 0x140, "one", "two");
 
          foreach (var button in ButtonsOfANewEditor()) Assert.NotNull(button.Image);
+      }
+   }
+
+   #endregion
+
+   #region The Sound button shows the Poke Flute
+
+   public class ShortcutPokeFluteNameTests {
+      [Theory]
+      [InlineData("Poké Flute")]
+      [InlineData("POKé FLUTE")]
+      [InlineData("\"POKE FLUTE\"")]
+      [InlineData("Poke_Flute")]
+      [InlineData("FLÛTE POKé")]     // the other languages of the games, in either order of the words
+      [InlineData("POKéFLÖTE")]
+      [InlineData("FLAUTA POKé")]
+      [InlineData("POKéFLAUTO")]
+      public void ThePokeFlute_IsRecognizedByItsName(string name) {
+         Assert.True(ShortcutIcons.IsPokeFluteName(name));
+      }
+
+      [Theory]
+      [InlineData("Blue Flute")]
+      [InlineData("YELLOW FLUTE")]
+      [InlineData("Poké Ball")]
+      [InlineData("Poke Doll")]
+      [InlineData("Soothe Bell")]
+      [InlineData("Flute")]
+      [InlineData("")]
+      public void EveryOtherItem_IsNot(string name) {
+         Assert.False(ShortcutIcons.IsPokeFluteName(name));
+      }
+
+      [Fact]
+      public void ANameThatIsNotThere_IsNotThePokeFlute() {
+         Assert.False(ShortcutIcons.IsPokeFluteName(null));
+      }
+   }
+
+   public class ShortcutPokeFluteItemTests : BaseViewModelTestClass {
+      private const int Table = 0x100;
+
+      public ShortcutPokeFluteItemTests() : base(0x2000) { }
+
+      [Fact]
+      public void ThePokeFlute_IsFoundByItsName_WhereverItIs() {
+         CreateTextTable(HardcodeTablesModel.ItemsTableName, Table, "BLUE FLUTE", "POKE BALL", "POKE FLUTE", "SODA POP");
+
+         Assert.Equal(2, ShortcutIcons.FindPokeFluteItem(Model));
+      }
+
+      [Fact]
+      public void ARomWithoutItemNamedLikeIt_HasNoPokeFlute() {
+         CreateTextTable(HardcodeTablesModel.ItemsTableName, Table, "BLUE FLUTE", "POKE BALL");
+
+         Assert.Equal(-1, ShortcutIcons.FindPokeFluteItem(Model));
+      }
+
+      [Fact]
+      public void ARomWithoutAnItemTable_HasNoPokeFlute_AndNothingThrows() {
+         Assert.Equal(-1, ShortcutIcons.FindPokeFluteItem(Model));
+         Assert.Null(ShortcutIcons.PokeFlute(Model));
+      }
+
+      private void CreateItemsWithoutNames(string gameCode) {
+         SetFullModel(0xFF); // every name is empty
+         SetGameCode(gameCode);
+         ViewPort.Edit($"@{Table:X} ^{HardcodeTablesModel.ItemsTableName}[name\"\"12]360 ");
+      }
+
+      private void RenameItem(int item, string name) => ViewPort.Edit($"@{Table + item * 12:X} {name}\" ");
+
+      [Theory]
+      [InlineData("BPRE0")] // FireRed
+      [InlineData("BPGE1")] // LeafGreen 1.1
+      [InlineData("BPEE0")] // Emerald
+      [InlineData("BPRF0")] // a language other than English
+      public void WithoutNames_TheUneditedGamesUseTheOriginalNumberOfThePokeFlute(string gameCode) {
+         CreateItemsWithoutNames(gameCode);
+
+         Assert.Equal(ShortcutIcons.OriginalPokeFluteItem, ShortcutIcons.FindPokeFluteItem(Model));
+         Assert.Equal(350, ShortcutIcons.OriginalPokeFluteItem);
+      }
+
+      [Theory]
+      [InlineData("AXVE0")] // Ruby
+      [InlineData("AXPE1")] // Sapphire
+      [InlineData("XXXX0")]
+      public void WithoutNames_AnyOtherGame_HasNoPokeFlute(string gameCode) {
+         CreateItemsWithoutNames(gameCode);
+
+         Assert.Equal(-1, ShortcutIcons.FindPokeFluteItem(Model));
+      }
+
+      [Fact]
+      public void AnItemThatSomeoneRenamed_IsNotTakenForThePokeFluteByItsNumber() {
+         CreateItemsWithoutNames("BPRE0");
+         RenameItem(350, "MASTER BALL");
+
+         Assert.Equal(-1, ShortcutIcons.FindPokeFluteItem(Model));
+      }
+
+      [Fact]
+      public void TheNameWins_OverTheNumber() {
+         CreateItemsWithoutNames("BPRE0");
+         RenameItem(7, "POKE FLUTE"); // not at 350 (a hack that moved it)
+
+         Assert.Equal(7, ShortcutIcons.FindPokeFluteItem(Model));
+      }
+   }
+
+   public class ShortcutPokeFluteIconTests : BaseViewModelTestClass {
+      private const short Blue = 0x7C00;      // as the palette stores it (blue is the high bits)
+      private const short BlueDrawn = 0x001F;  // as the picture's pixels have it (the red and blue bits are swapped)
+      private const int Items = 0x100, Pictures = 0x300, Sprite = 0x400, Palette = 0x600, Songs = 0x700;
+
+      public ShortcutPokeFluteIconTests() : base(0x1000) { }
+
+      private void WriteName(int address, string name, int maxLength) {
+         var bytes = Model.TextConverter.Convert(name, out _);
+         for (int i = 0; i < maxLength; i++) Model[address + i] = i < bytes.Count ? bytes[i] : (byte)0xFF;
+      }
+
+      // a 24x24 picture (3x3 tiles) of palette colour 1, with a palette whose colour 1 is blue
+      private void CreatePicture() {
+         for (int i = 0; i < 9 * 32; i++) Model[Sprite + i] = 0x11;
+         Model.WriteMultiByteValue(Palette + 2, 2, Token, Blue);
+      }
+
+      [Fact]
+      public void ExpansionStyle_ThePictureIsTheIconFieldOfTheItem() {
+         CreatePicture();
+         ViewPort.Edit($"@{Items:X} ^{HardcodeTablesModel.ItemsTableName}[name\"\"12 icon<`ucs4x3x3`> palette<`ucp4`>]3 ");
+         WriteName(Items, "BLUE FLUTE", 12);
+         WriteName(Items + 20, "POKE BALL", 12);
+         WriteName(Items + 40, "Poké Flute", 12);
+         Model.WritePointer(Token, Items + 40 + 12, Sprite);
+         Model.WritePointer(Token, Items + 40 + 16, Palette);
+         ViewPort.Edit($"@{Sprite:X} ^fluteicon`ucs4x3x3` @{Palette:X} ^flutepalette`ucp4` ");
+
+         var picture = ShortcutIcons.PokeFlute(Model);
+
+         Assert.NotNull(picture);
+         Assert.Equal((24, 24), (picture.PixelWidth, picture.PixelHeight));
+         Assert.All(picture.PixelData, pixel => Assert.Equal(BlueDrawn, pixel));
+      }
+
+      private void CreateOriginalStyleItems(string flute = "POKE FLUTE") {
+         CreateTextTable(HardcodeTablesModel.ItemsTableName, Items, "BLUE FLUTE", "POKE BALL", flute);
+         CreatePicture();
+         ViewPort.Edit($"@{Pictures:X} ^{HardcodeTablesModel.ItemImagesTableName}[sprite<`ucs4x3x3`> palette<`ucp4`>]3 ");
+         Model.WritePointer(Token, Pictures + 2 * 8, Sprite);
+         Model.WritePointer(Token, Pictures + 2 * 8 + 4, Palette);
+         ViewPort.Edit($"@{Sprite:X} ^fluteicon`ucs4x3x3` @{Palette:X} ^flutepalette`ucp4` ");
+      }
+
+      [Fact]
+      public void OriginalGamesStyle_ThePictureIsTheEntryOfTheItemPictureTable() {
+         CreateOriginalStyleItems();
+
+         var picture = ShortcutIcons.PokeFlute(Model);
+
+         Assert.NotNull(picture);
+         Assert.Equal((24, 24), (picture.PixelWidth, picture.PixelHeight));
+         Assert.All(picture.PixelData, pixel => Assert.Equal(BlueDrawn, pixel));
+      }
+
+      [Fact]
+      public void ARomWithAFluteButNoPokeFlute_GivesNoPicture_NotTheBlueFlute() {
+         CreateOriginalStyleItems("SODA POP");
+
+         Assert.Null(ShortcutIcons.PokeFlute(Model));
+      }
+
+      [Fact]
+      public void APokeFluteWithoutAPicture_GivesNoPicture() {
+         CreateTextTable(HardcodeTablesModel.ItemsTableName, Items, "BLUE FLUTE", "POKE BALL", "POKE FLUTE");
+
+         Assert.Equal(2, ShortcutIcons.FindPokeFluteItem(Model));
+         Assert.Null(ShortcutIcons.PokeFlute(Model));
+      }
+
+      private GotoShortcutViewModel SoundButton() {
+         CreateTextTable(SoundTab.SongTable, Songs, "song a", "song b");
+         var editor = New.EditorViewModel();
+         editor.Add(ViewPort);
+         return editor.GotoViewModel.Shortcuts.Single(button => button.DisplayText == "Sound");
+      }
+
+      [Fact]
+      public void TheSoundButton_ShowsThePokeFluteOfTheRom() {
+         CreateOriginalStyleItems();
+
+         var button = SoundButton();
+
+         Assert.NotNull(button.Image);
+         Assert.All(button.Image.PixelData, pixel => Assert.Equal(BlueDrawn, pixel)); // the ROM's picture, not the built-in one
+      }
+
+      [Fact]
+      public void TheSoundButton_OfARomWithoutAPokeFlute_ShowsTheBuiltInPokeFlute() {
+         CreateOriginalStyleItems("SODA POP");
+
+         var button = SoundButton();
+
+         Assert.Equal(ShortcutFallbackIcons.Create(ShortcutKind.Sound).PixelData, button.Image.PixelData);
+      }
+   }
+
+   #endregion
+
+   #region The OW Sprites button shows the first picture of sprite 0
+
+   public class ShortcutFirstOverworldSpriteTests : BaseViewModelTestClass {
+      private const short Red = 0x001F, Blue = 0x7C00;           // as the palettes store them
+      private const short BlueDrawn = 0x001F;                     // as the picture's pixels have it (the red and blue bits are swapped)
+      private const int Palettes = 0x60, SpriteList = 0x80, Table = 0x100, Sprite0 = 0x120, Sprite1 = 0x140, Songs = 0x300;
+
+      public ShortcutFirstOverworldSpriteTests() : base(0x400) { }
+
+      // sprite 0 is 8x8, its picture is made of colour 1, and its palette (id 1) has a blue colour 1; the palette with id 0 has a red one
+      private void CreateTable(bool sprite0HasGraphics = true, bool withNames = false) {
+         for (int i = 0; i < 0x20; i++) Model[i] = 0x11;
+         Model.WriteMultiByteValue(0x20 + 2, 2, Token, Red);
+         Model.WriteMultiByteValue(0x40 + 2, 2, Token, Blue);
+         ViewPort.Edit($"@{Palettes:X2} <020> 00 00 <040> 01 00 @{Palettes:X2} ^{HardcodeTablesModel.OverworldPalettes}[pal<`ucp4`> id:|h]2 ");
+         ViewPort.Edit($"@{SpriteList:X2} <000> 20 ");
+         ViewPort.Edit(sprite0HasGraphics ? $"@{Sprite0:X} FF FF 01 00 40 00 08 00 08 00 <080>" : $"@{Sprite0:X} FF FF 01 00 40 00 08 00 08 00 00 00 00 00");
+         ViewPort.Edit($"@{Sprite1:X} FF FF 00 00 40 00 08 00 08 00 <080>"); // sprite 1 uses the same picture with the red palette
+         if (withNames) Model.SetList(new ModelDelta(), "owNames", "BRENDAN_NORMAL", "OTHER");
+         ViewPort.Edit($"@{Table:X} <{Sprite0:X}> <{Sprite1:X}> @{Table:X} ^{HardcodeTablesModel.OverworldSprites}[data<[starterbytes:|h paletteid:|h length: width: height: sprites<`osl`>]1>]{(withNames ? "owNames" : "2")} ");
+      }
+
+      [Fact]
+      public void ARomWithoutTheTable_HasNoSprite() {
+         Assert.Null(ShortcutIcons.FirstOverworldSprite(Model));
+      }
+
+      [Fact]
+      public void Sprite0_IsDrawnWithItsOwnPalette() {
+         CreateTable();
+
+         var picture = ShortcutIcons.FirstOverworldSprite(Model);
+
+         Assert.NotNull(picture);
+         Assert.Equal((8, 8), (picture.PixelWidth, picture.PixelHeight));
+         Assert.All(picture.PixelData, pixel => Assert.Equal(BlueDrawn, pixel)); // the palette with the id sprite 0 names, not the one of sprite 1
+      }
+
+      [Fact]
+      public void TheSprite_IsTheOneTheGalleryShowsForSprite0() {
+         CreateTable();
+
+         var fromGallery = OverworldSpriteRenderer.Get(Model).Get(0);
+
+         Assert.False(fromGallery.isPlaceholder);
+         Assert.Equal(fromGallery.image.PixelData, ShortcutIcons.FirstOverworldSprite(Model).PixelData);
+      }
+
+      [Fact]
+      public void ASpriteWithoutGraphics_GivesNoPicture_NotAPlaceholder() {
+         CreateTable(sprite0HasGraphics: false);
+
+         Assert.Null(ShortcutIcons.FirstOverworldSprite(Model));
+      }
+
+      [Fact]
+      public void ForAPlayerCalledBrendan_ItIsThePictureTheCustomizationButtonUsesToo() {
+         CreateTable(withNames: true);
+
+         var first = ShortcutIcons.FirstOverworldSprite(Model);
+         var brendan = ShortcutIcons.BrendanStanding(Model);
+
+         Assert.NotNull(first);
+         Assert.NotNull(brendan);
+         Assert.Equal((brendan.PixelWidth, brendan.PixelHeight), (first.PixelWidth, first.PixelHeight));
+         Assert.Equal(brendan.PixelData, first.PixelData);
+      }
+
+      private GotoShortcutViewModel Button() {
+         CreateTextTable(SoundTab.SongTable, Songs, "song a", "song b");
+         var editor = New.EditorViewModel();
+         editor.Add(ViewPort);
+         return editor.GotoViewModel.Shortcuts.Single(button => button.DisplayText == "OW Sprites");
+      }
+
+      [Fact]
+      public void TheButton_ShowsSprite0() {
+         CreateTable();
+
+         var button = Button();
+
+         Assert.Equal((8, 8), (button.Image.PixelWidth, button.Image.PixelHeight));
+         Assert.All(button.Image.PixelData, pixel => Assert.Equal(BlueDrawn, pixel));
+      }
+
+      [Fact]
+      public void TheButton_OfARomWhoseSprite0HasNoGraphics_ShowsTheBuiltInPicture() {
+         CreateTable(sprite0HasGraphics: false);
+
+         var button = Button();
+
+         Assert.Equal(ShortcutFallbackIcons.Create(ShortcutKind.OverworldSprites).PixelData, button.Image.PixelData);
       }
    }
 

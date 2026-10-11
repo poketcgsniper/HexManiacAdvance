@@ -15,7 +15,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       Moves,
       Items,
       Maps,
-      /// <summary>The Sound editor (music and cries).</summary>
+      /// <summary>The Sound editor (music and cries): its picture is a Poke Flute.</summary>
       Sound,
       OverworldSprites,
       AnimatedTiles,
@@ -26,7 +26,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
    /// The built-in pictures of the main-menu buttons, used when the ROM and its metadata give a button no picture of its own.
    ///
    /// An unedited game has no picture for some buttons (the Sound editor, the overworld sprites...): before these pictures the button showed a dark grey one-colour glyph that almost disappeared on the dark
-   /// background. Now every button always has a coloured sprite in the style of the others (an outline, a few shades, a highlight): a music note, an egg, a lightning bolt, a potion, a map, a trainer's head, a
+   /// background. Now every button always has a coloured sprite in the style of the others (an outline, a few shades, a highlight): a Poke Flute (the Sound button shows the Poke Flute item of the ROM, this is the one for a ROM that has none), an egg, a lightning bolt, a potion, a map, a trainer's head, a
    /// character in the overworld, a flower tile, a cartridge. They are drawn by hand for this program (see ShortcutFallbackIcons.Art.cs), not taken from any game.
    ///
    /// A picture that comes from the loaded ROM always wins: the fallback is only asked for when the button has no picture at all (<see cref="Attach"/>).

@@ -20,7 +20,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
    ///   Pokemon              the front picture of Cradily (found by name in the species names; the button keeps the ROM metadata's picture if there is no Cradily),
    ///                        and the place where its battle animation plugs in (<see cref="CreatePokemonButtonAnimation"/>)
    ///   Items                a Poke Ball (found by name in the items table, with the icon the item table points to)
-   ///   OW Sprites           Brendan standing and facing down (the overworld sprite table's BRENDAN_NORMAL, the same picture the Character Customization tab shows)
+   ///   Sound                the Poke Flute (the item is found by its name in the items table; its picture is the 'icon' of the items table or, in the unedited games, the item picture table)
+   ///   OW Sprites           the first picture of overworld sprite 0 (standing, facing down): the player, Brendan in Ruby, Sapphire, Emerald and CUBE, Red in FireRed and LeafGreen
    ///   Anim Tiles           the General tileset's flower, animated with the frames and the speed of the game's own animation table
    ///   Character Customization   Brendan's trainer front picture with a dark skin tone and the blue clothes row
    ///
@@ -186,6 +187,94 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             if (char.IsLetterOrDigit(c)) result.Append(char.ToUpperInvariant(c));
          }
          return result.ToString();
+      }
+
+      #endregion
+
+      #region The Poke Flute (the Sound button)
+
+      /// <summary>The number of ITEM_POKE_FLUTE in Emerald, FireRed and LeafGreen (the unedited games have it at the same place, in every language).</summary>
+      public const int OriginalPokeFluteItem = 350;
+
+      /// <summary>True for the name of the Poke Flute in any of the languages of the games (letters only, see <see cref="NormalizeName"/>): 'POKE FLUTE', 'FLUTE POKE', 'POKEFLOTE', 'FLAUTA POKE', 'POKEFLAUTO'.</summary>
+      public static bool IsPokeFluteName(string name) {
+         var letters = NormalizeName(name);
+         if (!letters.Contains("POKE", StringComparison.Ordinal)) return false;
+         return letters.Contains("FLUT", StringComparison.Ordinal) || letters.Contains("FLAUT", StringComparison.Ordinal) || letters.Contains("FLOT", StringComparison.Ordinal);
+      }
+
+      /// <summary>
+      /// The number of the Poke Flute in the items table: the first item with the name of the Poke Flute. Only if the table has no names at all (or none for item 350) and the game is an unedited-looking
+      /// Emerald, FireRed or LeafGreen, the original number 350 is used. -1 if the ROM has no Poke Flute.
+      /// </summary>
+      public static int FindPokeFluteItem(IDataModel model) {
+         try {
+            var items = model.GetTable(HardcodeTablesModel.ItemsTableName);
+            if (items == null) return -1;
+            var names = model.GetOptions(HardcodeTablesModel.ItemsTableName);
+            for (int i = 0; names != null && i < names.Count && i < items.ElementCount; i++) {
+               if (IsPokeFluteName(names[i])) return i;
+            }
+            var gameCode = model.GetGameCode() ?? string.Empty;
+            var original = gameCode.StartsWith("BPE", StringComparison.Ordinal) || gameCode.StartsWith("BPR", StringComparison.Ordinal) || gameCode.StartsWith("BPG", StringComparison.Ordinal);
+            // an item without a name is listed by the program as '~351' (its number): no letter in the name means there is no name
+            var nameOfOriginal = names != null && OriginalPokeFluteItem < names.Count ? NormalizeName(names[OriginalPokeFluteItem]) : string.Empty;
+            var hasName = nameOfOriginal.Any(char.IsLetter);
+            return original && !hasName && OriginalPokeFluteItem < items.ElementCount ? OriginalPokeFluteItem : -1;
+         } catch (Exception) {
+            return -1;
+         }
+      }
+
+      /// <summary>
+      /// The Poke Flute's item picture. Null if the ROM has no such item or no picture for it. The picture is the one the items table points to (pokeemerald-expansion, CUBE: the 'icon' field)
+      /// or, in the unedited games, the entry of the item picture table (graphics.items.sprites, one entry per item) with the same number.
+      /// </summary>
+      public static IPixelViewModel PokeFlute(IDataModel model) {
+         try {
+            var item = FindPokeFluteItem(model);
+            return item < 0 ? null : ItemIconByNumber(model, item);
+         } catch (Exception) {
+            return null;
+         }
+      }
+
+      /// <summary>The picture of the item with this number: the 'icon' field of the items table if it has one, otherwise the same entry of the item picture table.</summary>
+      public static IPixelViewModel ItemIconByNumber(IDataModel model, int item) {
+         try {
+            var items = model.GetTable(HardcodeTablesModel.ItemsTableName);
+            if (items == null || item < 0 || item >= items.ElementCount) return null;
+            var iconSegment = items.ElementContent.FirstOrDefault(segment => segment.Name == "icon" && segment is ArrayRunPointerSegment);
+            if (iconSegment != null) {
+               var offset = items.ElementContent.Until(segment => segment == iconSegment).Sum(segment => segment.Length);
+               var iconAddress = model.ReadPointer(items.Start + items.ElementLength * item + offset);
+               if (iconAddress >= 0 && iconAddress < model.Count && model.GetNextRun(iconAddress) is ISpriteRun spriteRun && spriteRun.Start == iconAddress) {
+                  return SpriteDecorator.BuildSprite(model, spriteRun, useTransparency: true);
+               }
+            }
+            var pictures = model.GetTable(HardcodeTablesModel.ItemImagesTableName);
+            if (pictures != null && item < pictures.ElementCount) return BuildPicture(model, $"{HardcodeTablesModel.ItemImagesTableName}/{item}/sprite/");
+         } catch (Exception) { }
+         return null;
+      }
+
+      #endregion
+
+      #region The first overworld sprite (the OW Sprites button)
+
+      /// <summary>
+      /// The first picture of sprite 0 of the overworld sprite table (graphics.overworld.sprites), drawn with its own palette and with a transparent background: the player standing and facing down
+      /// (Brendan in Ruby, Sapphire, Emerald and CUBE, Red in FireRed and LeafGreen). It is the picture the sprite gallery and the map editor show for the sprite, so the table is read the same way for every game.
+      /// Null if the ROM has no such table or the sprite has no picture or palette.
+      /// </summary>
+      public static IPixelViewModel FirstOverworldSprite(IDataModel model) {
+         try {
+            var table = model.GetTable(HardcodeTablesModel.OverworldSprites);
+            if (table == null || table.ElementCount < 1) return null;
+            return HavenSoft.HexManiac.Core.ViewModels.Map.ObjectEventViewModel.Render(model, new ModelTable(model, table.Start), null, 0, 0, () => -1);
+         } catch (Exception) {
+            return null;
+         }
       }
 
       #endregion
