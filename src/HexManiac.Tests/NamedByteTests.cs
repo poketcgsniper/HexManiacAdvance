@@ -106,6 +106,29 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(10, matches.Count);
       }
 
+      [Theory]
+      [InlineData("^other[a:: b::]1 ")]
+      [InlineData("^sprite`ucs4x1x1` ")]
+      public void NamedByte_OverwrittenByAnotherFormat_NameNoLongerMatchesThatCell(string format) {
+         ViewPort.Edit(".some.constant=3 ");
+         Assert.Equal(new[] { 0 }, Model.GetMatchedWords("some.constant").ToArray());
+
+         ViewPort.Edit("@00 " + format);
+
+         Assert.Empty(Model.GetMatchedWords("some.constant"));
+      }
+
+      [Fact]
+      public void NamedByte_OverwrittenByAnotherFormat_UseTheNameAgain_DoesNotThrow() {
+         // the name still listed the overwritten cell, and typing the name elsewhere then cast whatever run was there to a WordRun
+         ViewPort.Edit(".some.constant=3 ");
+         ViewPort.Edit("@00 ^other[a:: b::]1 ");
+
+         ViewPort.Edit("@20 .some.constant ");
+
+         Assert.Equal(new[] { 0x20 }, Model.GetMatchedWords("some.constant").ToArray());
+      }
+
       [Fact]
       public void NamedConstant_CreateTableWithMatchingLength_TableHasExpectedLength() {
          ViewPort.Edit(".some.length 12 @04 ^table[a:]some.length ");

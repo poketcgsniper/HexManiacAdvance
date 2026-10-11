@@ -793,8 +793,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Visitors {
             return;
          }
          var addresses = Model.GetMatchedWords(constantName);
-         if (CurrentChange is not NoDataChangeDeltaModel && newValue == int.MinValue && addresses.Count > 0) {
-            var valueSource = (WordRun)Model.GetNextRun(addresses[0]);
+         WordRun valueSource = null;
+         foreach (var address in addresses) {
+            if (Model.GetNextRun(address) is WordRun candidate && candidate.Start == address) { valueSource = candidate; break; }
+         }
+         if (CurrentChange is not NoDataChangeDeltaModel && newValue == int.MinValue && valueSource != null) {
             int value = Model.ReadMultiByteValue(valueSource.Start, valueSource.Length);
             value /= valueSource.MultOffset;
             value -= valueSource.ValueOffset;
