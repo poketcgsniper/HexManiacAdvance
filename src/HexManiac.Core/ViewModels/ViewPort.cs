@@ -3125,6 +3125,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                }
                RefreshBackingData();
                SelectionEnd = GetSelectionSpan(SelectionStart).end;
+            } else {
+               // the table can't be extended: end the '+' edit, otherwise the next character is added to it and it is read as the hex byte '+3'
+               RefreshBackingData();
             }
             HandleErrorInfo(errorInfo);
             result = true;

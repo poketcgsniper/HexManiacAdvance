@@ -658,7 +658,7 @@ namespace HavenSoft.HexManiac.Core.Models {
       public static ErrorInfo CompleteArrayExtension(this IDataModel model, ModelDelta changeToken, int count, ref ITableRun table) {
          var currentArrayName = model.GetAnchorFromAddress(-1, table.Start);
          if (!table.CanAppend) {
-            return new ErrorInfo($"Cannot extend {currentArrayName}.");
+            return new ErrorInfo($"Cannot extend {(string.IsNullOrEmpty(currentArrayName) ? table.Start.ToAddress() : currentArrayName)}.");
          }
 
          var initialTableName = model.GetAnchorFromAddress(-1, table.Start);

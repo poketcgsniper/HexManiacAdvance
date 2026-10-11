@@ -128,6 +128,21 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void TypingPlusAtTheEndOfAStreamThatCannotGrow_ReportsAnErrorAndTheNextCharacterDoesNotThrow() {
+         TableStreamRun.TryParseTableStream(Model, 0x20, SortedSpan<int>.None, string.Empty, "[a. b.]1", null, out var stream); // a stream with a fixed length of 1 element (like a sprite template)
+         Model.ObserveRunWritten(ViewPort.CurrentChange, stream);
+         ViewPort.Edit("@22 <040> "); // a pointer starts where the stream ends
+         Assert.False(stream.CanAppend);
+         Errors.Clear();
+
+         ViewPort.Edit("@22 +"); // extends the stream before the cursor, which can't grow
+         ViewPort.Edit("3");     // used to continue the failed '+' edit as the hex edit '+3' and throw a FormatException
+
+         Assert.Single(Errors, error => error.Contains("Cannot extend"));
+         Assert.Equal(2, Model.GetNextRun(0x20).Length);
+      }
+
+      [Fact]
       public void StreamWithCustomEnd_CutPaste_DataUpdates() {
          SetFullModel(0xFF);
          var fileSystem = new StubFileSystem();
