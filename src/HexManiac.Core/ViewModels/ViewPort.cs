@@ -2535,7 +2535,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          title = "Sources of " + title;
          var newTab = new SearchResultsViewPort(title);
 
-         foreach (var source in run.PointerSources) newTab.Add(CreateChildView(source, source), source, source);
+         // the sources of an element inside a table that has inner anchors are not the sources of the table (see ContextItemFactory.GetAnchorSourceItems)
+         var sources = run.PointerSources;
+         if (run is ArrayRun array && array.SupportsInnerPointers && address > run.Start && address < run.Start + run.Length) sources = array.PointerSourcesForInnerElements[(address - run.Start) / array.ElementLength];
+         foreach (var source in sources ?? SortedSpan<int>.None) newTab.Add(CreateChildView(source, source), source, source);
 
          RequestTabChange(this, new(newTab));
          RequestMenuClose?.Invoke(this, EventArgs.Empty);
