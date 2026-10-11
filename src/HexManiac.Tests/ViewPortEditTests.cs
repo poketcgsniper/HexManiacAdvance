@@ -263,6 +263,70 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.DoesNotContain(8, (Model.GetNextRun(0x60).PointerSources ?? SortedSpan<int>.None).ToList());
       }
 
+      [Theory]
+      [InlineData(0x40)]
+      [InlineData(0x44)]
+      [InlineData(0x41)]
+      public void TypePointerToPalette_DestinationHasOtherPointersWithinThePalette_TheyAreClearedInsteadOfOverlapping(int destination) {
+         // the typed pointer adds a 0x20 byte palette: the pointers (and their formats) that were stored in those 0x20 bytes are replaced by it
+         ViewPort.Edit("@40 <180> <184> <188> <18C> @100 ^table[pal<`ucp4`>]2 ");
+         ViewPort.ChangeHistory.ChangeCompleted();
+         Assert.Equal(0x44, Model.GetNextRun(0x44).Start);
+         Assert.IsType<PointerRun>(Model.GetNextRun(0x44));
+
+         ViewPort.Edit($"@100 <{destination:X3}> ");
+
+         var palette = Assert.IsType<HavenSoft.HexManiac.Core.Models.Runs.Sprites.PaletteRun>(Model.GetNextRun(destination));
+         Assert.Equal(destination, palette.Start);
+         Assert.Equal(0x20, palette.Length);
+         for (var address = destination + 1; address < destination + 0x20; address++) {
+            var inside = Model.GetNextRun(address);
+            Assert.True(ReferenceEquals(inside, palette), $"{inside.GetType().Name} at {inside.Start:X} is inside the palette at {destination:X}");
+         }
+
+         ViewPort.Undo.Execute();
+
+         Assert.IsType<PointerRun>(Model.GetNextRun(0x44));
+         Assert.Equal(0x44, Model.GetNextRun(0x44).Start);
+      }
+
+      [Theory]
+      [InlineData("ucs4x1x1", false, 0x40)]
+      [InlineData("ucs4x1x1", false, 0x44)]
+      [InlineData("lzs4x1x1", true, 0x40)]
+      [InlineData("lzs4x1x1", true, 0x44)]
+      [InlineData("lzp4", true, 0x40)]
+      [InlineData("lzp4", true, 0x44)]
+      [InlineData("ucs4x1x1", false, 0x41)]
+      [InlineData("lzs4x1x1", true, 0x41)]
+      [InlineData("lzp4", true, 0x41)]
+      public void TypePointerToImageData_DestinationHasOtherPointersWithinTheData_TheyAreClearedInsteadOfOverlapping(string format, bool compressed, int destination) {
+         ViewPort.Edit("@40 <180> <184> <188> <18C> <190> <194> @100 ^table[data<`" + format + "`>]2 ");
+         ViewPort.ChangeHistory.ChangeCompleted();
+         if (compressed) {
+            // the data is a valid compressed stream, but the model still thinks of it as a few pointers
+            HavenSoft.HexManiac.Core.Models.Runs.Sprites.LZRun.Compress(new byte[0x20]).WriteInto(Model.RawData, destination);
+         } else if (destination == 0x41) {
+            Model.RawData[0x40] = 0;
+         }
+         Assert.IsType<PointerRun>(Model.GetNextRun(0x44));
+
+         ViewPort.Edit($"@100 <{destination:X3}> ");
+
+         var created = Model.GetNextRun(destination);
+         Assert.Equal(destination, created.Start);
+         Assert.False(created is PointerRun || created is NoInfoRun, $"{created.GetType().Name} at {created.Start:X}: the format was not added ({string.Join("|", Errors)})");
+         for (var address = destination + 1; address < destination + created.Length; address++) {
+            var inside = Model.GetNextRun(address);
+            Assert.True(ReferenceEquals(inside, created), $"{inside.GetType().Name} at {inside.Start:X} is inside the {created.GetType().Name} at {destination:X}+{created.Length:X}");
+         }
+
+         ViewPort.Undo.Execute();
+
+         Assert.IsType<PointerRun>(Model.GetNextRun(0x44));
+         Assert.Equal(0x44, Model.GetNextRun(0x44).Start);
+      }
+
       [Fact]
       public void ClearTableCellWithPointer_DestinationNoLongerListsTheCellAsASource() {
          // a stale source would be rewritten (un-nulling the cell) the next time the destination moves
