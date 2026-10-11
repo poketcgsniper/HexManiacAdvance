@@ -38,6 +38,7 @@ Name = '''Sprites'''
    '''graphics.pokemon.sprites.coordinates.front''',
    '''graphics.pokemon.sprites.elevation''',
    '''graphics.pokemon.animations.front''',
+   '''graphics.pokemon.animations.delay''',
    '''graphics.pokemon.sprites.back''',
    '''graphics.pokemon.sprites.coordinates.back''',
    '''graphics.pokemon.animations.back''',
