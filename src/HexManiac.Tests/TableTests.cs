@@ -1482,6 +1482,21 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void RecordPointer_ClearPartOfTheTable_DestinationNoLongerListsTheClearedPointerAsASource() {
+         SetFullModel(0xFF);
+         "02 00 00 00 00 01 00 08".ToByteArray().WriteInto(Model.RawData, 0);
+         ViewPort.Edit("@080 <100> @000 ^parent[arg:: target::|s=arg(2=<>)]2 ");
+         Assert.Contains(4, Model.GetNextRun(0x100).PointerSources);
+
+         ViewPort.Goto.Execute(0);
+         ViewPort.SelectionEnd = ViewPort.ConvertAddressToViewPoint(7); // the first element, not the whole table
+         ViewPort.Clear.Execute();
+
+         Assert.Equal(0, Model.ReadMultiByteValue(4, 4)); // the cleared record is a null pointer
+         Assert.Equal(0x80, Model.GetNextRun(0x100).PointerSources.Single()); // used to still list 4, which no longer holds a pointer
+      }
+
+      [Fact]
       public void RecordPointerToText_RepointText_UpdateRecord() {
          SetFullModel(0xFF);
          "00 00 00 00 00 00 00 00".ToByteArray().WriteInto(Model.RawData, 0);

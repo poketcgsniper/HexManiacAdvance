@@ -1184,13 +1184,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                   var start = arrayRun.Start + arrayRun.ElementLength * i;
                   if (start + arrayRun.ElementLength <= left) continue;
                   if (start > right) break;
+                  // what a record field holds depends on another field of the element (which may be cleared first): decide before clearing anything
+                  var fields = new List<ArrayRunElementSegment>();
+                  var fieldStart = start;
+                  foreach (var field in arrayRun.ElementContent) {
+                     fields.Add(field is ArrayRunRecordSegment record ? record.CreateConcrete(Model, arrayRun, fieldStart) : field);
+                     fieldStart += field.Length;
+                  }
                   for (int j = 0; j < arrayRun.ElementContent.Count; j++) {
                      start = arrayRun.Start + arrayRun.ElementLength * i + arrayRun.ElementContent.Take(j).Sum(seg => seg.Length);
                      if (start + arrayRun.ElementContent[j].Length <= left) continue;
                      if (start > right) break;
-                     if (arrayRun.ElementContent[j].Type == ElementContentType.Pointer) {
+                     if (fields[j].Type == ElementContentType.Pointer) {
                         // a cleared pointer cell is a null pointer: the old destination must stop listing the cell as one of its sources
-                        Model.UpdateArrayPointer(history.CurrentChange, arrayRun.ElementContent[j], arrayRun.ElementContent, i, start, Pointer.NULL);
+                        Model.UpdateArrayPointer(history.CurrentChange, fields[j], arrayRun.ElementContent, i, start, Pointer.NULL);
                         for (int k = 0; k < arrayRun.ElementContent[j].Length; k++) history.CurrentChange.ChangeData(Model, start + k, 0x00);
                      } else {
                         for (int k = 0; k < arrayRun.ElementContent[j].Length; k++) history.CurrentChange.ChangeData(Model, start + k, 0xFF);
