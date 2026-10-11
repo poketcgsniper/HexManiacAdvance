@@ -470,7 +470,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
 
       private void ImportBlocks(bool primary) {
          var layout = GetLayout();
-         var (blockCount, maxBlockCount) = EstimateBlockCount(layout, primary);
+         var (blockCount, maxBlockCount) = BlockCountToCopy(layout, primary); // (the same count Export uses: a file made by Export replaces the table in place)
          var blocksetName = primary ? Format.PrimaryBlockset : Format.SecondaryBlockset;
          var blockStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.Blocks);
          var attributeStart = layout.GetSubTable(blocksetName)[0].GetAddress(Format.BlockAttributes);
