@@ -204,24 +204,47 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
 
       public override string ToText(IDataModel model, int address, int depth) {
          using (ModelCacheScope.CreateScope(model)) {
-            var options = GetOptions(model).ToList();
+            var options = GetOptions(model);
             if (options == null) return base.ToText(model, address, depth);
 
             var resultAsInteger = ToInteger(model, address, Length) - ValueOffset;
             if (resultAsInteger >= options.Count || resultAsInteger < 0) return resultAsInteger.ToString();
-            var value = options[resultAsInteger] ?? resultAsInteger.ToString();
 
-            // use ~2 postfix for a value if an earlier entry in the array has the same name.
-            // Names are compared the way TryMatch compares them, so the text that is shown is always read back as this value
-            // (a list built from another table's values can contain both "Name" and "Name~3", and several of each)
-            var key = OptionKey(value, resultAsInteger);
-            var elementsUpToHereWithThisName = 1;
-            for (int i = resultAsInteger - 1; i >= 0; i--) {
-               if (OptionKey(options[i], i) == key) elementsUpToHereWithThisName++;
+            // The grid asks for this text for every cell that holds an enum, every time it scrolls. Working out which of the options before this one
+            // have the same name takes a look at all of them, so that is done once per list of options (for as long as the data stays the same).
+            var cache = model.CurrentCacheScope.GetOrAdd(enumTextsKey ??= "enum-texts:" + EnumName, () => new EnumTexts(options));
+            if (cache.Texts.Length != options.Count) cache = new EnumTexts(options);
+            return cache.Texts[resultAsInteger] ??= cache.CreateText(options, resultAsInteger);
+         }
+      }
+
+      private string enumTextsKey;
+
+      /// <summary>What <see cref="ToText"/> shows for each option of one list of options.</summary>
+      private sealed class EnumTexts {
+         // for each option: 1 + the number of options before it that have the same name
+         private readonly int[] occurrence;
+         public readonly string[] Texts;
+
+         public EnumTexts(IReadOnlyList<string> options) {
+            Texts = new string[options.Count];
+            occurrence = new int[options.Count];
+            var seen = new Dictionary<string, int>();
+            for (int i = 0; i < options.Count; i++) {
+               // Names are compared the way TryMatch compares them, so the text that is shown is always read back as this value
+               // (a list built from another table's values can contain both "Name" and "Name~3", and several of each)
+               var key = OptionKey(options[i], i);
+               seen.TryGetValue(key, out var count);
+               seen[key] = occurrence[i] = count + 1;
             }
+         }
+
+         public string CreateText(IReadOnlyList<string> options, int index) {
+            var value = options[index] ?? index.ToString();
+            // use ~2 postfix for a value if an earlier entry in the array has the same name.
             if (value.StartsWith("\"") && value.EndsWith("\"")) value = value.Substring(1, value.Length - 2);
             if (value.Contains('~')) value = value.Split('~')[0];
-            if (elementsUpToHereWithThisName > 1) value += "~" + elementsUpToHereWithThisName;
+            if (occurrence[index] > 1) value += "~" + occurrence[index];
 
             // add quotes around it if it contains a space
             if (value.Contains(' ')) value = $"\"{value}\"";
