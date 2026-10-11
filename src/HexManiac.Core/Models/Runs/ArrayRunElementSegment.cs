@@ -211,13 +211,16 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
             if (resultAsInteger >= options.Count || resultAsInteger < 0) return resultAsInteger.ToString();
             var value = options[resultAsInteger] ?? resultAsInteger.ToString();
 
-            // use ~2 postfix for a value if an earlier entry in the array has the same string
+            // use ~2 postfix for a value if an earlier entry in the array has the same name.
+            // Names are compared the way TryMatch compares them, so the text that is shown is always read back as this value
+            // (a list built from another table's values can contain both "Name" and "Name~3", and several of each)
+            var key = OptionKey(value, resultAsInteger);
             var elementsUpToHereWithThisName = 1;
             for (int i = resultAsInteger - 1; i >= 0; i--) {
-               var previousValue = options[i];
-               if (previousValue == value) elementsUpToHereWithThisName++;
+               if (OptionKey(options[i], i) == key) elementsUpToHereWithThisName++;
             }
             if (value.StartsWith("\"") && value.EndsWith("\"")) value = value.Substring(1, value.Length - 2);
+            if (value.Contains('~')) value = value.Split('~')[0];
             if (elementsUpToHereWithThisName > 1) value += "~" + elementsUpToHereWithThisName;
 
             // add quotes around it if it contains a space
@@ -313,6 +316,15 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          return TryMatch(text, options, out value);
       }
 
+      private static string UnquotedOption(string option) {
+         if (option.StartsWith("\"")) option = option.Substring(1);
+         if (option.EndsWith("\"")) option = option.Substring(0, option.Length - 1);
+         return option;
+      }
+
+      /// <summary>The name of an option the way TryMatch compares it: no quotes, no case, and nothing after a ~ (which says "the Nth one with this name").</summary>
+      private static string OptionKey(string option, int index) => UnquotedOption(option ?? index.ToString()).ToLower().Split("~")[0];
+
       public static bool TryMatch(string text, IReadOnlyList<string> list, out int value) {
          text = text.Trim();
          if (int.TryParse(text, out value)) return true;
@@ -325,16 +337,20 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          // if the ~ character is used, expect that it's saying which match we want
          var desiredMatch = 1;
          var splitIndex = text.IndexOf('~');
-         if (splitIndex != -1 && !int.TryParse(text.Substring(splitIndex + 1), out desiredMatch)) return false;
+         if (splitIndex != -1 && !int.TryParse(text.Substring(splitIndex + 1), out desiredMatch)) {
+            // not a "which of the duplicates" number: the ~ may be part of an option's own name (like the battle script comparison "&~")
+            for (int i = 0; i < list.Count; i++) {
+               if (list[i] != null && string.Equals(UnquotedOption(list[i]), text, StringComparison.OrdinalIgnoreCase)) { value = i; return true; }
+            }
+            return false;
+         }
          if (splitIndex != -1) text = text.Substring(0, splitIndex);
 
          // ok, so everything lines up... check the array to see if any values match the string entered
          text = text.ToLower();
          var options = list;
          for (int i = 0; i < options.Count; i++) {
-            var option = (options[i] ?? i.ToString()).ToLower().Split("~")[0];
-            if (option.StartsWith("\"")) option = option.Substring(1);
-            if (option.EndsWith("\"")) option = option.Substring(0, option.Length - 1);
+            var option = OptionKey(options[i], i);
             if (option == text) matches.Add(option);
             if (matches.Count == desiredMatch) { value = i; return true; }
             if (option.MatchesPartial(text, onlyCheckLettersAndDigits: text.Length > 3)) {

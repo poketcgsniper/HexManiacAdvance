@@ -446,7 +446,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
          }
       }
 
-      private record StreamInfo(ExpectedPointerType PointerType, int Source, int Destination);
+      private record StreamInfo(ExpectedPointerType PointerType, int Source, int Destination, DeferredStreamToken Deferred = null);
 
       public static int InsertMissingClosers(ref string script, int caret) {
          int caretMove = 0;
@@ -484,6 +484,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   text.Insert(i + 1, '\r');
                   text.Insert(i + 2, '\n');
                }
+               while (text.Count < i + 3) text.Add(' '); // the text ends right after the open brace
                text.Insert(i + 3, '}');
                close = i + 3;
                if (i == caret) caretMove -= 3;
@@ -588,8 +589,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   var info = streamInfo[0];
                   streamTypes.Add(info.PointerType);
                   if (info.Destination == DeferredStreamToken.AutoSentinel + Pointer.NULL) {
-                     var deferred = deferredContent[deferredContent.Count - streamInfo.Count];
-                     deferred.UpdateContent(model, info.PointerType, stream);
+                     info.Deferred.UpdateContent(model, info.PointerType, stream);
                   } else if (model.GetNextRun(info.Destination) is IStreamRun streamRun && streamRun.Start == info.Destination) {
                      var newStreamRun = streamRun.DeserializeRun(stream, token, out var _, out var _); // we don't notify parents/children based on script-stream changes: we know they never have parents/children.
                      // alter script content and compiled byte location based on stream move
@@ -608,6 +608,12 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                continue;
             }
             streamInfo.Clear();
+
+            // Decompile writes ".raw XX" for bytes that are not a command: read them back as the same byte
+            if (TryParseRawByte(line, out var rawByte)) {
+               result.Add(rawByte);
+               continue;
+            }
 
             var command = FirstMatch(line);
             if (command != null) {
@@ -675,7 +681,6 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   if (arg.Type == ArgType.Pointer && arg.PointerType != ExpectedPointerType.Unknown) {
                      var destination = result.ReadMultiByteValue(currentSize + pointerOffset, 4) + Pointer.NULL;
                      if (destination == DeferredStreamToken.AutoSentinel + Pointer.NULL) {
-                        streamInfo.Add(new(arg.PointerType, start + currentSize + pointerOffset, destination));
                         (string format, byte[] defaultContent, int alignment) = arg.PointerType switch {
                            ExpectedPointerType.Text => ("\"\"", new byte[] { 0xFF }, 1),
                            ExpectedPointerType.Mart => ($"[item:{HardcodeTablesModel.ItemsTableName}]!0000", new byte[] { 0, 0 }, 4),
@@ -683,7 +688,9 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                            ExpectedPointerType.Movement => ($"[move.movementtypes]!FE", new byte[] { 0xFE }, 1),
                            _ => ("^", new byte[0], 1)
                         };
-                        deferredContent.Add(new(currentSize + pointerOffset, format, defaultContent, alignment));
+                        var deferredToken = new DeferredStreamToken(currentSize + pointerOffset, format, defaultContent, alignment);
+                        deferredContent.Add(deferredToken);
+                        streamInfo.Add(new(arg.PointerType, start + currentSize + pointerOffset, destination, deferredToken));
                      } else if (destination >= 0 && arg.PointerType != ExpectedPointerType.Script) {
                         streamInfo.Add(new(arg.PointerType, start + currentSize + pointerOffset, destination));
                         if (arg.PointerType == ExpectedPointerType.Text) {
@@ -696,7 +703,9 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   pointerOffset += arg.Length(model, currentSize + pointerOffset);
                }
 
-               lastCommandIsEndCommand = command.IsEndingCommand;
+               // padding nops after the end command (they keep an inline stream aligned) don't make the script "unfinished":
+               // adding another end command there grew the script by a byte and shifted its inline streams
+               lastCommandIsEndCommand = command.IsEndingCommand || (lastCommandIsEndCommand && command.LineCommand != null && command.LineCommand.StartsWith("nop"));
             } else {
                CompileError.Raise(this, new($"{i}: {line} is not a valid command", new(i, 0, lines[i].Length, SegmentType.Error)));
                return null;
@@ -736,10 +745,18 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                labels[line.Substring(0, line.Length - 1)] = start + length;
                continue;
             }
+            if (TryParseRawByte(line, out var _)) { length += 1; continue; }
             var command = FirstMatch(line);
             if (command != null) length += command.CompiledByteLength(model, line);
          }
          return new LabelLibrary(model, labels) { RequireCompleteAddresses = RequireCompleteAddresses };
+      }
+
+      private static bool TryParseRawByte(string line, out byte value) {
+         value = 0;
+         if (!line.StartsWith(".raw ", StringComparison.Ordinal)) return false;
+         var text = line.Substring(5).Trim();
+         return text.Length == 2 && byte.TryParse(text, System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out value);
       }
 
       public static IEnumerable<T> SortOptions<T>(IEnumerable<T> options, string token, Func<T, string> compare) {
@@ -1237,7 +1254,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
             }
             data.AddShort(0);
             content = data.ToArray();
-         } else if (type == ExpectedPointerType.Mart) {
+         } else if (type == ExpectedPointerType.Decor) {
             //   [item:{HardcodeTablesModel.DecorationsTableName}]!0000
             var data = new List<byte>();
             foreach (var line in text.SplitLines()) {
@@ -1263,7 +1280,9 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
             foreach (var line in text.SplitLines()) {
                var parts = line.Split(':');
                if (parts.Length == 1) continue;
-               var index = format.FindIndex(parts[0].StartsWith);
+               // the lines read "name : value": the name is padded with spaces, and the format entries carry their ':' or '<>'
+               var name = parts[0].Trim();
+               var index = format.FindIndex(entry => entry.TrimEnd(':', '<', '>') == name);
                if (index == -1) continue;
                int offset = index switch {
                   0 => 0,
@@ -1271,12 +1290,14 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
                   int i => (i - 1) * 4,
                };
                var (value, length) = ReadSpriteTemplateField(format[index], parts[1]);
+               if (length == 4 && value != 0) value |= BaseModel.PointerOffset; // pointer fields are stored with the 08 base
 
                for (int i = 0; i < length; i++) {
                   data[offset + i] = (byte)value;
                   value >>= 8;
                }
             }
+            content = data;
          } else {
             throw new NotImplementedException();
          }

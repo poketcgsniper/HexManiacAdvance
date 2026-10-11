@@ -26,7 +26,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var count = 0;
          var used = 0.0;
          while (start + count < widths.Count && count < maxPerRow) {
-            var width = Math.Max(0, widths[start + count]);
+            var width = ButtonWidth(widths[start + count]);
             if (count > 0 && limited && used + width > availableWidth + Tolerance) break;
             used += width;
             count++;
@@ -56,9 +56,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <summary>The sum of the widths of 'count' buttons starting at 'start'.</summary>
       public static double RowWidth(IReadOnlyList<double> widths, int start, int count) {
          var total = 0.0;
-         for (int i = start; i < start + count && i < widths.Count; i++) total += Math.Max(0, widths[i]);
+         for (int i = start; i < start + count && i < widths.Count; i++) total += ButtonWidth(widths[i]);
          return total;
       }
+
+      /// <summary>A button without a usable width (negative or NaN) takes no space. Math.Max(0, NaN) is NaN, which would make every offset of the row NaN.</summary>
+      private static double ButtonWidth(double width) => width > 0 ? width : 0;
 
       /// <summary>How far from the left edge a row of 'rowWidth' starts to sit in the middle of 'containerWidth'. A row wider than the container starts at the edge (it is clipped on the right, never on the left).</summary>
       public static double CentreOffset(double containerWidth, double rowWidth) {

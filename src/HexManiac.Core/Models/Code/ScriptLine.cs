@@ -387,7 +387,7 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
             } else if (token.StartsWith("[") && token.EndsWith("]")) {
                var content = token.Substring(1, token.Length - 2);
                args.Add(new ArrayArg(content));
-            } else if (ScriptArg.IsValidToken(token)) {
+            } else if (ScriptArg.IsValidToken(token) && !IsDottedCommandName(token, LineCommand, args.Count, lineCode.Count)) {
                args.Add(new ScriptArg(token));
             } else {
                LineCommand = token;
@@ -396,6 +396,16 @@ namespace HavenSoft.HexManiac.Core.Models.Code {
 
          LineCode = lineCode;
          Args = args;
+      }
+
+      /// <summary>
+      /// A command name may contain a dot ("createmon.native"), but a dot also marks a one-byte argument ("slot.").
+      /// The command is always the first word after the code bytes and before the first argument, and it never has argument decorations like ':' or '&lt;&gt;'.
+      /// Without this, such a line had no name at all (null), and scanning a script for its length threw a NullReferenceException.
+      /// </summary>
+      private static bool IsDottedCommandName(string token, string commandSoFar, int argCount, int codeLength) {
+         if (commandSoFar != null || argCount > 0 || codeLength == 0) return false;
+         return token.IndexOfAny(new[] { ':', '<', '>', '|' }) == -1 && token.Trim('.').Length > 0 && !token.EndsWith(".");
       }
 
       public static IReadOnlyList<int> ExtractMatchingGames(ref string line) {

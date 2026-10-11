@@ -406,6 +406,19 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void PalettePointerNearTheEndOfTheData_ShowInTableTool_DoesNotThrow() {
+         // a palette pointer typed into a table can point at the last bytes of the file, where there is no room for 16 colors
+         ViewPort.Edit("@10 <1F8> @10 ^palettes[pointer<`ucp4`>]1 ");
+
+         ViewPort.Goto.Execute(0x10);
+         ViewPort.Tools.SelectedTool = ViewPort.Tools.TableTool;
+         var children = ViewPort.Tools.TableTool.Children.ToList();
+         if (Model.GetNextRun(0x1F8) is IPaletteRun run) run.GetPalette(Model, 0);
+
+         Assert.NotEmpty(children);
+      }
+
+      [Fact]
       public void IndexPaletteCanFindSpritesThatUseIt() {
          CreateTextTable("names", 0, "Adam", "Bob");
          ViewPort.Edit("@10 <0020> <0040> @10 ^palettes[pointer<`ucp4`>]2 ");

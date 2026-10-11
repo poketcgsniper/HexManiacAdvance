@@ -1097,7 +1097,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          selection.OnError += (sender, e) => RaiseError(e);
          selection.RequestTabChanged += (sender, e) => {
             var request = new TabChangeRequestedEventArgs(e.Tab);
-            RequestTabChange(this, request);
+            RequestTabChange?.Invoke(this, request);
             if (request.RequestAccepted && request.NewTab == mapper) {
                if (e.IsBackArrow) {
                   mapper.AddForwardNavigation(-1);
@@ -1184,16 +1184,23 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                   var start = arrayRun.Start + arrayRun.ElementLength * i;
                   if (start + arrayRun.ElementLength <= left) continue;
                   if (start > right) break;
+                  // what a record field holds depends on another field of the element (which may be cleared first): decide before clearing anything
+                  var fields = new List<ArrayRunElementSegment>();
+                  var fieldStart = start;
+                  foreach (var field in arrayRun.ElementContent) {
+                     fields.Add(field is ArrayRunRecordSegment record ? record.CreateConcrete(Model, arrayRun, fieldStart) : field);
+                     fieldStart += field.Length;
+                  }
                   for (int j = 0; j < arrayRun.ElementContent.Count; j++) {
                      start = arrayRun.Start + arrayRun.ElementLength * i + arrayRun.ElementContent.Take(j).Sum(seg => seg.Length);
                      if (start + arrayRun.ElementContent[j].Length <= left) continue;
                      if (start > right) break;
-                     for (int k = 0; k < arrayRun.ElementContent[j].Length; k++) {
-                        if (arrayRun.ElementContent[j].Type == ElementContentType.Pointer) {
-                           history.CurrentChange.ChangeData(Model, start + k, 0x00);
-                        } else {
-                           history.CurrentChange.ChangeData(Model, start + k, 0xFF);
-                        }
+                     if (fields[j].Type == ElementContentType.Pointer) {
+                        // a cleared pointer cell is a null pointer: the old destination must stop listing the cell as one of its sources
+                        Model.UpdateArrayPointer(history.CurrentChange, fields[j], arrayRun.ElementContent, i, start, Pointer.NULL);
+                        for (int k = 0; k < arrayRun.ElementContent[j].Length; k++) history.CurrentChange.ChangeData(Model, start + k, 0x00);
+                     } else {
+                        for (int k = 0; k < arrayRun.ElementContent[j].Length; k++) history.CurrentChange.ChangeData(Model, start + k, 0xFF);
                      }
                   }
                }
@@ -2417,6 +2424,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             // open tool
             var byteOffset = scroll.ViewPointToDataIndex(new Point(x, y));
             var currentRun = Model.GetNextRun(byteOffset);
+            if (currentRun.Start > byteOffset) return; // GetNextRun also returns a run that starts later: there is nothing under the cursor to open
             if (currentRun is ISpriteRun) {
                tools.SpriteTool.SpriteAddress = currentRun.Start;
                tools.SelectedIndex = Tools.IndexOf(Tools.SpriteTool);
@@ -2535,9 +2543,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          title = "Sources of " + title;
          var newTab = new SearchResultsViewPort(title);
 
-         foreach (var source in run.PointerSources) newTab.Add(CreateChildView(source, source), source, source);
+         // the sources of an element inside a table that has inner anchors are not the sources of the table (see ContextItemFactory.GetAnchorSourceItems)
+         var sources = run.PointerSources;
+         if (run is ArrayRun array && array.SupportsInnerPointers && address > run.Start && address < run.Start + run.Length) sources = array.PointerSourcesForInnerElements[(address - run.Start) / array.ElementLength];
+         foreach (var source in sources ?? SortedSpan<int>.None) newTab.Add(CreateChildView(source, source), source, source);
 
-         RequestTabChange(this, new(newTab));
+         RequestTabChange?.Invoke(this, new(newTab));
          RequestMenuClose?.Invoke(this, EventArgs.Empty);
       }
 
@@ -2944,7 +2955,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                if (completeEditOperation.Result) {
                   // if the data we just changed was in a table, notify children of that table about the change
                   var previousRun = Model.GetNextRun(dataIndex);
-                  if (previousRun is ITableRun tableRun) {
+                  if (previousRun is ITableRun tableRun && tableRun.Start <= dataIndex) { // GetNextRun also returns a table that starts after the edit: nothing in that table changed
                      var offsets = tableRun.ConvertByteOffsetToArrayOffset(dataIndex);
                      var errorInfo = tableRun.NotifyChildren(Model, history.CurrentChange, offsets.ElementIndex, offsets.SegmentIndex);
                      HandleErrorInfo(errorInfo);
@@ -3000,12 +3011,23 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (currentText.StartsWith(GotoMarker.ToString())) {
             if (currentText.Length == 2 && currentText[1] == '{') {
                var currentAddress = scroll.ViewPointToDataIndex(point);
+               // everything between '@{' and its '@}' (the data a deep copy has for the pointer) belongs at the destination of the pointer.
+               // If there is no destination to jump to, stop here: otherwise it would be written over the cell instead, and the '@}' would go back to some unrelated place.
+               if (currentAddress + 4 > Model.Count) { // a pointer does not fit in the last bytes of the file
+                  ClearEdits(point);
+                  RaiseError($"Could not jump using pointer at {currentAddress:X6}");
+                  exitEditEarly = true;
+                  RequestMenuClose?.Invoke(this, EventArgs.Empty);
+                  result = true;
+                  return true;
+               }
                var destination = Model.ReadPointer(currentAddress);
                if (destination == Pointer.NULL) {
                   if (CreateNewData(currentAddress)) {
                      destination = Model.ReadPointer(currentAddress);
                   } else {
                      RaiseError($"Could not jump using pointer at {currentAddress:X6}");
+                     exitEditEarly = true;
                   }
                }
                ClearEdits(point);
@@ -3016,6 +3038,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                   }
                } else if (destination != Pointer.NULL) {
                   RaiseError($"Could not jump using pointer at {currentAddress:X6}");
+                  exitEditEarly = true;
                }
                RequestMenuClose?.Invoke(this, EventArgs.Empty);
                result = true;
@@ -3114,6 +3137,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                }
                RefreshBackingData();
                SelectionEnd = GetSelectionSpan(SelectionStart).end;
+            } else {
+               // the table can't be extended: end the '+' edit, otherwise the next character is added to it and it is read as the hex byte '+3'
+               RefreshBackingData();
             }
             HandleErrorInfo(errorInfo);
             result = true;
@@ -3226,7 +3252,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                exitEditEarly = true;
                return;
             }
-            for (int i = 0; i < content.Length / 2; i++) {
+            // the bytes replace whatever is there, including pointers: the destinations of those pointers have to forget them while the cells still hold the pointers
+            var putLength = content.Length / 2;
+            var overwrittenPointers = new List<IFormattedRun>();
+            for (var run = Model.GetNextRun(index); run.Start < index + putLength && run.Start < Model.Count; run = Model.GetNextRun(run.Start + Math.Max(run.Length, 1))) {
+               if (run is PointerRun && run.Start + run.Length > index) overwrittenPointers.Add(run);
+            }
+            foreach (var pointer in overwrittenPointers) Model.ClearFormat(CurrentChange, pointer.Start, pointer.Length);
+            for (int i = 0; i < putLength; i++) {
                var data = byte.Parse(content.Substring(i * 2, 2), NumberStyles.HexNumber);
                CurrentChange.ChangeData(Model, index + i, data);
             }

@@ -792,9 +792,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Visitors {
             ErrorText = "Cannot write constant with no name.";
             return;
          }
+         // the constant takes these bytes: another format that starts inside them (a pointer next to the cell, for example) is no longer that format.
+         // (a table keeps its format: the cells of a table are not given names this way)
+         var coveredRun = Model.GetNextRun(memoryLocation);
+         if (CurrentChange is not NoDataChangeDeltaModel && !(coveredRun is ITableRun && coveredRun.Start < memoryLocation + byteCount)) Model.ClearFormat(CurrentChange, memoryLocation, byteCount);
          var addresses = Model.GetMatchedWords(constantName);
-         if (CurrentChange is not NoDataChangeDeltaModel && newValue == int.MinValue && addresses.Count > 0) {
-            var valueSource = (WordRun)Model.GetNextRun(addresses[0]);
+         WordRun valueSource = null;
+         foreach (var address in addresses) {
+            if (Model.GetNextRun(address) is WordRun candidate && candidate.Start == address) { valueSource = candidate; break; }
+         }
+         if (CurrentChange is not NoDataChangeDeltaModel && newValue == int.MinValue && valueSource != null) {
             int value = Model.ReadMultiByteValue(valueSource.Start, valueSource.Length);
             value /= valueSource.MultOffset;
             value -= valueSource.ValueOffset;
