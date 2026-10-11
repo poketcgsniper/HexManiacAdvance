@@ -2203,14 +2203,16 @@ show:
          if (ShowPointer) UpdateScriptError(Pointer);
       }
 
-      public void SetDestinationFormat() {
+      public void SetDestinationFormat() => SetDestinationFormat(new ModelDelta()); // don't track this change: showing a signpost is not an edit
+
+      private void SetDestinationFormat(ModelDelta token) {
          if (!ShowPointer) return;
          if (Pointer < 0 || Pointer >= element.Model.Count) return; // a null (or out of file) pointer has nowhere to format
          var destinationRun = new XSERun(Pointer, SortedSpan<int>.None);
          var existingRun = element.Model.GetNextRun(destinationRun.Start);
          if (existingRun.Start < destinationRun.Start) return; // don't erase existing runs for this
          if (existingRun.Start == destinationRun.Start && existingRun is not NoInfoRun) return;
-         element.Model.ObserveRunWritten(new ModelDelta(), destinationRun); // don't track this change
+         element.Model.ObserveRunWritten(token, destinationRun);
       }
 
       public void ClearDestinationFormat() {
@@ -2273,7 +2275,11 @@ show:
          // 0F 00 <start+9> 09 03 02 FF
          var textStart = start + 9;
          Token.ChangeData(element.Model, start, new byte[] { 0x0F, 0, (byte)textStart, (byte)(textStart >> 8), (byte)(textStart >> 16), (byte)((textStart >> 24) + 8), 9, 3, 2, 0xFF });
-         Pointer = start;
+         // the script is part of this change, so is its format (the script, the pointer in it, the text it points to):
+         // going to the script formats it too, but that is not tracked, and undo would leave the format behind over the erased bytes
+         element.Model.ObserveRunWritten(Token, new PointerRun(start + 2));
+         element.Model.ObserveRunWritten(Token, new PCSRun(element.Model, textStart, 1, SortedSpan.One(start + 2)));
+         SetPointer(start, Token);
          gotoAddress(start);
       }
 
@@ -2281,15 +2287,17 @@ show:
 
       public int Pointer {
          get => element.GetAddress("arg");
-         set {
-            ClearDestinationFormat();
-            element.SetAddress("arg", value, false);
-            var run = element.Model.GetNextRun(Pointer);
-            if (run.Start == Pointer && run is NoInfoRun && !IsValidScriptFreespace(Pointer)) SetDestinationFormat();
-            UpdateScriptError(element.GetAddress("arg"));
-            pointerText = argText = null;
-            NotifyPropertiesChanged(nameof(PointerText), nameof(ArgText), nameof(CanGotoScript), nameof(CanCreateScript));
-         }
+         set => SetPointer(value, new ModelDelta()); // (the format of a script that is already there is not tracked, like when the signpost is shown)
+      }
+
+      private void SetPointer(int value, ModelDelta formatToken) {
+         ClearDestinationFormat();
+         element.SetAddress("arg", value, false);
+         var run = element.Model.GetNextRun(Pointer);
+         if (run.Start == Pointer && run is NoInfoRun && !IsValidScriptFreespace(Pointer)) SetDestinationFormat(formatToken);
+         UpdateScriptError(element.GetAddress("arg"));
+         pointerText = argText = null;
+         NotifyPropertiesChanged(nameof(PointerText), nameof(ArgText), nameof(CanGotoScript), nameof(CanCreateScript));
       }
 
       private string pointerText;

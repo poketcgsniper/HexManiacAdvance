@@ -256,6 +256,31 @@ namespace HavenSoft.HexManiac.Tests {
 
       #endregion
 
+      /// <summary>every run of the model as text: start, type, length</summary>
+      private List<string> RunSnapshot() => Model.All<IFormattedRun>().Select(run => $"{run.Start:X}:{run.GetType().Name}:{run.Length:X}").ToList();
+
+      [Fact]
+      public void SignpostCreateScript_WhenUndone_LeavesNoFormatBehindOverTheErasedScript() {
+         for (int i = 0x80; i < Data.Length; i++) Data[i] = 0xFF; // free space for the script
+         var element = CreateSignpostElement();
+         var signpost = new SignpostEventViewModel(element, address => BlockMapViewModel.GotoAddress(ViewPort, address)) { X = 0, Y = 0, Elevation = 0, Kind = 0, Pointer = Pointer.NULL }; // (the map editor's own goto: it formats the script it goes to)
+         var runsBefore = RunSnapshot();
+
+         signpost.CreateScript();
+
+         var start = element.GetAddress("arg");
+         Assert.True(start >= 0x80, "setup: the script has to be in the free space, was " + start.ToString("X"));
+         Assert.Equal(0x0F, Data[start]);
+         Assert.NotEqual(runsBefore, RunSnapshot()); // the script and the text it points to are formatted now
+
+         Token.Revert(Model);
+
+         // the bytes are free again, so the format of the script (the script itself, its pointer, its text) has to be gone too
+         Assert.Equal(0xFF, Data[start]);
+         Assert.Equal(runsBefore, RunSnapshot());
+         Assert.Empty(StalePointerSources());
+      }
+
       #region map script
 
       [Fact]

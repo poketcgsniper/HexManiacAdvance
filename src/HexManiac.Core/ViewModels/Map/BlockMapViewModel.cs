@@ -377,7 +377,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       }
 
       public int GotoNameIndex {
-         get => SortedAvailableNames.IndexOf(AvailableNames[SelectedNameIndex]);
+         get {
+            var index = SelectedNameIndex; // (a map can name a region section that the name table does not have)
+            return index < 0 || index >= AvailableNames.Count ? -1 : SortedAvailableNames.IndexOf(AvailableNames[index]);
+         }
          set {
             if (!value.InRange(0, SortedAvailableNames.Count)) return;
             var name = sortedAvailableNames[value];
