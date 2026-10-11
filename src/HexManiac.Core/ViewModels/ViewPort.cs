@@ -3004,9 +3004,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (currentText.StartsWith(GotoMarker.ToString())) {
             if (currentText.Length == 2 && currentText[1] == '{') {
                var currentAddress = scroll.ViewPointToDataIndex(point);
+               // everything between '@{' and its '@}' (the data a deep copy has for the pointer) belongs at the destination of the pointer.
+               // If there is no destination to jump to, stop here: otherwise it would be written over the cell instead, and the '@}' would go back to some unrelated place.
                if (currentAddress + 4 > Model.Count) { // a pointer does not fit in the last bytes of the file
                   ClearEdits(point);
                   RaiseError($"Could not jump using pointer at {currentAddress:X6}");
+                  exitEditEarly = true;
                   RequestMenuClose?.Invoke(this, EventArgs.Empty);
                   result = true;
                   return true;
@@ -3017,6 +3020,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                      destination = Model.ReadPointer(currentAddress);
                   } else {
                      RaiseError($"Could not jump using pointer at {currentAddress:X6}");
+                     exitEditEarly = true;
                   }
                }
                ClearEdits(point);
@@ -3027,6 +3031,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                   }
                } else if (destination != Pointer.NULL) {
                   RaiseError($"Could not jump using pointer at {currentAddress:X6}");
+                  exitEditEarly = true;
                }
                RequestMenuClose?.Invoke(this, EventArgs.Empty);
                result = true;

@@ -142,6 +142,24 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(2, Model.GetNextRun(0x20).Length);
       }
 
+      [Theory]
+      [InlineData("", 0x20)]                 // the cell holds FF FF FF FF, which is not a pointer
+      [InlineData("@20 00 00 00 00 ", 0x20)] // a null pointer, but it is not in a table, so no data can be created for it
+      [InlineData("", 0x1FE)]                // there is no room for a pointer at the end of the file
+      public void DeepPasteJumpThatCannotBeFollowed_ReportsAnErrorAndStopsInsteadOfWritingTheRestOfThePasteAtTheWrongPlace(string setup, int cell) {
+         SetFullModel(0xFF);
+         if (setup.Length > 0) ViewPort.Edit(setup);
+         ViewPort.Goto.Execute("80"); // so that '@}' has an earlier place to go back to
+         ViewPort.Goto.Execute(cell.ToString("X2"));
+         var before = Model.RawData.ToArray();
+         Errors.Clear();
+
+         ViewPort.Edit($"@{cell:X2} @{{ AA BB @}} CC DD ");
+
+         Assert.Contains(Errors, error => error.Contains("Could not jump"));
+         Assert.Equal(before, Model.RawData); // used to write AA BB over the cell and CC DD at the place the stale '@}' went back to
+      }
+
       [Fact]
       public void StreamWithCustomEnd_CutPaste_DataUpdates() {
          SetFullModel(0xFF);
