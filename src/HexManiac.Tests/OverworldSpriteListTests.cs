@@ -114,6 +114,23 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.All(pixels.Cast<int>(), pixel => Assert.Equal(0, pixel));
          Assert.All(data, value => Assert.Equal(0, value));
       }
+
+      [Theory]
+      [InlineData(0x1FF)] // the last byte of the file
+      [InlineData(0x1FC)]
+      [InlineData(0x1F9)]
+      public void OverworldSpriteList_PointerTypedToTheLastBytesOfTheFile_NoEntryFitsSoItIsRejectedInsteadOfReadingPastTheEnd(int destination) {
+         ViewPort.Edit("@80 <000> 20 ");
+         ViewPort.Edit("@A0 FF FF 00 00 40 00 08 00 08 00 <080>");
+         ViewPort.Edit("@A0 ^parent[starterbytes:|h paletteid:|h length: width: height: sprites<`osl`>]1 ");
+         Assert.Equal(0x80, Model.ReadPointer(0xAA));
+
+         ViewPort.Edit($"@AA <{destination:X6}> ");
+
+         Assert.Single(Errors);
+         Assert.NotEqual(destination, Model.ReadPointer(0xAA));
+         Assert.IsNotType<OverworldSpriteListRun>(Model.GetNextRun(destination));
+      }
    }
 
    public class OverworldSpriteListResizeTests : BaseViewModelTestClass {

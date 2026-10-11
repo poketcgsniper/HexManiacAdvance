@@ -75,6 +75,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          SpriteFormat = new SpriteFormat(4, 1, 1, string.Empty);
 
          if (sources == null || sources.Count == 0) return;
+         if (start < 0 || start + ElementLength > model.Count) { Length = 0; return; } // not even one entry fits in the file
 
          // initialize format from parent info
          var listOffset = GetOffset<ArrayRunPointerSegment>(parent, pSeg => pSeg.InnerFormat.StartsWith("`osl"));
@@ -146,6 +147,7 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
             Length = ElementLength;
          } else if (elementCount == -1) {
             while (Start + Length < nextAnchorStart) {
+               if (start + Length + ElementLength > model.Count) break;
                var destination = model.ReadPointer(start + Length);
                if (destination < 0 || destination >= model.Count) break;
                if (model.ReadMultiByteValue(start + Length + 4, 2) != byteLength) break;
