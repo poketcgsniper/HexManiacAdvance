@@ -704,7 +704,8 @@ namespace HavenSoft.HexManiac.Tests {
       private const int AllInstruments = 0x400; // 4 instruments, named 'sound.voicegroups.all_instruments' (when the test asks for it)
       private const int Other = 0x500; // 2 instruments, named 'sound.voicegroups.other'. Used by the two songs.
       private const int ToneSize = 12;
-      private const string SongSource = @"
+      // the tests below search and replace whole lines with \n, so the text must not depend on the line endings of the checkout (a Windows checkout turns this file into \r\n)
+      private static readonly string SongSource = @"
 	.include ""MPlayDef.s""
 	.equ	t_grp, voicegroup000
 t_1:
@@ -722,7 +723,7 @@ t:
 	.word	t_grp
 	.word	t_1
 	.end
-";
+".Replace("\r\n", "\n");
 
       private readonly List<string> tabErrors = new List<string>();
       private readonly List<string> tabMessages = new List<string>();
