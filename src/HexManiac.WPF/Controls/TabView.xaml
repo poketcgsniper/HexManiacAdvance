@@ -312,7 +312,8 @@
                         </DataTemplate>
                      </Grid.Resources>
                      <hsg3hv:AngleComboBox Grid.Column="1" HorizontalAlignment="Stretch" Margin="5,0" Direction="Out"
-                        DataContext="{Binding TableTool.CurrentElementSelector}" />
+                        DataContext="{Binding TableTool.CurrentElementSelector}"
+                        ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" />
                      <hsg3hv:AngleButton Content="Previous" Grid.Column="0" Command="{Binding TableTool.Previous}" Padding="0" Direction="Left"/>
                      <hsg3hv:AngleButton Content="Next" Grid.Column="2" Command="{Binding TableTool.Next}" Padding="0" Direction="Right"/>
                   </Grid>
