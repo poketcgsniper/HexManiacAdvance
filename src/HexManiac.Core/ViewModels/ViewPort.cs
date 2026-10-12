@@ -2592,7 +2592,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       /// <summary>
-      /// Goto targets starting with this prefix open an editor tab instead of navigating to data: 'editor:sound', 'editor:sprites', 'editor:customization'.
+      /// Goto targets starting with this prefix open an editor tab instead of navigating to data: 'editor:sound', 'editor:sprites', 'editor:customization', 'editor:reflections'.
       /// </summary>
       public const string EditorGotoPrefix = "editor:";
 
@@ -2605,9 +2605,21 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             OpenTilesetAnimationTab(TilesetAnimationTab.DefaultGroup, TilesetAnimationTab.DefaultMap, false);
          } else if (editor.Equals("customization", StringComparison.OrdinalIgnoreCase) || editor.Equals("character", StringComparison.OrdinalIgnoreCase)) {
             OpenCharacterCustomizationTab();
+         } else if (editor.Equals("reflections", StringComparison.OrdinalIgnoreCase) || editor.Equals("reflection", StringComparison.OrdinalIgnoreCase)) {
+            OpenReflectionPaletteTab();
          } else {
-            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites', 'editor:animations' or 'editor:customization'.");
+            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites', 'editor:animations', 'editor:customization' or 'editor:reflections'.");
          }
+      }
+
+      public void OpenReflectionPaletteTab() {
+         if (!ReflectionPaletteTab.IsSupported(Model)) { RaiseError(ReflectionPaletteTab.UnsupportedMessage); return; }
+         var newTab = new ReflectionPaletteTab(this);
+         newTab.OnError += (sender, e) => RaiseError(e);
+         newTab.OnMessage += (sender, e) => RaiseMessage(e);
+         var args = new TabChangeRequestedEventArgs(newTab);
+         RequestTabChange(this, args);
+         if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);
       }
 
       public void OpenCharacterCustomizationTab() {

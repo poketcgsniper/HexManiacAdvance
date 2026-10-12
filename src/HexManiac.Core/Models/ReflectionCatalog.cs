@@ -90,7 +90,7 @@ namespace HavenSoft.HexManiac.Core.Models {
 
       private static bool IsEmerald(IDataModel model) {
          var code = model.GetGameCode();
-         return code.StartsWith("BPEE") || code.StartsWith("AXVE") && false;
+         return code.StartsWith("BPEE");
       }
 
       /// <summary>OBJ_EVENT_PAL_TAG_QUINTY_PLUMP_REFLECTION without its prefix becomes "Quinty Plump reflection".</summary>
@@ -275,7 +275,7 @@ namespace HavenSoft.HexManiac.Core.Models {
             var second = Read16(model, pointer + secondOffset);
             if (tag < 0) continue;
             var slot = model[pointer + infoOffset] & 0xF;
-            var name = names != null && i < names.Count && !string.IsNullOrEmpty(names[i]) ? names[i] : $"Sprite {i}";
+            var name = names != null && i < names.Count && !string.IsNullOrEmpty(names[i]) ? names[i] : EmeraldOverworldNames.Name(model, i, table.ElementCount) ?? $"Sprite {i}";
             sprites.Add(new ReflectionSprite(i, name, tag, slot, second == ObjectPaletteTags.None || second == 0xFFFF ? -1 : second, pointer));
          }
       }
@@ -350,7 +350,8 @@ namespace HavenSoft.HexManiac.Core.Models {
             }
             if (reflection == sprite.Tag || !ExistsInTable(reflection)) reflection = -1; // a reflection that reuses the sprite's own colours has nothing of its own
             sprite.ReflectionTag = reflection;
-            sprite.BridgeTag = sprite.SecondTag >= 0 && sprite.SecondTag != sprite.Tag && ExistsInTable(sprite.SecondTag) ? sprite.SecondTag : -1;
+            // a game that computes its reflections doesn't read the second tag at all
+            sprite.BridgeTag = Mode == ReflectionMode.Stored && sprite.SecondTag >= 0 && sprite.SecondTag != sprite.Tag && ExistsInTable(sprite.SecondTag) ? sprite.SecondTag : -1;
          }
       }
 
