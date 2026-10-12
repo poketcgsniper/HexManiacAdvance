@@ -531,6 +531,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Map {
       /// </summary>
       public static int GetDynamicGraphicsStart(IDataModel model) => model.TryGetUnmappedConstant(DynamicGraphicsStartConstant, out var start) && start > 0 ? start : 240;
       private int DynamicStart => GetDynamicGraphicsStart(element.Model);
+      /// <summary>true for the 16 graphics-variable ids (OBJ_EVENT_GFX_VAR_0 .. OBJ_EVENT_GFX_VAR_F).</summary>
+      public static bool IsDynamicGraphics(IDataModel model, int graphics) {
+         var start = GetDynamicGraphicsStart(model);
+         return graphics >= start && graphics < start + 16;
+      }
 
       public bool CanAddDynamicGraphicsToTransitionScript => !HasGraphicsInTransitionScript && ShowGraphicsAsText && Graphics >= DynamicStart;
 
@@ -1838,12 +1843,9 @@ show:
       /// <param name="facing">(0, 1, 2, 3) = (down, up, left, right)</param>
       public static IPixelViewModel Render(IDataModel model, ModelTable owTable, IPixelViewModel defaultOW, int index, int facing, Func<int> dynamicSprites) {
          // special case: gfx variables
-         var dynamicStart = GetDynamicGraphicsStart(model);
-         if (index >= dynamicStart && index < dynamicStart + 16) {
-            var fromScript = dynamicSprites();
-            if (fromScript > -1) index = fromScript;
-            else return GetDynamicPlaceholder(model, owTable, defaultOW);
-         }
+         // Every one of them gets the placeholder, on every map: which sprite the var holds is decided by scripts at runtime
+         // (a transition script on some maps, a trigger, an NPC's own script, ... on others), so the editor never guesses from one script.
+         if (IsDynamicGraphics(model, index)) return GetDynamicPlaceholder(model, owTable, defaultOW);
 
          // special case: expanded OWs for pokemon / sprites20k (HMA expansion utility integration)
          ModelTable dataTable;
