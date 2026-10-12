@@ -500,6 +500,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                         Groups[childIndexGroup].AddChildrenFromTable(viewPort, selection, currentArray, currentIndex, header, helperGroup, partition, member.Fields);
                         // a picture is worth a thousand clicks: offer the gallery of every overworld sprite
                         if (tableName == HardcodeTablesModel.OverworldSprites) AddChild(new SpriteGalleryElementViewModel(viewPort, currentIndex));
+                        // the field effects (grass, ripples, dust, ...): their frames with the palette the game uses, and the palette one click away
+                        if (FieldEffects.IsFieldEffectTable(tableName)) AddChild(new FieldEffectElementViewModel(viewPort, currentIndex));
                         // expansion trainers: the battle messages (trainer slides) live in their own table, one click away
                         if (tableName == HardcodeTablesModel.TrainerTableName && (member.HasFieldList ? member.ShowsField("name") : partition == 2) && model.GetTable(TrainerSlidesTable) is ITableRun slides && currentIndex < slides.ElementCount) {
                            var slideIndex = currentIndex;

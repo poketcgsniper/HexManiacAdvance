@@ -294,15 +294,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var frames = new List<IPixelViewModel>();
          var list = info?.List;
          if (list == null) return frames;
+         // the palette the game uses (found by tag); if the effect has none, Describe already picked the one HexManiac would show it with
          var colors = info.Palette?.Colors;
-         var blankPages = 0;
-         var palette = list.FindRelatedPalettes(model).FirstOrDefault();
-         if (palette != null) {
-            colors = palette.AllColors(model);
-            blankPages = palette.PaletteFormat.InitialBlankPages;
-         }
          if (colors == null || colors.Count == 0) colors = TileViewModel.CreateDefaultPalette(16);
          if (colors.Count == 16) colors = SpriteTool.CreatePaletteWithUniqueTransparentColor(colors);
+         const int blankPages = 0;
          var frameWidth = list.SpriteFormat.TileWidth * 8;
          var frameHeight = info.Height > 0 && info.Width == frameWidth ? info.Height : list.SpriteFormat.TileHeight * 8;
          for (int page = 0; page < list.Pages; page++) {
