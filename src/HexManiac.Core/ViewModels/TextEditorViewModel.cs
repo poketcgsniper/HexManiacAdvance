@@ -28,6 +28,25 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public event EventHandler RequestCaretMove;
       public event EventHandler RequestKeyboardFocus;
 
+      /// <summary>
+      /// Whether the little square where the vertical and the horizontal scroll bar of a text box meet has to be painted over:
+      /// that square only exists while BOTH scroll bars are showing (the text is wider than the box and taller than the box).
+      /// With one bar or none there is no such square, so nothing may be painted there (a dark square at the corner of the trainer team box was exactly that).
+      /// All four sizes must come from a finished WPF layout (ScrollViewer.ScrollChanged), never from the moment the text changes:
+      /// then they still describe the previous text. A scroll bar shows exactly when the extent is larger than the viewport (WPF's own rule, including its rounding slack).
+      /// </summary>
+      public static bool NeedsScrollCornerCover(double extentWidth, double viewportWidth, double extentHeight, double viewportHeight) {
+         if (double.IsNaN(extentWidth) || double.IsNaN(viewportWidth) || double.IsNaN(extentHeight) || double.IsNaN(viewportHeight)) return false;
+         return IsGreater(extentWidth, viewportWidth) && IsGreater(extentHeight, viewportHeight);
+      }
+
+      /// <summary>WPF's DoubleUtil.GreaterThan: larger, and not just larger by floating point noise.</summary>
+      private static bool IsGreater(double value, double other) {
+         if (!(value > other)) return false;
+         var slack = (Math.Abs(value) + Math.Abs(other) + 10.0) * 2.2204460492503131E-16;
+         return value - other >= slack;
+      }
+
       public TextEditorViewModel() : this(true) { }
 
       public TextEditorViewModel(bool syntaxHighlighting) {

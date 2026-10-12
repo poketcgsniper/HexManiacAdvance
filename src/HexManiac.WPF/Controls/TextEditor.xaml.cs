@@ -73,13 +73,9 @@ namespace HavenSoft.HexManiac.WPF.Controls {
                width = Math.Max(width, new FormattedText(line, CultureInfo.CurrentCulture, FlowDirection, typeface, TransparentLayer.FontSize, Brushes.Transparent, 1).Width);
             }
             foreach (var layer in Layers) layer.Width = width;
-            if (width > TransparentLayer.ViewportWidth && TransparentLayer.ViewportHeight > TransparentLayer.ExtentHeight) {
-               CornerCover.Width = 16;
-               CornerCover.Height = 17;
-            } else {
-               CornerCover.Width = 0;
-               CornerCover.Height = 0;
-            }
+            // The corner cover is NOT decided here: the viewport and extent sizes the text box reports while its text is still changing
+            // are the ones of the text it had before (WPF lays it out afterwards), and nothing ever corrected a wrong guess.
+            // That left a dark 16x17 square at the corner of the trainer team box, with no scroll bar anywhere. See UpdateCornerCover, which runs after the layout.
          };
       }
 
@@ -184,6 +180,20 @@ namespace HavenSoft.HexManiac.WPF.Controls {
             transform.X = -TransparentLayer.HorizontalOffset;
             layer.Width = TransparentLayer.ExtentWidth;
          }
+         UpdateCornerCover(e);
+      }
+
+      /// <summary>
+      /// The square where the two scroll bars meet is painted over, but only while both scroll bars are showing (see TextEditorViewModel.NeedsScrollCornerCover).
+      /// ScrollChanged is raised after WPF has laid the text box out, so the sizes in 'e' are the final ones for the current text and the current box size
+      /// (it is raised again whenever the text, the box or the window changes them). The decision is therefore always about what is on screen now.
+      /// </summary>
+      private void UpdateCornerCover(ScrollChangedEventArgs e) {
+         var cover = TextEditorViewModel.NeedsScrollCornerCover(e.ExtentWidth, e.ViewportWidth, e.ExtentHeight, e.ViewportHeight);
+         var width = cover ? 16 : 0;
+         var height = cover ? 17 : 0;
+         if (CornerCover.Width != width) CornerCover.Width = width;
+         if (CornerCover.Height != height) CornerCover.Height = height;
       }
 
       private static SolidColorBrush Brush(string name) {
