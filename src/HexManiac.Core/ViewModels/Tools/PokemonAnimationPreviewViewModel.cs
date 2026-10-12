@@ -185,7 +185,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             return model.GetAnchorFromAddress(-1, table.Start) == HardcodeTablesModel.PokemonStatsTable;
          }
          // the cheap tests first: this is asked for every field the table tool shows
-         if (item is not ArrayRunPointerSegment || model.GetAnchorFromAddress(-1, table.Start) != HardcodeTablesModel.FrontSpritesTable) return false;
+         // (a table has many pointer fields, the model's anchor lookup is only worth it for the one that can be the picture)
+         if (item is not ArrayRunPointerSegment) return false;
+         if (item.Name != "sprite" && !ReferenceEquals(item, table.ElementContent.FirstOrDefault(segment => segment is ArrayRunPointerSegment))) return false;
+         if (model.GetAnchorFromAddress(-1, table.Start) != HardcodeTablesModel.FrontSpritesTable) return false;
          return PokemonAnimationLayout.Find(model) is SeparateTablesLayout layout && layout.IsPictureTable(table) && layout.PictureFieldName == item.Name;
       }
 
