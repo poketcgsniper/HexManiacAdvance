@@ -175,18 +175,38 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          this.pictureSource = pictureSource;
       }
 
-      /// <summary>True for the field that gets the preview under it.</summary>
+      /// <summary>
+      /// True for the field that gets the preview under it: frontAnimFrames of the pokemon table when it holds the animation (pokeemerald-expansion, CUBE),
+      /// otherwise the picture field of the front sprite table of the unedited games (the sprite and its animation are next to each other there).
+      /// </summary>
       public static bool IsFramesField(IDataModel model, ITableRun table, ArrayRunElementSegment item) {
-         if (!string.Equals(item?.Name, FramesFieldName, StringComparison.Ordinal)) return false;
-         return model.GetAnchorFromAddress(-1, table.Start) == HardcodeTablesModel.PokemonStatsTable;
+         if (item == null || table == null) return false;
+         if (string.Equals(item.Name, FramesFieldName, StringComparison.Ordinal)) {
+            return model.GetAnchorFromAddress(-1, table.Start) == HardcodeTablesModel.PokemonStatsTable;
+         }
+         // the cheap tests first: this is asked for every field the table tool shows
+         // (a table has many pointer fields, the model's anchor lookup is only worth it for the one that can be the picture)
+         if (item is not ArrayRunPointerSegment) return false;
+         if (item.Name != "sprite" && !ReferenceEquals(item, table.ElementContent.FirstOrDefault(segment => segment is ArrayRunPointerSegment))) return false;
+         if (model.GetAnchorFromAddress(-1, table.Start) != HardcodeTablesModel.FrontSpritesTable) return false;
+         return PokemonAnimationLayout.Find(model) is SeparateTablesLayout layout && layout.IsPictureTable(table) && layout.PictureFieldName == item.Name;
       }
 
-      public static PokemonAnimationPreviewViewModel Create(ViewPort viewPort, ITableRun table, int elementIndex) {
-         var picture = FieldAddress(table, elementIndex, "frontPic");
+      /// <param name="fieldAddress">The address of the field the preview was asked for (see <see cref="IsFramesField"/>).</param>
+      public static PokemonAnimationPreviewViewModel Create(ViewPort viewPort, ITableRun table, int elementIndex, int fieldAddress = -1) {
+         var species = elementIndex;
+         int picture;
+         if (PokemonAnimationLayout.Find(viewPort.Model) is SeparateTablesLayout separate) {
+            // the front sprite table: the preview belongs to the species of this row, and the sprite next to it is the one this field points at
+            species = PokemonAnimationLayout.SpeciesOfRow(table, elementIndex);
+            picture = fieldAddress >= 0 ? fieldAddress : separate.FrontPictureAddress(viewPort.Model, species);
+         } else {
+            picture = FieldAddress(table, elementIndex, "frontPic");
+         }
          // the sprite next to this preview knows which palette is selected; it is looked up when a build starts (the group is complete by then)
          SpriteElementViewModel Sibling() => viewPort.Tools.TableTool.Children.OfType<SpriteElementViewModel>().FirstOrDefault(sprite => sprite.Start == picture);
          return new PokemonAnimationPreviewViewModel(
-            viewPort.Model, elementIndex, viewPort.Singletons.WorkDispatcher.CreateDelayTimer(),
+            viewPort.Model, species, viewPort.Singletons.WorkDispatcher.CreateDelayTimer(),
             () => Sibling()?.GetCurrentColors(),
             () => Token(Sibling()),
             Sibling);
@@ -266,14 +286,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       /// <summary>Everything that can change the animation and is not a picture: the movement, its delay and the list of pictures.</summary>
       protected virtual string ComputeSignature() {
          try {
-            var run = model.GetTable(HardcodeTablesModel.PokemonStatsTable);
-            if (run == null || speciesIndex < 0 || speciesIndex >= run.ElementCount) return "none";
-            var element = new ModelTable(model, run)[speciesIndex];
-            if (!element.HasField("frontAnimId") || !element.HasField("frontAnimDelay") || !element.HasField("frontAnimFrames")) return "none";
-            var frames = element.GetAddress("frontAnimFrames");
+            var layout = PokemonAnimationLayout.Find(model);
+            if (layout == null || !layout.TryReadInputs(model, speciesIndex, out var inputs)) return "none";
             var text = new System.Text.StringBuilder();
-            text.Append(speciesIndex).Append('|').Append(element.GetValue("frontAnimId")).Append('|').Append(element.GetValue("frontAnimDelay")).Append('|').Append(frames);
-            var commands = PokemonAnimationSource.ReadFrameCommands(model, frames);
+            text.Append(speciesIndex).Append('|').Append(inputs.AnimId).Append('|').Append(inputs.Delay).Append('|').Append(inputs.FramesAddress);
+            var commands = PokemonAnimationSource.ReadFrameCommands(model, inputs.FramesAddress);
             if (commands == null) {
                text.Append("|?");
             } else {

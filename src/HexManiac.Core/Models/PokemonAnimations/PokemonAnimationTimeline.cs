@@ -20,30 +20,13 @@ namespace HavenSoft.HexManiac.Core.Models.PokemonAnimations {
       /// <summary>The frontAnimFrames command list, or null if the pointer does not lead to a readable list.</summary>
       public FrameCommand[] Frames { get; set; }
 
-      /// <summary>Reads the front animation of one species. Returns null if the ROM has no such table or the sprite is not readable.</summary>
+      /// <summary>
+      /// Reads the front animation of one species. Returns null if the ROM has no table that describes it or the sprite is not readable.
+      /// Where the pieces are depends on the ROM, see <see cref="PokemonAnimationLayout"/>.
+      /// </summary>
+      /// <param name="speciesIndex">The row of the pokemon table (the species number).</param>
       public static PokemonAnimationSource Read(IDataModel model, int speciesIndex, IReadOnlyList<short> hmaPaletteOverride = null) {
-         var run = model.GetTable(HardcodeTablesModel.PokemonStatsTable);
-         if (run == null || speciesIndex < 0 || speciesIndex >= run.ElementCount) return null;
-         var element = new ModelTable(model, run)[speciesIndex];
-         if (!element.HasField("frontAnimId") || !element.HasField("frontAnimDelay") || !element.HasField("frontAnimFrames") ||
-            !element.HasField("frontPic") || !element.HasField("palette")) return null;
-
-         var pixels = element.GetSprite("frontPic");
-         if (pixels == null) return null;
-         var images = SplitFrames(pixels);
-         if (images == null) return null;
-
-         var palette = hmaPaletteOverride ?? element.GetPalette("palette");
-         if (palette == null || palette.Count < 16) return null;
-
-         var source = new PokemonAnimationSource {
-            Images = images,
-            Palette = ToGbaPalette(palette),
-            AnimId = element.GetValue("frontAnimId"),
-            Delay = element.GetValue("frontAnimDelay"),
-         };
-         source.Frames = ReadFrameCommands(model, element.GetAddress("frontAnimFrames"));
-         return source;
+         return PokemonAnimationLayout.Find(model)?.Read(model, speciesIndex, hmaPaletteOverride);
       }
 
       /// <summary>HexManiac draws colours with red and blue swapped compared to the GBA.</summary>

@@ -260,7 +260,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             if (!item.IsUnused() && viewModel is not null) {
                Add(viewModel);
                helperGroup.AddChildrenFromPointerSegment(viewPort, itemAddress, item, viewModel, header, recursionLevel: 0);
-               if (PokemonAnimationPreviewViewModel.IsFramesField(viewPort.Model, table, item)) Add(PokemonAnimationPreviewViewModel.Create(viewPort, table, index));
+               if (PokemonAnimationPreviewViewModel.IsFramesField(viewPort.Model, table, item)) Add(PokemonAnimationPreviewViewModel.Create(viewPort, table, index, itemAddress));
             }
          }
          AddAdhocSpecialElementsToGroup(viewPort, table);
