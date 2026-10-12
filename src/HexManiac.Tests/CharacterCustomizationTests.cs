@@ -875,6 +875,150 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.True(secondary.IsHealthy);
       }
 
+      #region Code that points straight at the colours of a row
+      // The compiler is free to fold "address of the table + 16" into one 4-byte word of the game's code (the address of the colours of row 0). The model only knows
+      // pointers to the very start of a table, so when a table moves to make room for a new row, such a word must be moved with it or the game goes on reading the erased old copy:
+      // every colour 0xFFFF, plain white. These words are in the pool after the pointers.
+      private const int FoldedMain = 0x280, FoldedShadow = 0x284, FoldedHighlight = 0x288, FoldedRowOne = 0x28C, FoldedOdd = 0x290, FoldedReserved = 0x294, FoldedInData = 0x2A0;
+
+      private CharacterColorTable TableOf(CharacterColorKind kind) {
+         var customization = Create();
+         return kind == CharacterColorKind.SkinTone ? customization.SkinTones : kind == CharacterColorKind.Clothes ? customization.Clothes : customization.Secondary;
+      }
+
+      private static int StartOf(CharacterColorKind kind) => kind == CharacterColorKind.SkinTone ? SkinTable : kind == CharacterColorKind.Clothes ? ClothesTable : SecondaryTable;
+
+      private static int PoolOf(CharacterColorKind kind) => kind == CharacterColorKind.SkinTone ? PoolSkin : kind == CharacterColorKind.Clothes ? PoolClothes : PoolSecondary;
+
+      /// <summary>Puts a little table right behind the colour table, so it can't grow in place (the skin table already has the clothes table behind it).</summary>
+      private void BlockTheGrowth(CharacterColorKind kind) {
+         if (kind == CharacterColorKind.SkinTone) return;
+         var run = TableOf(kind).Run;
+         ViewPort.Edit($"@{run.Start + run.Length:X} ^charcustomblocker[x.]2 ");
+         Done();
+      }
+
+      private void WriteWord(int address, int target) {
+         Model.WriteMultiByteValue(address, 4, Token, BaseModel.PointerOffset + target);
+         Done();
+      }
+
+      private int Target(int wordAddress) => Word(wordAddress) - BaseModel.PointerOffset;
+
+      private void WriteFoldedWords(int start) {
+         WriteWord(FoldedMain, start + 16);
+         WriteWord(FoldedShadow, start + 18);
+         WriteWord(FoldedHighlight, start + 20);
+         WriteWord(FoldedRowOne, start + RowLength); // the start of row 1: not "the colours of row 0"
+         WriteWord(FoldedOdd, start + 17);           // in the middle of a colour
+         WriteWord(FoldedReserved, start + 22);      // behind the three colours
+      }
+
+      [Theory]
+      [InlineData(CharacterColorKind.SkinTone)]
+      [InlineData(CharacterColorKind.Clothes)]
+      [InlineData(CharacterColorKind.Secondary)]
+      public void Add_ThatMovedTheTable_MovesTheCodeWordsThatPointAtTheColoursOfRowZero(CharacterColorKind kind) {
+         BlockTheGrowth(kind);
+         var start = StartOf(kind);
+         WriteFoldedWords(start);
+         var table = TableOf(kind);
+         var rowOne = table.ReadRow(1);
+
+         var result = table.Add("Mint", new[] { Gba(10, 28, 18), Gba(6, 22, 12), Gba(16, 31, 24) });
+         Done();
+
+         Assert.True(result.Success);
+         Assert.NotEqual(start, table.Run.Start);
+         var moved = table.Run.Start;
+         Assert.Equal(moved, Model.ReadPointer(PoolOf(kind)));
+         Assert.Equal(moved + 16, Target(FoldedMain));
+         Assert.Equal(moved + 18, Target(FoldedShadow));
+         Assert.Equal(moved + 20, Target(FoldedHighlight));
+         Assert.Equal(start + RowLength, Target(FoldedRowOne));
+         Assert.Equal(start + 17, Target(FoldedOdd));
+         Assert.Equal(start + 22, Target(FoldedReserved));
+         Assert.Contains("3 more places", result.Message); // the person is told that three words of the game's code followed the table
+         // what the game reads through the folded words: the colours of the rows of the table at its new place, the new row included
+         Assert.Equal(rowOne.Colors[0], (ushort)Model.ReadMultiByteValue(Target(FoldedMain) + RowLength, 2));
+         Assert.Equal(rowOne.Colors[1], (ushort)Model.ReadMultiByteValue(Target(FoldedShadow) + RowLength, 2));
+         Assert.Equal(rowOne.Colors[2], (ushort)Model.ReadMultiByteValue(Target(FoldedHighlight) + RowLength, 2));
+         var last = table.Run.ElementCount - 1;
+         Assert.Equal(Gba(10, 28, 18), (ushort)Model.ReadMultiByteValue(Target(FoldedMain) + RowLength * last, 2));
+      }
+
+      [Theory]
+      [InlineData(CharacterColorKind.SkinTone)]
+      [InlineData(CharacterColorKind.Secondary)]
+      public void Add_ThatMovedTheTable_AndItsUndoAndRedo_TakeTheCodeWordsAlong(CharacterColorKind kind) {
+         BlockTheGrowth(kind);
+         var start = StartOf(kind);
+         WriteFoldedWords(start);
+         var table = TableOf(kind);
+
+         table.Add("Mint", new[] { Gba(10, 28, 18), Gba(6, 22, 12), Gba(16, 31, 24) });
+         Done();
+         var moved = table.Run.Start;
+         Undo();
+
+         Assert.Equal(start, table.Run.Start);
+         Assert.Equal(start + 16, Target(FoldedMain));
+         Assert.Equal(start + 18, Target(FoldedShadow));
+         Assert.Equal(start + 20, Target(FoldedHighlight));
+
+         Redo();
+
+         Assert.Equal(moved, table.Run.Start);
+         Assert.Equal(moved + 16, Target(FoldedMain));
+         Assert.Equal(moved + 20, Target(FoldedHighlight));
+      }
+
+      [Fact]
+      public void Add_ThatGrowsInPlace_LeavesTheCodeWordsAlone() {
+         WriteFoldedWords(ClothesTable);
+         var clothes = Create().Clothes;
+
+         var result = clothes.Add("Green", new[] { Gba(4, 28, 6), Gba(2, 20, 4), Gba(12, 31, 14) });
+         Done();
+
+         Assert.True(result.Success);
+         Assert.Equal(ClothesTable, clothes.Run.Start);
+         Assert.Equal(ClothesTable + 16, Target(FoldedMain));
+         Assert.Equal(ClothesTable + 20, Target(FoldedHighlight));
+         Assert.DoesNotContain("more place", result.Message);
+      }
+
+      [Fact]
+      public void Add_ThatMovedTheTable_DoesNotTouchAWordThatBelongsToKnownData() {
+         WriteWord(FoldedMain, SkinTable + 16);
+         ViewPort.Edit($"@{FoldedInData:X} ^charcustomotherdata[value::]1 ");
+         WriteWord(FoldedInData, SkinTable + 16); // a number in a table the model knows: it only looks like the address
+         var skin = Create().SkinTones;
+
+         skin.Add("Mint", new[] { Gba(10, 28, 18), Gba(6, 22, 12), Gba(16, 31, 24) });
+         Done();
+
+         Assert.Equal(skin.Run.Start + 16, Target(FoldedMain));
+         Assert.Equal(SkinTable + 16, Target(FoldedInData));
+      }
+
+      [Fact]
+      public void AddingSeveralColours_KeepsTheCodeWordsOnTheTable() {
+         BlockTheGrowth(CharacterColorKind.Secondary);
+         WriteFoldedWords(SecondaryTable);
+         var secondary = Create().Secondary;
+
+         for (int i = 0; i < 5; i++) Assert.True(secondary.Add($"Added {i}", new[] { Gba(i, 20, 31 - i), Gba(2, 14, 26), Gba(12, 26, 31) }).Success);
+         Done();
+
+         Assert.Equal(8, secondary.Run.ElementCount);
+         Assert.Equal(8, Model[SecondaryCount]);
+         Assert.Equal(secondary.Run.Start + 16, Target(FoldedMain));
+         Assert.Equal(secondary.Run.Start + 20, Target(FoldedHighlight));
+         for (int row = 0; row < 8; row++) Assert.Equal(secondary.ReadRow(row).Colors[0], (ushort)Model.ReadMultiByteValue(Target(FoldedMain) + RowLength * row, 2));
+      }
+      #endregion
+
       [Fact]
       public void GbaColor_DeriveSecondaryShades_UsesTheRomsOwnRatios() {
          var (shadow, highlight) = GbaColor.DeriveSecondaryShades(Gba(31, 31, 31));

@@ -405,6 +405,7 @@ namespace HavenSoft.HexManiac.Core.Models {
 
          var token = tokenFactory();
          var start = run.Start;
+         var inside = FindReferencesIntoTheTable(run); // before the table moves: the old copy is erased by the move
          var grown = model.RelocateForExpansion(token, run, run.Length + run.ElementLength);
          grown = grown.Append(token, 1);
          model.ObserveRunWritten(token, grown);
@@ -415,7 +416,43 @@ namespace HavenSoft.HexManiac.Core.Models {
          for (int i = 0; i < ColorsPerRow; i++) model.WriteMultiByteValue(address + ColorOffset + 2 * i, 2, token, (i < colors.Count ? colors[i] : 0) & 0x7FFF);
          model.WriteMultiByteValue(CountAddress, 1, token, count + 1);
          var moved = grown.Start != start;
-         return CharacterEditResult.Ok(count, moved ? $"The {Noun} table was moved to free space to make room. The game's references to it were updated." : null);
+         var redirected = moved ? RedirectReferencesIntoTheTable(token, inside, grown.Start) : 0;
+         if (!moved) return CharacterEditResult.Ok(count);
+         var message = $"The {Noun} table was moved to free space to make room. The game's references to it were updated.";
+         if (redirected > 0) message += $" {redirected} more place{(redirected == 1 ? " that reads" : "s that read")} the colours directly {(redirected == 1 ? "was" : "were")} updated too.";
+         return CharacterEditResult.Ok(count, message);
+      }
+
+      /// <summary>
+      /// A compiler is free to fold the position of a field into the address it loads: the game's code may contain "the address of the colours of row 0" (table + 16, 18 or 20) as one 4-byte word
+      /// instead of "the address of the table" plus 16. The model only knows pointers to the very start of a table, so such a word does not move when the table moves
+      /// and the game would go on reading the old, erased copy (every colour 0xFFFF: plain white). These are the words (address, offset inside the table) that point at the colours of row 0.
+      /// Only whole-word aligned words that no known run covers are taken, and only exactly those three addresses: nothing else in the ROM is touched.
+      /// </summary>
+      private List<(int address, int offset)> FindReferencesIntoTheTable(ITableRun run) {
+         var found = new List<(int address, int offset)>();
+         var raw = model.RawData;
+         if (raw == null || run == null) return found;
+         var low = BaseModel.PointerOffset + run.Start + ColorOffset;
+         var high = BaseModel.PointerOffset + run.Start + ColorOffset + 2 * (ColorsPerRow - 1);
+         for (int address = 0; address + 4 <= raw.Length; address += 4) {
+            if (raw[address + 3] < 0x08 || raw[address + 3] > 0x09) continue; // the 0x08 / 0x09 of a ROM address: nearly every word stops here
+            var value = raw[address] | (raw[address + 1] << 8) | (raw[address + 2] << 16) | (raw[address + 3] << 24);
+            if (value < low || value > high || (value - low) % 2 != 0) continue;
+            if (address >= run.Start && address < run.Start + run.Length) continue; // the table itself
+            var covering = model.GetNextRun(address);
+            if (covering.Start <= address && address < covering.Start + covering.Length) continue; // something the model knows (a table, a picture, a pointer...) is not code
+            found.Add((address, value - BaseModel.PointerOffset - run.Start));
+         }
+         return found;
+      }
+
+      private int RedirectReferencesIntoTheTable(ModelDelta token, List<(int address, int offset)> references, int newStart) {
+         foreach (var (address, offset) in references) {
+            var value = BaseModel.PointerOffset + newStart + offset;
+            token.ChangeData(model, address, new byte[] { (byte)value, (byte)(value >> 8), (byte)(value >> 16), (byte)(value >> 24) });
+         }
+         return references.Count;
       }
 
       /// <summary>A copy of a row, at the end of the table.</summary>
