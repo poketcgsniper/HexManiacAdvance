@@ -104,7 +104,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                case "sound": case "music": case "cries": return ShortcutKind.Sound;
                case "animations": case "tiles": return ShortcutKind.AnimatedTiles;
                case "customization": case "character": return ShortcutKind.CharacterCustomization;
-               case "sprites": case "gallery": return ShortcutKind.OverworldSprites;
+               case "sprites": case "gallery": case "secondary": case "fieldeffects": case "reflections": case "reflection": return ShortcutKind.OverworldSprites;
             }
          }
          if (destination.StartsWith(HardcodeTablesModel.OverworldSprites, StringComparison.Ordinal)) return ShortcutKind.OverworldSprites;

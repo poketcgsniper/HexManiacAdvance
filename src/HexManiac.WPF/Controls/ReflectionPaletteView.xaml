@@ -47,6 +47,7 @@
                   <WrapPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
                      <Button Content="Open palette table" Command="{Binding OpenPaletteTable}" Style="{StaticResource ToolButton}" ToolTip="Show the overworld palette table in the main tab"/>
                      <Button Content="Open sprite table" Command="{Binding OpenSpriteTable}" Style="{StaticResource ToolButton}" ToolTip="Show the overworld sprite table in the main tab"/>
+                     <Button Content="Open field effects" Command="{Binding OpenFieldEffects}" Style="{StaticResource ToolButton}" ToolTip="Show the field effects table (grass, ripples, dust...) in the main tab"/>
                   </WrapPanel>
                   <ScrollViewer MaxHeight="520" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,4,0,0">
                      <ItemsControl ItemsSource="{Binding Entries}" IsTabStop="False">

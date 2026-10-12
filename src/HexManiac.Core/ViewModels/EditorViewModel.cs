@@ -1494,11 +1494,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             AddButton(() => ShortcutIcons.PokeFlute(model), ViewPort.EditorGotoPrefix + "sound", "Sound"); // the Poke Flute item picture (the built-in picture is a Poke Flute too)
          }
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
-            AddButton(() => ShortcutIcons.FirstOverworldSprite(model), HardcodeTablesModel.OverworldSprites, "OW Sprites"); // sprite 0, first picture (the player in the unedited games); the built-in character if the ROM has none
+            AddButton(() => ShortcutIcons.FirstOverworldSprite(model), HardcodeTablesModel.OverworldSprites, "OW Sprites"); // sprite 235 (RS Brendan, walking graphic), first picture; sprite 0 if the table is shorter; the built-in character if the ROM has none
          }
-         // the field effects (grass, ripples, shadows, dust...) with their palettes: one table, named for people (graphics.overworld.fieldeffects; older files call it graphics.overworld.sprites2)
-         if (FieldEffects.FindTableName(model) is string fieldEffectTable && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Field Effects")) {
-            AddButton(() => FieldEffects.ButtonPicture(model), fieldEffectTable, "Field\nEffects");
+         // 'OW Secondary': the field effects (grass, ripples, shadows, dust...) with their palettes, and the reflection palettes, behind one button. It opens the field effects table
+         // (graphics.overworld.fieldeffects; older files call it graphics.overworld.sprites2) and the Reflection Palettes editor is one click away from there (and back); a game with only
+         // reflection palettes opens that editor directly. See ViewPort.OpenEditorTab("secondary").
+         if (OverworldSecondary.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == OverworldSecondary.ButtonText)) {
+            AddButton(() => FieldEffects.ButtonPicture(model) ?? ReflectionPreview.MenuIcon(model), ViewPort.EditorGotoPrefix + "secondary", OverworldSecondary.ButtonText); // the first frame of the tall grass
          }
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
             var animTiles = AddButton(() => FindItemIcon(model, "Wailmer Pail", "Pail", "Watering"), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles");
@@ -1506,9 +1508,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          if (CharacterCustomizationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Character Customization")) {
             AddButton(() => ShortcutIcons.CharacterFront(model) ?? ShortcutIcons.BrendanStanding(model), ViewPort.EditorGotoPrefix + "customization", "Character\nCustomization");
-         }
-         if (ReflectionPaletteTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Reflection Palettes")) {
-            AddButton(() => ReflectionPreview.MenuIcon(model), ViewPort.EditorGotoPrefix + "reflections", "Reflection\nPalettes"); // the boy upside down in the colours of water
          }
       }
 

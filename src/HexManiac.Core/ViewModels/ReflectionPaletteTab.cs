@@ -320,6 +320,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public ICommand OpenPaletteTable => StubCommand(ref openPalettes, () => ShowInMainTab(model.GetTable(HardcodeTablesModel.OverworldPalettes)?.Start ?? -1), () => model.GetTable(HardcodeTablesModel.OverworldPalettes) != null);
       public ICommand OpenSpriteTable => StubCommand(ref openSprites, () => ShowInMainTab(model.GetTable(HardcodeTablesModel.OverworldSprites)?.Start ?? -1), () => model.GetTable(HardcodeTablesModel.OverworldSprites) != null);
 
+      private StubCommand openFieldEffects;
+      /// <summary>The other half of the 'OW Secondary' menu button: shows the field effects table (grass, ripples, dust...) in the main tab.</summary>
+      public ICommand OpenFieldEffects => StubCommand(ref openFieldEffects, () => ShowInMainTab(FieldEffects.FindTable(model)?.Start ?? -1), () => FieldEffects.IsSupported(model));
+
       #region Reading
 
       /// <summary>Reads everything from the ROM again and keeps the selection if the entry is still there.</summary>
