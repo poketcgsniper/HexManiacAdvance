@@ -342,6 +342,44 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void OpeningTheTabWithoutTheTables_SaysWhyAndOpensNothing() {
+         var plain = new PokemonModel(new byte[0x200], singletons: Singletons);
+         var viewPort = new ViewPort("plain.txt", plain, InstantDispatch.Instance, Singletons);
+         var errors = new List<string>();
+         var opened = new List<ITabContent>();
+         viewPort.OnError += (sender, e) => errors.Add(e);
+         viewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
+
+         viewPort.OpenReflectionPaletteTab();
+
+         Assert.Empty(opened);
+         Assert.Single(errors);
+         Assert.Contains("Reflection Palettes", errors[0]);
+      }
+
+      [Fact]
+      public void TheEditorGotoPrefix_OpensTheTab() {
+         var opened = new List<ITabContent>();
+         ViewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
+
+         ViewPort.OpenEditorTab("reflections");
+
+         var tab = Assert.IsType<ReflectionPaletteTab>(Assert.Single(opened));
+         Assert.Equal("Reflection Palettes", tab.Name);
+         Assert.Equal(Model, tab.Model);
+         Assert.Empty(Errors);
+      }
+
+      [Fact]
+      public void TheQuickEditItem_IsOnlyAvailableWhereTheTablesAre() {
+         var item = new HavenSoft.HexManiac.Core.ViewModels.QuickEditItems.OpenReflectionPalettes();
+         var plain = new ViewPort("plain.txt", new PokemonModel(new byte[0x200], singletons: Singletons), InstantDispatch.Instance, Singletons);
+
+         Assert.True(item.CanRun(ViewPort));
+         Assert.False(item.CanRun(plain));
+      }
+
+      [Fact]
       public void Tab_OpenPaletteOfASprite_ShowsItsOwnPaletteInTheMainTab() {
          var tab = CreateTab();
          tab.Entries[1].Select.Execute(null);
