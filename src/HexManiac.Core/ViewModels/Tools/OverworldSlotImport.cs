@@ -108,7 +108,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       }
 
       private static void ParseHint(string innerFormat, out string[] tableNames, out string keyField) {
-         tableNames = new string[0];
+         // (a plain `osl` has no hint: the frames then look for their palette in the overworld palette table, by 'id')
+         tableNames = new[] { HardcodeTablesModel.OverworldPalettes };
          keyField = "id";
          var bar = innerFormat.IndexOf('|');
          if (bar < 0) return;
