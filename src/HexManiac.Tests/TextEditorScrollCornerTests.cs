@@ -26,7 +26,7 @@ namespace HavenSoft.HexManiac.Tests {
 
       [Fact]
       public void OnlyTheVerticalBarShowing_NoCover() {
-         Assert.False(TextEditorViewModel.NeedsScrollCornerCover(extentWidth: 158, viewportWidth: 142, extentHeight: 600, viewportHeight: 140));
+         Assert.False(TextEditorViewModel.NeedsScrollCornerCover(extentWidth: 142, viewportWidth: 142, extentHeight: 600, viewportHeight: 140));
       }
 
       [Fact]
