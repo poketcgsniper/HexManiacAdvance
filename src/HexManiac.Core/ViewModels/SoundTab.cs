@@ -517,8 +517,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private bool newSongsGetOwnVoicegroup = true;
       /// <summary>
-      /// When set (it starts set), a song that is new gets a voicegroup of its own, made from the instruments the song uses: a song put into an empty slot (one that 'Add new song' made, or any song without tracks)
-      /// and a song added at the end of the table. A MIDI file's General MIDI programs, or the voices a .s file selects, are taken from the voicegroup the song would have used, and every other slot is filled with a blank instrument.
+      /// When set (it starts set), a song put into an empty slot (one that 'Add new song' made, or any song without tracks) gets a voicegroup of its own, made from the instruments the song uses. A MIDI file's General MIDI programs, or the voices a .s file selects, are taken from the voicegroup the song would have used, and every other slot is filled with a blank instrument.
       /// Replacing a song that has tracks never does this on its own (InsertWithNewVoicegroup is the way to ask for it).
       /// </summary>
       public bool NewSongsGetOwnVoicegroup { get => newSongsGetOwnVoicegroup; set => Set(ref newSongsGetOwnVoicegroup, value); }
@@ -709,7 +708,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (table == null) { error = $"This ROM has no {SongTable} table."; return null; }
          if (!asNewSong && selectedSong == null) { error = "Select a song to replace, or choose 'add as new song'."; return null; }
 
-         var makesOwnVoicegroup = !InsertWithNewVoicegroup && NewSongsGetOwnVoicegroup && (asNewSong || IsEmptySlot(selectedSong));
+         var makesOwnVoicegroup = !InsertWithNewVoicegroup && NewSongsGetOwnVoicegroup && !asNewSong && IsEmptySlot(selectedSong);
          // a new song that names a voicegroup this ROM has (voicegroup_littleroot for sound.voicegroups.littleroot) is made for that one, unless the user picked a voicegroup to insert with
          VoicegroupItem voicegroupNamedInFile(string symbol) {
             if (!makesOwnVoicegroup || knownSymbols != null || OverrideVoicegroup || voicegroupPickedByUser) return null;
@@ -941,6 +940,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          SongFilter = string.Empty; // the new song is at the end of the list: a filter could hide it
          LoadSongs();
          SelectedSong = index < Songs.Count ? Songs[index] : null;
+         InsertAsNewSong = false; // the next file goes into this song (Insert song, or a file dropped on the tab), not to the end of the table
          var player = InsertMusicPlayer == 0 ? "playbgm" : "playse";
          Status = $"Added song {index}{(string.IsNullOrEmpty(name) ? string.Empty : " (" + name + ")")}: an empty song that plays nothing. Use 'Insert song…' to put a MIDI or .s file in it{(NewSongsGetOwnVoicegroup ? "; it then gets a voicegroup of its own, made from the instruments the song uses" : string.Empty)}. Scripts play it with '{player} {index}'.";
          OnMessage?.Invoke(this, Status + (tableMovedTo >= 0 ? $" The song table was moved to {tableMovedTo:X6} to make room." : string.Empty));

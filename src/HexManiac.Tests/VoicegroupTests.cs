@@ -118,6 +118,8 @@ t:
          return tab;
       }
 
+      private int SongCount => Model.GetTable(SoundTab.SongTable).ElementCount;
+
       private int HeaderVoicegroup(int song) => Model.ReadPointer(headers[song] + 4);
 
       private byte[] Bytes(int address, int length) => Enumerable.Range(0, length).Select(i => Model[address + i]).ToArray();
