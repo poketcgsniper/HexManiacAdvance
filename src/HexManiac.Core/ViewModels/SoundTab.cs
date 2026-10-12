@@ -591,7 +591,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          foreach (var item in Songs) item.MatchToFilter(songFilter);
          // a voicegroup the user picked for inserting songs stays picked when the lists are read again; otherwise it is the All Instruments voicegroup
          // if the ROM has one (songs made from MIDI files are meant for it), or the first one
-         SelectVoicegroupAutomatically((keepInsertVoicegroup == null ? null : FindVoicegroupItem(keepInsertVoicegroup.Value)) ?? FindAllInstrumentsVoicegroup() ?? Voicegroups.FirstOrDefault());
+         SelectVoicegroupAutomatically((keepInsertVoicegroup == null ? null : FindVoicegroupItem(keepInsertVoicegroup.Value)) ?? FindAllInstrumentsVoicegroup() ?? DefaultVoicegroup());
          // the selected song belongs to the old list: drop it (callers that want a selection pick one again)
          if (selectedSong != null && !Songs.Contains(selectedSong)) SelectedSong = null;
       }
@@ -1083,6 +1083,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          NotifyPropertyChanged(nameof(AllInstrumentsDetails));
          NotifyPropertyChanged(nameof(HasAllInstruments));
       }
+
+      /// <summary>
+      /// The voicegroup that is picked for inserting songs when the ROM has no All Instruments one: the first voicegroup of the list that holds a real set of instruments
+      /// (the small voicegroups that 'Add new song' makes for one song each, with a few instruments and filler in every other slot, are not a good start for the next song), or else the first one.
+      /// </summary>
+      private VoicegroupItem DefaultVoicegroup()
+         => Voicegroups.FirstOrDefault(group => !group.Info.IsCustom && VoicegroupCatalog.CountRealInstruments(model, group.Address, group.Info.EntryCount) >= 16) ?? Voicegroups.FirstOrDefault();
 
       /// <summary>The All Instruments voicegroup (anchored as sound.voicegroups.all_instruments), if the ROM has it.</summary>
       private VoicegroupItem FindAllInstrumentsVoicegroup()

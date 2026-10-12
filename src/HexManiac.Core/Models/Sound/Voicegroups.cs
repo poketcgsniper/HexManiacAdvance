@@ -137,6 +137,21 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
       public const string TableFormat = "[type.|h key. length. pan_sweep.|h wave_or_group::|h attack. decay. sustain. release.]128";
       public const string AnchorPrefix = "sound.voicegroups.";
 
+      /// <summary>How many of the first 'count' instruments of the voicegroup at 'address' are real ones, that is, not the games' unused-instrument filler.</summary>
+      public static int CountRealInstruments(IDataModel model, int address, int count) {
+         if (address < 0) return 0;
+         var filler = FillerTone();
+         int real = 0;
+         for (int slot = 0; slot < count && slot < MaxEntries; slot++) {
+            var start = address + slot * EntrySize;
+            if (start + EntrySize > model.Count) break;
+            bool same = true;
+            for (int i = 0; i < EntrySize && same; i++) same = model[start + i] == filler[i];
+            if (!same) real++;
+         }
+         return real;
+      }
+
       /// <summary>The number of instruments in a row, from the start, that look valid.</summary>
       public static int CountEntries(IDataModel model, int address, int maxEntries = MaxEntries) {
          if (address < 0) return 0;
