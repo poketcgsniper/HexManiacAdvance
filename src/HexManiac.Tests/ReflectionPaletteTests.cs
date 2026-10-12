@@ -1,0 +1,360 @@
+using HavenSoft.HexManiac.Core;
+using HavenSoft.HexManiac.Core.Models;
+using HavenSoft.HexManiac.Core.Models.Runs;
+using HavenSoft.HexManiac.Core.ViewModels;
+using System.Collections.Generic;
+using System.Linq;
+using Xunit;
+
+namespace HavenSoft.HexManiac.Tests {
+   /// <summary>The Reflection Palettes editor: which palettes there are, which sprites use them, the colour rules of a game that computes its reflections, the previews and editing.</summary>
+   public class ReflectionPaletteTests : BaseViewModelTestClass {
+      private const int SpriteTable = 0x100, Info0 = 0x140, Info1 = 0x180, List0 = 0x200, List1 = 0x220, Sheet0 = 0x800, Sheet1 = 0x2000, FrameBytes = 0x100;
+      private const int PaletteTable = 0x400, BrendanPal = 0x600, BrendanReflection = 0x640, NpcPal = 0x680, NpcReflection = 0x6C0;
+      private const int BrendanTag = 0x1100, BrendanReflectionTag = 0x1101, NpcTag = 0x1103, NpcReflectionTag = 0x1107;
+      private readonly List<string> tabErrors = new();
+
+      public ReflectionPaletteTests() : base(0x10000) {
+         SetFullModel(0);
+         Model.SetList(new ModelDelta(), "objecteventgfx", "BRENDAN_NORMAL", "NINJA_BOY");
+         var tags = new string[0x1108];
+         for (int i = 0; i < tags.Length; i++) tags[i] = string.Empty;
+         tags[BrendanTag] = "OBJ_EVENT_PAL_TAG_BRENDAN";
+         tags[BrendanReflectionTag] = "OBJ_EVENT_PAL_TAG_BRENDAN_REFLECTION";
+         tags[NpcTag] = "OBJ_EVENT_PAL_TAG_NPC_1";
+         tags[NpcReflectionTag] = "OBJ_EVENT_PAL_TAG_NPC_1_REFLECTION";
+         Model.SetList(new ModelDelta(), ObjectPaletteTags.ListName, tags);
+
+         // the pictures: frame f of a sheet starts with the pixels f and f+1; the bottom left pixel of the first frame of the first sheet is 3
+         for (int f = 0; f < OverworldSheetFrameSource.PlayerSheetFrames; f++) {
+            Data[Sheet0 + FrameBytes * f] = (byte)((f % 16) | (((f + 1) % 16) << 4));
+            Data[Sheet1 + FrameBytes * f] = (byte)((f % 16) | (((f + 1) % 16) << 4));
+         }
+         Data[Sheet0 + 0xDC] = 0x03; // tile 6 (the bottom left one), its last row: the pixel at x=0, y=31
+
+         ViewPort.Edit($"@{SpriteTable:X} ^{HardcodeTablesModel.OverworldSprites}[data<[tileTag: paletteid:|h reflectionPaletteTag:|h length: width: height: info. tracks. unused: oam<> subsprites<> anims<> sprites<`osl`> affine<>]1>]objecteventgfx ");
+         Model.WritePointer(Token, SpriteTable, Info0);
+         Model.WritePointer(Token, SpriteTable + 4, Info1);
+         WriteInfo(Info0, BrendanTag, 0, List0);
+         WriteInfo(Info1, NpcTag, 2, List1);
+         ViewPort.Edit($"@{List0:X} <{Sheet0:X6}> 00 01 01 00 ");
+         ViewPort.Edit($"@{List1:X} <{Sheet1:X6}> 00 01 01 00 ");
+         ViewPort.Edit($"@{Info0:X} ^sheet0[tileTag: paletteid:|h reflectionPaletteTag:|h length: width: height: info. tracks. unused: oam<> subsprites<> anims<> sprites<`osl`> affine<>]1 ");
+         ViewPort.Edit($"@{Info1:X} ^sheet1[tileTag: paletteid:|h reflectionPaletteTag:|h length: width: height: info. tracks. unused: oam<> subsprites<> anims<> sprites<`osl`> affine<>]1 ");
+
+         // the palette table: four palettes, 16 colours each (the colours of a palette are its tag's low byte and its colour number, so they are easy to tell apart)
+         ViewPort.Edit($"@{PaletteTable:X} ^{HardcodeTablesModel.OverworldPalettes}[pal<`ucp4`> id:|h unused:]4 ");
+         var palettes = new[] { (BrendanPal, BrendanTag), (BrendanReflection, BrendanReflectionTag), (NpcPal, NpcTag), (NpcReflection, NpcReflectionTag) };
+         for (int i = 0; i < palettes.Length; i++) {
+            Model.WritePointer(Token, PaletteTable + i * 8, palettes[i].Item1);
+            Model.WriteMultiByteValue(PaletteTable + i * 8 + 4, 2, Token, palettes[i].Item2);
+            ViewPort.Edit($"@{palettes[i].Item1:X} ^pal{i}`ucp4` ");
+         }
+         foreach (var (address, seed) in new[] { (BrendanPal, 1), (BrendanReflection, 2), (NpcPal, 3), (NpcReflection, 4) }) {
+            for (int i = 0; i < 16; i++) Model.WriteMultiByteValue(address + i * 2, 2, Token, GbaColor.Pack(seed + i, i, 31 - i));
+         }
+         ViewPort.ChangeHistory.ChangeCompleted();
+      }
+
+      private void WriteInfo(int info, int tag, int slot, int list) {
+         Model.WriteMultiByteValue(info + 2, 2, Token, tag);
+         Model.WriteMultiByteValue(info + 4, 2, Token, 0x11FF); // no second tag
+         Model.WriteMultiByteValue(info + 6, 2, Token, 0x200); // length
+         Model.WriteMultiByteValue(info + 8, 2, Token, 16); // width
+         Model.WriteMultiByteValue(info + 10, 2, Token, 32); // height
+         Token.ChangeData(Model, info + 12, (byte)slot);
+         Model.WritePointer(Token, info + 28, list);
+      }
+
+      private ReflectionPaletteTab CreateTab() {
+         var tab = new ReflectionPaletteTab(ViewPort);
+         tab.OnError += (sender, e) => tabErrors.Add(e);
+         return tab;
+      }
+
+      #region The catalog
+
+      [Fact]
+      public void Catalog_FindsTheStoredReflectionPalettes_AndTheSpritesThatUseThem() {
+         Assert.True(ReflectionCatalog.IsSupported(Model));
+         var catalog = ReflectionCatalog.Build(Model);
+
+         Assert.Equal(ReflectionMode.Stored, catalog.Mode);
+         Assert.Equal(new[] { BrendanReflectionTag, NpcReflectionTag }, catalog.Stored.Select(p => p.Tag).ToArray());
+         Assert.All(catalog.Stored, palette => Assert.True(palette.IsStored));
+         Assert.Equal("Brendan reflection", catalog.Stored[0].Name);
+         Assert.Equal(BrendanReflection, catalog.Stored[0].Address);
+         Assert.Equal(PaletteTable + 8 + 0, catalog.Stored[0].PointerAddress);
+         Assert.Equal("BRENDAN_NORMAL", catalog.SpritesFor(catalog.Stored[0]).Single().Name);
+         Assert.Equal("NINJA_BOY", catalog.SpritesFor(catalog.Stored[1]).Single().Name);
+         Assert.Empty(catalog.Computed);
+      }
+
+      [Fact]
+      public void Catalog_ReadsTheSlotAndPaletteOfEachSprite() {
+         var catalog = ReflectionCatalog.Build(Model);
+
+         Assert.Equal(2, catalog.Sprites.Count);
+         Assert.Equal((BrendanTag, 0, BrendanReflectionTag), (catalog.Sprites[0].Tag, catalog.Sprites[0].Slot, catalog.Sprites[0].ReflectionTag));
+         Assert.Equal((NpcTag, 2, NpcReflectionTag), (catalog.Sprites[1].Tag, catalog.Sprites[1].Slot, catalog.Sprites[1].ReflectionTag));
+         Assert.Equal(-1, catalog.Sprites[0].BridgeTag);
+      }
+
+      [Fact]
+      public void Catalog_AGameThatComputesItsReflections_ListsTheThreeRulesFirstAndDoesNotUseTheSecondTag() {
+         Model.SetList(new ModelDelta(), ReflectionCatalog.ModeListName, "filtered");
+         ViewPort.ChangeHistory.ChangeCompleted();
+         var catalog = ReflectionCatalog.Build(Model);
+
+         Assert.Equal(ReflectionMode.Computed, catalog.Mode);
+         Assert.Equal(new[] { "water", "ice", "bridge" }, catalog.Computed.Select(p => p.Key).ToArray());
+         Assert.All(catalog.Sprites, sprite => Assert.Equal(-1, sprite.BridgeTag));
+         Assert.NotNull(catalog.Find("tag:1101"));
+         Assert.Null(catalog.Find("tag:9999"));
+      }
+
+      [Fact]
+      public void Catalog_WithoutTheTables_IsNotSupported() {
+         var empty = new BaseViewModelTestClass(0x1000);
+         Assert.False(ReflectionCatalog.IsSupported(empty.Model));
+         Assert.False(ReflectionCatalog.IsSupported(null));
+         Assert.False(ReflectionPaletteTab.IsSupported(empty.Model));
+      }
+
+      [Fact]
+      public void Catalog_ReadsTheColoursOfAPalette() {
+         var catalog = ReflectionCatalog.Build(Model);
+
+         var colors = catalog.ColorsOf(catalog.Stored[0]);
+
+         Assert.Equal(16, colors.Count);
+         Assert.Equal(GbaColor.ToDisplay(GbaColor.Pack(2 + 5, 5, 31 - 5)), colors[5]);
+         Assert.Equal(BrendanReflection, catalog.AddressOfTag(BrendanReflectionTag));
+         Assert.Equal(-1, catalog.AddressOfTag(0x4321));
+      }
+
+      [Fact]
+      public void ObjectPaletteTags_NameThemselvesFromTheMetadataList() {
+         Assert.Equal("Brendan reflection", ObjectPaletteTags.Name(Model, BrendanReflectionTag));
+         Assert.Equal("NPC 1", ObjectPaletteTags.Name(Model, NpcTag));
+         Assert.Null(ObjectPaletteTags.Name(Model, 0x1105));
+         Assert.True(ObjectPaletteTags.IsReflectionName("NPC 1 reflection"));
+         Assert.False(ObjectPaletteTags.IsReflectionName("NPC 1"));
+         Assert.Equal("Quinty Plump reflection", ObjectPaletteTags.Humanize("OBJ_EVENT_PAL_TAG_QUINTY_PLUMP_REFLECTION"));
+      }
+
+      #endregion
+
+      #region The colour rules
+
+      [Fact]
+      public void Water_AddsTenBlue_AndKeepsTheFirstColour() {
+         var palette = new ushort[] { GbaColor.Pack(1, 2, 3), GbaColor.Pack(4, 5, 6), GbaColor.Pack(7, 8, 25) };
+
+         var result = ReflectionFilters.Water(palette);
+
+         Assert.Equal(palette[0], result[0]);
+         Assert.Equal(GbaColor.Pack(4, 5, 16), result[1]);
+         Assert.Equal(GbaColor.Pack(7, 8, 31), result[2]); // never above 31
+      }
+
+      [Fact]
+      public void Ice_TakesFiveRed_AddsThreeGreenAndSixteenBlue() {
+         var palette = new ushort[] { GbaColor.Pack(1, 2, 3), GbaColor.Pack(4, 30, 6), GbaColor.Pack(20, 8, 10) };
+
+         var result = ReflectionFilters.Ice(palette);
+
+         Assert.Equal(palette[0], result[0]);
+         Assert.Equal(GbaColor.Pack(0, 31, 22), result[1]); // red can't go below 0, green can't go above 31
+         Assert.Equal(GbaColor.Pack(15, 11, 26), result[2]);
+      }
+
+      [Fact]
+      public void Bridge_IsOneFlatColour() {
+         var result = ReflectionFilters.Bridge();
+
+         Assert.Equal(16, result.Length);
+         Assert.All(result, color => Assert.Equal(0x55C9, color));
+      }
+
+      [Fact]
+      public void Filter_WorksOnTheColoursAPictureUses() {
+         var normal = new[] { GbaColor.ToDisplay(GbaColor.Pack(1, 1, 1)), GbaColor.ToDisplay(GbaColor.Pack(4, 5, 6)) };
+
+         var water = ReflectionPreview.Filter(ReflectionPaletteKind.Water, normal);
+
+         Assert.Equal(normal[0], water[0]);
+         Assert.Equal(GbaColor.ToDisplay(GbaColor.Pack(4, 5, 16)), water[1]);
+         Assert.Null(ReflectionPreview.Filter(ReflectionPaletteKind.Stored, normal));
+         Assert.Equal(16, ReflectionPreview.Filter(ReflectionPaletteKind.Bridge, null).Count);
+      }
+
+      #endregion
+
+      #region Pictures
+
+      [Fact]
+      public void FlipVertical_PutsTheLastRowFirst() {
+         var pixels = new int[2, 3];
+         pixels[0, 0] = 1; pixels[1, 2] = 7;
+
+         var flipped = ReflectionPreview.FlipVertical(pixels);
+
+         Assert.Equal(1, flipped[0, 2]);
+         Assert.Equal(7, flipped[1, 0]);
+      }
+
+      [Fact]
+      public void ReadFrames_GivesThePicturesOfASprite_AndNothingForASpriteThatIsNotThere() {
+         var frames = ReflectionPreview.ReadFrames(Model, 0, ReflectionPreview.PlayerFrames);
+
+         Assert.Equal(3, frames.Count);
+         Assert.Equal(16, frames[0].GetLength(0));
+         Assert.Equal(32, frames[0].GetLength(1));
+         Assert.Equal(3, frames[0][0, 31]);
+         Assert.Equal(3, frames[1][0, 0]); // the second picture shown is frame 3
+         Assert.Empty(ReflectionPreview.ReadFrames(Model, 99, new[] { 0 }));
+      }
+
+      [Fact]
+      public void TheReflectionPicture_IsTheNormalPictureUpsideDown() {
+         var frames = ReflectionPreview.ReadFrames(Model, 0, new[] { 0 });
+         var palette = Enumerable.Range(0, 16).Select(i => GbaColor.ToDisplay(GbaColor.Pack(i, 31 - i, 5))).ToArray();
+
+         var normal = ReflectionPreview.DrawNormal(frames[0], palette);
+         var reflection = ReflectionPreview.DrawReflection(frames[0], palette);
+
+         Assert.Equal(normal.PixelWidth, reflection.PixelWidth);
+         Assert.Equal(normal.PixelData[31 * 16], reflection.PixelData[0]);
+         Assert.Equal(normal.PixelData[0], reflection.PixelData[31 * 16]);
+         Assert.NotEqual(normal.PixelData[0], normal.PixelData[31 * 16]);
+         Assert.Null(ReflectionPreview.DrawNormal(frames[0], null));
+      }
+
+      [Fact]
+      public void MenuIcon_IsTheFirstPlayerSpriteUpsideDown() {
+         var icon = ReflectionPreview.MenuIcon(Model);
+
+         Assert.NotNull(icon);
+         Assert.Equal(16, icon.PixelWidth);
+         Assert.Equal(32, icon.PixelHeight);
+      }
+
+      #endregion
+
+      #region The tab
+
+      [Fact]
+      public void Tab_ListsThePalettes_PlayersFirst_AndSelectsTheFirst() {
+         var tab = CreateTab();
+
+         Assert.Equal(new[] { "tag:1101", "tag:1107" }, tab.Entries.Select(entry => entry.Key).ToArray());
+         Assert.Equal("tag:1101", tab.SelectedKey);
+         Assert.True(tab.Entries[0].Selected);
+         Assert.False(tab.Entries[1].Selected);
+         Assert.True(tab.IsEditable);
+         Assert.False(tab.ComputesReflections);
+         Assert.Equal("used by 1 sprite", tab.Entries[0].Status);
+         Assert.Equal(16, tab.Entries[0].Colors.Count);
+         Assert.Contains("Tag 1101", tab.Where);
+         Assert.Contains(BrendanReflection.ToString("X6"), tab.Where);
+      }
+
+      [Fact]
+      public void Tab_SelectingAPalette_ShowsItsColoursAndItsSprites() {
+         var tab = CreateTab();
+
+         tab.Entries[1].Select.Execute(null);
+
+         Assert.Equal("NPC 1 reflection", tab.Title);
+         Assert.Equal("tag:1107", tab.SelectedKey);
+         Assert.False(tab.Entries[0].Selected);
+         Assert.Equal(16, tab.Palette.Elements.Count);
+         Assert.Equal(GbaColor.ToDisplay(GbaColor.Pack(4 + 3, 3, 31 - 3)), tab.Palette.Elements[3].Color);
+         var sprite = Assert.Single(tab.Sprites);
+         Assert.Equal("Ninja Boy", sprite.Name);
+         var frame = Assert.Single(sprite.Frames);
+         Assert.True(frame.Normal.HasImage);
+         Assert.True(frame.Reflection.HasImage);
+         Assert.False(frame.InGame.HasImage);
+         Assert.False(tab.ShowsInGame);
+      }
+
+      [Fact]
+      public void Tab_ThePlayerShowsThreePictures_AndEachSpriteItsReflection() {
+         var tab = CreateTab();
+
+         var sprite = Assert.Single(tab.Sprites);
+
+         Assert.Equal("Brendan Normal", sprite.Name);
+         Assert.Equal(new[] { "standing", "walking", "walking" }, sprite.Frames.Select(frame => frame.Label).ToArray());
+         Assert.All(sprite.Frames, frame => Assert.True(frame.Reflection.HasImage));
+      }
+
+      [Fact]
+      public void Tab_EditingAColour_ReachesTheRomRedrawsThePreviewAndUndoTakesItBack() {
+         var tab = CreateTab();
+         var before = tab.Palette.Elements[4].Color;
+         var edited = GbaColor.Pack(5, 9, 28);
+         var previewBefore = tab.Sprites[0].Frames[0].Reflection.PixelData.ToArray();
+
+         tab.Palette.Elements[1].Color = GbaColor.ToDisplay(edited);
+         tab.Palette.PushColorsToModel();
+
+         Assert.Equal(edited, Model.ReadMultiByteValue(BrendanReflection + 2, 2));
+         Assert.Equal(GbaColor.ToDisplay(edited), tab.Entries[0].Colors[1]);
+         Assert.Contains("1=5:9:28", tab.ColorSummary);
+         Assert.Equal(before, tab.Palette.Elements[4].Color);
+         Assert.Empty(tabErrors);
+         // the other palettes are not touched
+         Assert.Equal(GbaColor.Pack(4 + 1, 1, 31 - 1), Model.ReadMultiByteValue(NpcReflection + 2, 2));
+
+         tab.Undo.Execute(null);
+
+         Assert.Equal(GbaColor.Pack(2 + 1, 1, 31 - 1), Model.ReadMultiByteValue(BrendanReflection + 2, 2));
+         Assert.Equal(GbaColor.ToDisplay(GbaColor.Pack(2 + 1, 1, 31 - 1)), tab.Palette.Elements[1].Color);
+      }
+
+      [Fact]
+      public void Tab_AGameThatComputesItsReflections_ShowsTheRulesFirst_AndCannotEditThem() {
+         Model.SetList(new ModelDelta(), ReflectionCatalog.ModeListName, "filtered");
+         ViewPort.ChangeHistory.ChangeCompleted();
+         var tab = CreateTab();
+
+         Assert.True(tab.ComputesReflections);
+         Assert.Equal(new[] { "water", "ice", "bridge", "tag:1101", "tag:1107" }, tab.Entries.Select(entry => entry.Key).ToArray());
+         Assert.Equal("water", tab.SelectedKey);
+         Assert.False(tab.IsEditable);
+         Assert.Contains("adds 10 to the blue", tab.Description);
+         Assert.False(tab.HasWhere);
+         Assert.Equal(2, tab.Sprites.Count);
+         var water = tab.Sprites[0].Frames[0];
+         Assert.True(water.Reflection.HasImage);
+         Assert.False(water.InGame.HasImage);
+
+         tab.Entries[3].Select.Execute(null);
+
+         Assert.True(tab.IsEditable);
+         Assert.True(tab.ShowsInGame);
+         Assert.Contains("never loads it", tab.Description);
+         Assert.True(tab.Sprites[0].Frames[0].InGame.HasImage);
+         Assert.Equal("stored, but this game doesn't read it", tab.Entries[3].Status);
+      }
+
+      [Fact]
+      public void Tab_OpenPaletteOfASprite_ShowsItsOwnPaletteInTheMainTab() {
+         var tab = CreateTab();
+         tab.Entries[1].Select.Execute(null);
+         var changes = new List<TabChangeRequestedEventArgs>();
+         tab.RequestTabChange += (sender, e) => changes.Add(e);
+
+         tab.Sprites[0].OpenPalette.Execute(null);
+
+         Assert.Empty(tabErrors);
+         Assert.Single(changes);
+         Assert.Equal(PaletteTable + 2 * 8, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart)); // the pointer to the palette of the sprite: the third row of the palette table
+      }
+
+      #endregion
+   }
+}

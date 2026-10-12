@@ -330,7 +330,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             var keep = selectedKey;
             Entries.Clear();
             // a game that computes its reflections: the rules first, then the palettes it doesn't read
-            foreach (var entry in catalog.Computed.Concat(catalog.Stored)) Entries.Add(MakeRow(entry));
+            // (the palettes of the player first, they are what people look for)
+            var stored = catalog.Stored.OrderBy(entry => catalog.SpritesFor(entry).Any(sprite => sprite.Slot == ReflectionCatalog.PlayerSlot) ? 0 : 1).ToList();
+            foreach (var entry in catalog.Computed.Concat(stored)) Entries.Add(MakeRow(entry));
             selectedKey = Entries.Any(entry => entry.Key == keep) ? keep : Entries.FirstOrDefault()?.Key;
             foreach (var entry in Entries) entry.Selected = entry.Key == selectedKey;
          } finally {
