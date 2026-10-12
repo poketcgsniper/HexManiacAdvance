@@ -88,7 +88,7 @@ namespace HavenSoft.HexManiac.Core.Models.PokemonAnimations {
          return table.ElementContent.FirstOrDefault(isKind)?.Name;
       }
 
-      public static bool IsPointer(ArrayRunElementSegment segment) => segment is ArrayRunPointerSegment;
+      public static bool IsPointer(ArrayRunElementSegment segment) => segment is ArrayRunPointerSegment || segment.Type == ElementContentType.Pointer;
 
       public static bool IsNumber(ArrayRunElementSegment segment) => segment.Type == ElementContentType.Integer && segment.Length >= 1 && segment.Length <= 4 && !(segment is ArrayRunTupleSegment) && !(segment is ArrayRunCalculatedSegment);
 
