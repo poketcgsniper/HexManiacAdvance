@@ -305,7 +305,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          var paletteAddress = Allocate(model, token, 32);
          if (paletteAddress < 0) { error = "There is no free space in the ROM for a new palette."; return -1; }
          for (int i = 0; i < 32; i++) token.ChangeData(model, paletteAddress + i, colors[i]);
-         model.ObserveRunWritten(token, new NoInfoRun(paletteAddress)); // (keeps the space reserved until the row points at it)
 
          table = model.RelocateForExpansion(token, table, table.Length + table.ElementLength);
          table = table.Append(token, 1);
