@@ -181,15 +181,20 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
       /// <summary>
       /// The voices (the numbers a voicegroup is indexed by) that the song's tracks select with VOICE commands, including the ones in patterns and in jumped-to blocks.
       /// A track is followed the way the sound engine plays it: to its FINE, a GOTO ends the walk of that block (the command after it can't be reached from it), and PATT / GOTO / REPT targets are walked as well.
-      /// Every address is looked at once, so loops can't run on.
+      /// A PEND only ends a walk that was started by a PATT: a PEND outside of a pattern does nothing in the engine (mid2agb writes the first copy of a repeated phrase in the middle of the track and
+      /// closes it with a PEND, then the track plays on), so the walk of a track goes on after it. Walks that started in a pattern and walks of the track itself keep their own list of visited addresses,
+      /// because the same bytes are met both ways.
       /// </summary>
       public SortedSet<int> FindVoices(SongHeader header) {
          var voices = new SortedSet<int>();
          if (header == null) return voices;
-         var visited = new HashSet<int>();
-         var pending = new Queue<int>(header.Tracks);
+         var visitedInTrack = new HashSet<int>();
+         var visitedInPattern = new HashSet<int>();
+         var pending = new Queue<(int address, bool pattern)>();
+         foreach (var track in header.Tracks) pending.Enqueue((track, false));
          while (pending.Count > 0) {
-            int address = pending.Dequeue();
+            var (address, pattern) = pending.Dequeue();
+            var visited = pattern ? visitedInPattern : visitedInTrack;
             int runningStatus = 0;
             int guard = 0x40000;
             while (address >= 0 && address < model.Count && guard-- > 0) {
@@ -201,10 +206,11 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
                if (effective == 0xBD && argCount > 0 && model[argStart] < 0x80) voices.Add(model[argStart]);
                if (effective == 0xB2 || effective == 0xB3 || effective == 0xB5) {
                   var target = model.ReadPointer(argStart + (effective == 0xB5 ? 1 : 0));
-                  if (target >= 0 && target < model.Count) pending.Enqueue(target);
+                  if (target >= 0 && target < model.Count) pending.Enqueue((target, effective == 0xB3));
                }
                address += length;
-               if (effective == 0xB1 || effective == 0xB2 || effective == 0xB4) break; // FINE, GOTO, PEND: nothing after them is played from here
+               if (effective == 0xB1 || effective == 0xB2) break; // FINE, GOTO: nothing after them is played from here
+               if (effective == 0xB4 && pattern) break;           // PEND: the end of a pattern (outside of a pattern the engine ignores it)
             }
          }
          return voices;
