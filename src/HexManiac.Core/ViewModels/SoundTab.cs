@@ -8,6 +8,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Input;
 
 namespace HavenSoft.HexManiac.Core.ViewModels {
@@ -774,7 +775,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             }
          } else if (makesOwnVoicegroup) {
             var voicegroupSongName = !string.IsNullOrEmpty(result.SongName) ? result.SongName : !string.IsNullOrEmpty(songName) ? songName : selectedSong?.Name;
-            voicegroupMessage = CreateVoicegroupFromSongInstruments(token, headerAddress, address, bytes.Length, voicegroupSongName, out warning);
+            voicegroupMessage = CreateVoicegroupFromSongInstruments(token, headerAddress, address, bytes.Length, voicegroupSongName, FindVoicegroupHint(text), out warning);
          }
 
          int index;
@@ -951,7 +952,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// The voices are what the song's VOICE commands select (a MIDI file's General MIDI programs, or what the .s file asks for); each one is copied from the same slot of the voicegroup the song was written with.
       /// Every other slot is the games' blank instrument. Returns the sentence for the status line. 'warning' says why it could not be made (the song then keeps the voicegroup it was written with).
       /// </summary>
-      private string CreateVoicegroupFromSongInstruments(ModelDelta token, int headerAddress, int songAddress, int songLength, string songName, out string warning) {
+      private string CreateVoicegroupFromSongInstruments(ModelDelta token, int headerAddress, int songAddress, int songLength, string songName, string voicegroupHint, out string warning) {
          warning = null;
          if (!SongHeader.TryRead(model, headerAddress, out var header) || header.TrackCount == 0) return string.Empty;
          // a song file that defines its voicegroup inside its own data has one already
@@ -961,6 +962,29 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var sourceItem = FindVoicegroupItem(header.Voicegroup);
          var source = sourceItem?.Info ?? VoicegroupCatalog.Inspect(model, header.Voicegroup);
          var sourceTitle = sourceItem?.Title ?? source.Name ?? header.Voicegroup.ToString("X6");
+         string caution = null;
+         // The file names its voicegroup in two ways: an address (a song exported by this tool, right only for the ROM it came from, and a ROM changes its addresses every time it is built again)
+         // and a name. A name that this ROM knows wins over an address that is not that voicegroup, so a song saved from another version of the ROM still finds its instruments.
+         var named = string.IsNullOrEmpty(voicegroupHint) ? null : VoicegroupEditor.FindByName(Voicegroups.Select(group => group.Info), voicegroupHint);
+         var namedItem = named == null ? null : Voicegroups.FirstOrDefault(group => group.Address == named.Address);
+         if (namedItem != null && (sourceItem == null || sourceItem.Address != namedItem.Address)) {
+            sourceItem = namedItem;
+            source = namedItem.Info;
+            sourceTitle = namedItem.Title;
+            caution = $" The file's voicegroup address ({header.Voicegroup + BaseModel.PointerOffset:X8}) is not that voicegroup in this ROM (the file was probably saved from another version of it), so the voicegroup it names, {voicegroupHint}, was used.";
+         } else if (sourceItem == null) {
+            var real = source.IsCustom ? 0 : VoicegroupCatalog.CountRealInstruments(model, header.Voicegroup, source.EntryCount);
+            if (real < 2) {
+               // the address is not a voicegroup of this ROM and nothing else says which one was meant
+               var fallback = selectedVoicegroup ?? DefaultVoicegroup();
+               if (fallback != null) {
+                  sourceItem = fallback;
+                  source = fallback.Info;
+                  sourceTitle = fallback.Title;
+                  caution = $" The file's voicegroup address ({header.Voicegroup + BaseModel.PointerOffset:X8}) is not a voicegroup of this ROM, so the instruments were taken from {sourceTitle}: they may not be the ones the song was written for.";
+               }
+            }
+         }
          if (!VoicegroupEditor.TryCreateForVoices(model, token, source, voices, songName, out var address, out var anchorName, out var missing, out var error)) {
             warning = "The song is inserted, but it could not get its own voicegroup: " + error;
             return string.Empty;
@@ -968,7 +992,15 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          VoicegroupEditor.AssignToSong(model, token, headerAddress, address);
          var message = $" It has its own new voicegroup at {address:X6}{(anchorName == null ? string.Empty : " (" + anchorName + ")")}: the {voices.Count} instrument{(voices.Count == 1 ? string.Empty : "s")} the song uses (slot{(voices.Count == 1 ? " " : "s ")}{DescribeNumbers(voices)}) taken from {sourceTitle}, the other slots blank.";
          if (missing.Count > 0) message += $" {sourceTitle} has no instrument in slot{(missing.Count == 1 ? " " : "s ")}{DescribeNumbers(missing)}, so {(missing.Count == 1 ? "that slot stays" : "those slots stay")} blank.";
+         if (caution != null) { message += caution; warning = caution.Trim(); }
          return message;
+      }
+
+      /// <summary>The voicegroup name that a song exported by this tool gives next to its voicegroup address (".equ song_grp, 0x0909C7E8   @ voicegroup vs_gym_leader"), or null.</summary>
+      public static string FindVoicegroupHint(string songText) {
+         if (string.IsNullOrEmpty(songText)) return null;
+         var match = Regex.Match(songText, @"^[ \t]*\.equ[ \t]+\S+_grp[ \t]*,[^@\r\n]*@[ \t]*voicegroup[ \t]+([A-Za-z0-9_.]+)", RegexOptions.Multiline);
+         return match.Success ? match.Groups[1].Value : null;
       }
 
       private static string DescribeNumbers(IEnumerable<int> numbers) {

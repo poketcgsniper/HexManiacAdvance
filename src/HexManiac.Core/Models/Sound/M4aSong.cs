@@ -108,7 +108,9 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          var text = new StringBuilder();
          text.AppendLine("\t.include \"MPlayDef.s\"");
          text.AppendLine();
-         text.AppendLine($"\t.equ\t{name}_grp, 0x{header.Voicegroup + BaseModel.PointerOffset:X8}\t@ voicegroup");
+         // the address is only right for this ROM (and this build of it); the name lets the file find its voicegroup in another version of the ROM
+         var voicegroupName = VoicegroupNameAt(header.Voicegroup);
+         text.AppendLine($"\t.equ\t{name}_grp, 0x{header.Voicegroup + BaseModel.PointerOffset:X8}\t@ voicegroup{(voicegroupName == null ? string.Empty : " " + voicegroupName)}");
          text.AppendLine($"\t.equ\t{name}_pri, {header.Priority}");
          text.AppendLine(header.Reverb >= 0x80 ? $"\t.equ\t{name}_rev, reverb_set+{header.Reverb - 0x80}" : $"\t.equ\t{name}_rev, {header.Reverb}");
          text.AppendLine($"\t.equ\t{name}_mvl, 127");
@@ -176,6 +178,13 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          text.AppendLine();
          text.AppendLine("\t.end");
          return text.ToString();
+      }
+
+      /// <summary>The name of the voicegroup that starts at an address (the part of its anchor name after 'voicegroups.'), or null.</summary>
+      private string VoicegroupNameAt(int address) {
+         if (address < 0 || address >= model.Count) return null;
+         var anchor = model.GetAnchorFromAddress(-1, address);
+         return VoicegroupCatalog.IsVoicegroupAnchor(anchor, out var shortName) && shortName.All(c => c < 128 && (char.IsLetterOrDigit(c) || c == '_' || c == '.')) ? shortName : null;
       }
 
       /// <summary>

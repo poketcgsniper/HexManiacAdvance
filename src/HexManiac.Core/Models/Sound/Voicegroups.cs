@@ -355,7 +355,9 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          foreach (var voice in voices.Distinct().OrderBy(voice => voice)) {
             if (voice < 0 || voice >= VoicegroupCatalog.MaxEntries) continue;
             var sourceSlot = sourceAddress + voice * VoicegroupCatalog.EntrySize;
-            if (sourceAddress < 0 || voice >= sourceCount || sourceSlot + VoicegroupCatalog.EntrySize > model.Count) { missing?.Add(voice); continue; }
+            if (sourceAddress < 0 || sourceSlot + VoicegroupCatalog.EntrySize > model.Count) { missing?.Add(voice); continue; }
+            // a voice past the end of the voicegroup is read from whatever follows it, by the engine as well: it only counts as missing when that isn't an instrument either
+            if (voice >= sourceCount && !ToneData.TryRead(model, sourceSlot, out _)) { missing?.Add(voice); continue; }
             for (int i = 0; i < VoicegroupCatalog.EntrySize; i++) bytes[voice * VoicegroupCatalog.EntrySize + i] = model[sourceSlot + i];
          }
          return bytes;
