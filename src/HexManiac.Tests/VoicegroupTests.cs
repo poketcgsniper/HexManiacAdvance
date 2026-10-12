@@ -825,5 +825,172 @@ two_voices:
       }
 
       #endregion
+
+      #region Songs from the game (voices the song selects, and where they are copied from)
+
+      // mid2agb writes the first copy of a phrase that is repeated in the middle of the track and ends it with PEND: the engine ignores a PEND outside of a pattern and plays on
+      private const string PendSource = @"
+	.include ""MPlayDef.s""
+	.equ	pend_grp, voicegroup000
+	.section .rodata
+	.global	pend_song
+	.align	2
+pend_song_1:
+	.byte	VOICE , 1
+	.byte	VOL , 100
+pend_song_1_001:
+	.byte	N24 , Cn3 , v100
+	.byte	W24
+	.byte	PEND
+	.byte	VOICE , 3
+	.byte	N24 , En3 , v100
+	.byte	W24
+	.byte	FINE
+	.align	2
+pend_song:
+	.byte	1
+	.byte	0
+	.byte	0
+	.byte	0
+	.word	pend_grp
+	.word	pend_song_1
+	.end
+";
+
+      private const string PatternSource = @"
+	.include ""MPlayDef.s""
+	.equ	pat_grp, voicegroup000
+	.section .rodata
+	.global	pat_song
+	.align	2
+pat_song_1:
+	.byte	VOICE , 1
+	.byte	PATT
+	 .word	pat_song_1_001
+	.byte	VOICE , 3
+	.byte	N24 , Cn3 , v100
+	.byte	W24
+	.byte	FINE
+pat_song_1_001:
+	.byte	VOICE , 2
+	.byte	N24 , Cn3 , v100
+	.byte	W24
+	.byte	PEND
+	.byte	VOICE , 7
+	.byte	N24 , Cn3 , v100
+	.byte	W24
+	.byte	FINE
+	.align	2
+pat_song:
+	.byte	1
+	.byte	0
+	.byte	0
+	.byte	0
+	.word	pat_grp
+	.word	pat_song_1
+	.end
+";
+
+      private SortedSet<int> VoicesOf(string source) {
+         var song = SongAssembler.Assemble(source, 0x08004000, new Dictionary<string, int> { ["voicegroup000"] = 0x08000000 + GroupA });
+         Assert.True(song.Success, song.Error);
+         for (int i = 0; i < song.Bytes.Length; i++) Model[0x4000 + i] = song.Bytes[i];
+         Assert.True(SongHeader.TryRead(Model, 0x4000 + song.HeaderOffset, out var header));
+         return new SongDisassembler(Model).FindVoices(header);
+      }
+
+      [Fact]
+      public void FindVoices_GoesOnAfterAPendThatIsNotInAPattern() {
+         Assert.Equal(new[] { 1, 3 }, VoicesOf(PendSource));
+      }
+
+      [Fact]
+      public void FindVoices_StopsAtThePendOfAPattern_ButFindsTheVoicesInsideIt() {
+         Assert.Equal(new[] { 1, 2, 3 }, VoicesOf(PatternSource));
+      }
+
+      [Fact]
+      public void Tab_InsertSong_IntoANewSong_KeepsTheVoicesThatComeAfterAPhraseEndedByPend() {
+         var tab = CreateTab();
+         tab.AddNewSong.Execute(null);
+         var index = tab.SelectedSong.Index;
+         FileSystem.OpenFile = (description, options) => new LoadedFile("pend.s", Encoding.UTF8.GetBytes(PendSource));
+         tab.SelectedVoicegroup = Group(tab, GroupA);
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Empty(tabErrors);
+         tab.SelectedSong = tab.Songs[index];
+         var voicegroup = tab.SelectedSong.Header.Voicegroup;
+         Assert.Equal(Bytes(GroupA + 1 * ToneSize, ToneSize), Bytes(voicegroup + 1 * ToneSize, ToneSize));
+         Assert.Equal(Bytes(GroupA + 3 * ToneSize, ToneSize), Bytes(voicegroup + 3 * ToneSize, ToneSize)); // used to stay the blank square wave
+         Assert.NotEqual(VoicegroupCatalog.FillerTone(), Bytes(voicegroup + 3 * ToneSize, ToneSize));
+      }
+
+      [Fact]
+      public void BuildForVoices_CopiesAVoicePastTheEndOfTheVoicegroup_WhenAnInstrumentIsThereAsTheEngineReadsIt() {
+         // GroupB has two instruments; the engine would read slot 8 just the same, so the copy has to carry it
+         for (int i = 0; i < ToneSize; i++) Model[GroupB + 8 * ToneSize + i] = Model[GroupA + 1 * ToneSize + i];
+         var missing = new List<int>();
+
+         var bytes = VoicegroupEditor.BuildForVoices(Model, GroupB, 2, new[] { 0, 8, 9 }, missing);
+
+         Assert.Equal(Bytes(GroupB + 8 * ToneSize, ToneSize), bytes.Skip(8 * ToneSize).Take(ToneSize).ToArray());
+         Assert.Equal(new[] { 9 }, missing); // nothing there
+         Assert.Equal(VoicegroupCatalog.FillerTone(), bytes.Skip(9 * ToneSize).Take(ToneSize).ToArray());
+      }
+
+      [Fact]
+      public void Export_NamesTheVoicegroup_AndTheNameIsFoundAgain() {
+         var tab = CreateTab();
+         tab.SelectedSong = tab.Songs[2]; // uses sound.voicegroups.beta
+         Assert.Contains("@ voicegroup beta", tab.SongText);
+         Assert.Equal("beta", SoundTab.FindVoicegroupHint(tab.SongText));
+         Assert.Null(SoundTab.FindVoicegroupHint("\t.equ\tx_grp, 0x08000500\t@ voicegroup\r\n"));
+         Assert.Null(SoundTab.FindVoicegroupHint("\t.equ\tx_pri, 1\t@ voicegroup beta\r\n"));
+         Assert.Null(SoundTab.FindVoicegroupHint(null));
+      }
+
+      [Fact]
+      public void Tab_InsertSong_IntoANewSong_FindsTheVoicegroupByName_WhenTheAddressOfAnExportedSongIsFromAnotherBuild() {
+         var tab = CreateTab();
+         tab.SelectedSong = tab.Songs[2];
+         var text = tab.SongText.Replace("0x08000500", "0x08003000"); // where the voicegroup was in the ROM the file was saved from
+         Assert.Contains("0x08003000", text);
+         tab.AddNewSong.Execute(null);
+         var index = tab.SelectedSong.Index;
+         FileSystem.OpenFile = (description, options) => new LoadedFile("old.s", Encoding.UTF8.GetBytes(text));
+         tab.SelectedVoicegroup = Group(tab, GroupA);
+
+         tab.InsertSong.Execute(null);
+
+         tab.SelectedSong = tab.Songs[index];
+         var voicegroup = tab.SelectedSong.Header.Voicegroup;
+         Assert.NotEqual(GroupA, voicegroup);
+         Assert.NotEqual(GroupB, voicegroup);
+         Assert.Equal(Bytes(GroupB, ToneSize), Bytes(voicegroup, ToneSize)); // slot 0 comes from beta, not from the voicegroup picked in the tab
+         Assert.Equal(Bytes(GroupB + ToneSize, ToneSize), Bytes(voicegroup + ToneSize, ToneSize));
+         Assert.Contains(tabErrors, e => e.Contains("beta")); // and the user is told
+      }
+
+      [Fact]
+      public void Tab_InsertSong_IntoANewSong_WarnsWhenTheAddressOfTheFileIsNoVoicegroup_AndNothingElseNamesOne() {
+         var tab = CreateTab();
+         tab.SelectedSong = tab.Songs[2];
+         var text = tab.SongText.Replace("0x08000500", "0x08003000").Replace("@ voicegroup beta", "@ voicegroup");
+         tab.AddNewSong.Execute(null);
+         var index = tab.SelectedSong.Index;
+         FileSystem.OpenFile = (description, options) => new LoadedFile("old.s", Encoding.UTF8.GetBytes(text));
+         tab.SelectedVoicegroup = Group(tab, GroupA);
+
+         tab.InsertSong.Execute(null);
+
+         tab.SelectedSong = tab.Songs[index];
+         var voicegroup = tab.SelectedSong.Header.Voicegroup;
+         Assert.Equal(Bytes(GroupA, ToneSize), Bytes(voicegroup, ToneSize)); // the voicegroup chosen in the tab
+         Assert.Contains(tabErrors, e => e.Contains("not a voicegroup of this ROM"));
+      }
+
+      #endregion
    }
 }
