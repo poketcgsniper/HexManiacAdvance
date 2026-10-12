@@ -417,6 +417,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          prevPalPage = new(),
          nextPalPage = new();
 
+      /// <summary>
+      /// The address of the 'sprites' pointer (in a graphics-info table) that the current import command started from, or -1.
+      /// The table tool sets it for the duration of an import, so that overworld sprites that share data with other sprites can be copied before they are changed.
+      /// </summary>
+      public int SpriteSourceAddress { get; set; } = -1;
+
       private int spriteAddress;
       public int SpriteAddress {
          get => spriteAddress;
@@ -806,6 +812,18 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       private void ImportSpriteAndPalette(IFileSystem fileSystem, int[,] pixels, IReadOnlyList<short> palette, ImportType importType = ImportType.Unknown) {
          if (pixels == null) return;
+         if (importDepth == 0 && !(palette != null && pixels.GetLength(0) == PixelWidth && pixels.GetLength(1) == PixelHeight && IsShowingImage(Unindex(pixels, palette).image))) {
+            if (!PrepareOverworldSlot(fileSystem, importType)) return;
+         }
+         importDepth += 1;
+         try {
+            ImportSpriteAndPaletteCore(fileSystem, pixels, palette, importType);
+         } finally {
+            importDepth -= 1;
+         }
+      }
+
+      private void ImportSpriteAndPaletteCore(IFileSystem fileSystem, int[,] pixels, IReadOnlyList<short> palette, ImportType importType) {
          if (!TryValidate(pixels, palette, out var spriteRun, out var paletteRun)) return;
          var relatedSprites = paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>();
          var relatedPalettes = spriteRun.FindRelatedPalettes(model);
@@ -820,8 +838,22 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          }
       }
 
+      private int importDepth;
+
       private void ImportSpriteAndPalette(IFileSystem fileSystem, short[] image, int width, ImportType importType = ImportType.Unknown) {
          if (image == null) return;
+         if (importDepth == 0 && !(width == PixelWidth && image.Length / Math.Max(1, width) == PixelHeight && IsShowingImage(image))) {
+            if (!PrepareOverworldSlot(fileSystem, importType)) return;
+         }
+         importDepth += 1;
+         try {
+            ImportSpriteAndPaletteCore(fileSystem, image, width, importType);
+         } finally {
+            importDepth -= 1;
+         }
+      }
+
+      private void ImportSpriteAndPaletteCore(IFileSystem fileSystem, short[] image, int width, ImportType importType) {
          if (!TryValidate(image, out var spriteRun, out var paletteRun)) return;
          var height = image.Length / width;
          var relatedSprites = paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>();
@@ -883,6 +915,74 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          }
          return true;
       }
+
+      #region Overworld sprites that share data
+
+      /// <summary>
+      /// An overworld sprite slot can share its pictures and its palette with other slots (the spare slots of CUBE all start out as copies of the Pikachu).
+      /// If the import started from such a slot, the pictures are copied first so the other slots keep theirs, and the user can ask for a new palette
+      /// (a new row in the overworld palette table) so that the other slots keep their colors too.
+      /// Returns false if the import should not go on.
+      /// </summary>
+      private bool PrepareOverworldSlot(IFileSystem fileSystem, ImportType importType) {
+         if (SpriteSourceAddress < 0) return true;
+         var slot = OverworldSlotImport.Find(model, SpriteSourceAddress);
+         if (slot == null || slot.List.Start != spriteAddress || !slot.NeedsChoice) return true;
+
+         var createPalette = false;
+         if (importType == ImportType.Unknown) {
+            var tag = slot.CanCreatePalette ? OverworldSlotImport.FindFreeTag(slot) : -1;
+            var choice = AskAboutOverworldSlot(fileSystem, slot, tag);
+            if (choice < 0) return false; // cancelled
+            createPalette = choice == OverworldNewPaletteOption;
+         }
+         if (!createPalette && !slot.SharesPictures) return true; // the pictures are the sprite's own: just go on and use the shared palette
+
+         var result = OverworldSlotImport.Prepare(slot, viewPort.CurrentChange, createPalette);
+         if (!result.Success) {
+            viewPort.RaiseError(result.Error);
+            return false;
+         }
+         SpriteAddress = result.ListAddress;
+         if (result.PaletteAddress >= 0) PaletteAddress = result.PaletteAddress;
+         if (createPalette) {
+            var reflection = slot.ReflectionTag >= 0 && slot.ReflectionTag != OverworldSlot.NoPaletteTag ? $" Its reflection palette ({slot.ReflectionTag:X4}) was not changed." : string.Empty;
+            viewPort.RaiseMessage($"Created palette {result.PaletteId:X4} for this sprite. Other sprites keep their colors.{reflection}");
+         }
+         else if (result.CopiedPictures) viewPort.RaiseMessage("This sprite now has its own copy of the pictures. Other sprites keep theirs.");
+         return true;
+      }
+
+      public const int OverworldNewPaletteOption = 1, OverworldSharedPaletteOption = 2;
+
+      private int AskAboutOverworldSlot(IFileSystem fileSystem, OverworldSlot slot, int newTag) {
+         var prompt = new List<string>();
+         if (slot.SharesPictures) prompt.Add($"This sprite shares its pictures with {Math.Max(1, slot.OtherRowsOnList)} other sprite{(slot.OtherRowsOnList > 1 ? "s" : string.Empty)}.");
+         if (slot.SharesPalette) prompt.Add($"Palette {slot.PaletteId:X4} is also used by {slot.OtherRowsOnPalette} other sprite{(slot.OtherRowsOnPalette > 1 ? "s" : string.Empty)}.");
+         prompt.Add("How do you want to import?");
+         var options = new List<VisualOption>();
+         if (slot.CanCreatePalette && newTag >= 0) {
+            options.Add(new VisualOption {
+               Option = "New palette", Index = OverworldNewPaletteOption,
+               ShortDescription = $"Create palette {newTag:X4} for this sprite",
+               Description = (slot.SharesPictures ? "Give this sprite its own copy of the pictures and a new palette. " : "Give this sprite a new palette. ") + "No other sprite changes.",
+            });
+         }
+         options.Add(new VisualOption {
+            Option = slot.SharesPictures ? "Own pictures, shared palette" : "Shared palette", Index = OverworldSharedPaletteOption,
+            ShortDescription = $"Keep using palette {slot.PaletteId:X4}",
+            Description = (slot.SharesPictures ? "Give this sprite its own copy of the pictures, but keep the palette that the other sprites use. " : string.Empty) + "You can choose how the shared palette changes next.",
+         });
+         return fileSystem.ShowOptions("Import Sprite", string.Join(" ", prompt), null, options.ToArray());
+      }
+
+      /// <summary>The frames of an overworld sprite list that is being imported into are not "other" images that the palette would break.</summary>
+      private IReadOnlyList<ISpriteRun> ExcludeOwnFrames(ISpriteRun spriteRun, IReadOnlyList<ISpriteRun> dependentSprites) {
+         if (spriteRun is not OverworldSpriteListRun list) return dependentSprites;
+         return dependentSprites.Where(sprite => !(sprite.PointerSources ?? SortedSpan<int>.None).Any(source => source >= list.Start && source < list.Start + list.Length)).ToList();
+      }
+
+      #endregion
 
       private short[][] SplitHorizontally(short[] image, int width, int count) {
          var images = new short[count][];
@@ -956,7 +1056,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       private Point ImportSinglePageSpriteAndPalette(IFileSystem fileSystem, int[,] pixels, IReadOnlyList<short> palette, ISpriteRun spriteRun, IPaletteRun paletteRun, ImportType importType, bool allowSpriteEdits = true) {
          var result = new Point(spriteRun.SpriteFormat.TileWidth * 8, spriteRun.SpriteFormat.TileHeight * 8);
 
-         var dependentSprites = paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>();
+         var dependentSprites = ExcludeOwnFrames(spriteRun, paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>());
          if (dependentSprites.Count == 0 || // no sprites are associated with this palette. So just use the currently loaded sprite.
             (dependentSprites.Count == 1 && dependentSprites[0].Start == spriteRun.Start && (spriteRun.Pages == 1 || spriteRun.Pages == paletteRun.Pages)) || // 'I am the only sprite' case
             (dependentSprites.Count == 1 && dependentSprites[0] is ITilesetRun && spriteRun is ITilemapRun) // 'My tileset is the only sprite' case
@@ -991,7 +1091,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       private Point ImportSinglePageSpriteAndPalette(IFileSystem fileSystem, short[] image, ISpriteRun spriteRun, IPaletteRun paletteRun, ImportType importType, bool allowSpriteEdits = true) {
          var result = new Point(spriteRun.SpriteFormat.TileWidth * 8, spriteRun.SpriteFormat.TileHeight * 8);
 
-         var dependentSprites = paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>();
+         var dependentSprites = ExcludeOwnFrames(spriteRun, paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>());
          if (dependentSprites.Count == 0 || // no sprites are associated with this palette. So just use the currently loaded sprite.
             (dependentSprites.Count == 1 && dependentSprites[0].Start == spriteRun.Start && (spriteRun.Pages == 1 || spriteRun.Pages == paletteRun.Pages)) || // 'I am the only sprite' case
             (dependentSprites.Count == 1 && dependentSprites[0] is ITilesetRun && spriteRun is ITilemapRun) // 'My tileset is the only sprite' case
@@ -1035,7 +1135,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             }
          }
 
-         var dependentSprites = paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>();
+         var dependentSprites = ExcludeOwnFrames(spriteRun, paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>());
          if (dependentSprites.Count == 0 || // no sprites are associated with this palette. So just use the currently loaded sprite.
             (dependentSprites.Count == 1 && dependentSprites[0].Start == spriteRun.Start) || // 'I am the only sprite' case
             (dependentSprites.Count == 1 && dependentSprites[0] is ITilesetRun && spriteRun is ITilemapRun) // 'My tileset is the only sprite' case
@@ -1075,7 +1175,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             Array.Copy(image, i * PixelWidth * PixelHeight, imageForPage[i], 0, PixelWidth * PixelHeight);
          }
 
-         var dependentSprites = paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>();
+         var dependentSprites = ExcludeOwnFrames(spriteRun, paletteRun?.FindDependentSprites(model) ?? new List<ISpriteRun>());
          if (dependentSprites.Count == 0 || // no sprites are associated with this palette. So just use the currently loaded sprite.
             (dependentSprites.Count == 1 && dependentSprites[0].Start == spriteRun.Start) || // 'I am the only sprite' case
             (dependentSprites.Count == 1 && dependentSprites[0] is ITilesetRun && spriteRun is ITilemapRun) // 'My tileset is the only sprite' case

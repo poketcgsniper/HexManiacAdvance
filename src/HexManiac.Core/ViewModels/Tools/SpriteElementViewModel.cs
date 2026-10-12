@@ -180,7 +180,12 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             if (palette != null) spriteTool.PaletteAddress = palette.Start;
             spriteTool.PalettePage = CurrentPalette;
             if (palettes.Count > CurrentPalette && palettes[CurrentPalette].Pages == sRun.Pages) spriteTool.PalettePage = CurrentPage;
-            command.Execute(fs);
+            spriteTool.SpriteSourceAddress = Start; // (lets the import copy shared overworld sprite data before it changes it)
+            try {
+               command.Execute(fs);
+            } finally {
+               spriteTool.SpriteSourceAddress = -1;
+            }
          }
       }
 
