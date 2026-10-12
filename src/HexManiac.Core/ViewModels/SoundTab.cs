@@ -517,8 +517,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private bool newSongsGetOwnVoicegroup = true;
       /// <summary>
-      /// When set (it starts set), a song put into an empty slot (one that 'Add new song' made, or any song without tracks) gets a voicegroup of its own, made from the instruments the song uses:
-      /// a MIDI file's General MIDI programs, or the voices a .s file selects, are taken from the voicegroup the song would have used, and every other slot is filled with a blank instrument.
+      /// When set (it starts set), a song that is new gets a voicegroup of its own, made from the instruments the song uses: a song put into an empty slot (one that 'Add new song' made, or any song without tracks)
+      /// and a song added at the end of the table. A MIDI file's General MIDI programs, or the voices a .s file selects, are taken from the voicegroup the song would have used, and every other slot is filled with a blank instrument.
       /// Replacing a song that has tracks never does this on its own (InsertWithNewVoicegroup is the way to ask for it).
       /// </summary>
       public bool NewSongsGetOwnVoicegroup { get => newSongsGetOwnVoicegroup; set => Set(ref newSongsGetOwnVoicegroup, value); }
@@ -709,6 +709,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (table == null) { error = $"This ROM has no {SongTable} table."; return null; }
          if (!asNewSong && selectedSong == null) { error = "Select a song to replace, or choose 'add as new song'."; return null; }
 
+         var makesOwnVoicegroup = !InsertWithNewVoicegroup && NewSongsGetOwnVoicegroup && (asNewSong || IsEmptySlot(selectedSong));
+         // a new song that names a voicegroup this ROM has (voicegroup_littleroot for sound.voicegroups.littleroot) is made for that one, unless the user picked a voicegroup to insert with
+         VoicegroupItem voicegroupNamedInFile(string symbol) {
+            if (!makesOwnVoicegroup || knownSymbols != null || OverrideVoicegroup || voicegroupPickedByUser) return null;
+            var info = VoicegroupEditor.FindByName(Voicegroups.Select(group => group.Info), symbol);
+            return info == null ? null : Voicegroups.FirstOrDefault(group => group.Address == info.Address);
+         }
+
          // first pass: find out how big the song is and which symbols it needs
          var externals = new Dictionary<string, int>();
          if (knownSymbols != null) foreach (var pair in knownSymbols) externals[pair.Key] = pair.Value;
@@ -720,7 +728,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                // the voicegroup is the symbol of the header's voicegroup word, or one that is named like a voicegroup. Any other open symbol (the label of a GOTO or PATT,
                // for example) is a mistake in the file: binding it to the voicegroup would make the song jump into the instruments.
                if (symbol == result.VoicegroupSymbol || symbol.Contains("grp", StringComparison.OrdinalIgnoreCase) || symbol.Contains("voice", StringComparison.OrdinalIgnoreCase)) {
-                  externals[symbol] = voicegroup.Address + BaseModel.PointerOffset;
+                  externals[symbol] = (voicegroupNamedInFile(symbol) ?? voicegroup).Address + BaseModel.PointerOffset;
                } else {
                   unresolved.Add(symbol);
                }
@@ -765,8 +773,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             } else {
                warning = "The song is inserted, but it could not get its own voicegroup: " + voicegroupError;
             }
-         } else if (!asNewSong && NewSongsGetOwnVoicegroup && IsEmptySlot(selectedSong)) {
-            voicegroupMessage = CreateVoicegroupFromSongInstruments(token, headerAddress, address, bytes.Length, result.SongName ?? selectedSong.Name, out warning);
+         } else if (makesOwnVoicegroup) {
+            var voicegroupSongName = !string.IsNullOrEmpty(result.SongName) ? result.SongName : !string.IsNullOrEmpty(songName) ? songName : selectedSong?.Name;
+            voicegroupMessage = CreateVoicegroupFromSongInstruments(token, headerAddress, address, bytes.Length, voicegroupSongName, out warning);
          }
 
          int index;

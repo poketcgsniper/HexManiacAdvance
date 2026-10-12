@@ -54,6 +54,11 @@ namespace HavenSoft.HexManiac.WPF.Controls {
          e.Handled = true;
       }
 
+      // a song the view model selects (the one 'Add new song' just made, at the end of a long list) has to be brought into view
+      private void SongSelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e) {
+         if (sender is System.Windows.Controls.ListBox list && list.SelectedItem != null) list.ScrollIntoView(list.SelectedItem);
+      }
+
       private void CryDoubleClick(object sender, MouseButtonEventArgs e) {
          if (ViewModel?.PlayCry.CanExecute(null) == true) ViewModel.PlayCry.Execute(null);
       }
