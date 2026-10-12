@@ -1156,11 +1156,17 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       private void InsertMidiFromFile(LoadedFile file) {
          var asNew = InsertAsNewSong;
          var musicPlayer = asNew ? InsertMusicPlayer : selectedSong?.MusicPlayer ?? 0;
+         var general = !voicegroupPickedByUser && !OverrideVoicegroup && FindAllInstrumentsVoicegroup() != null; // ChooseVoicegroupForMidi takes All Instruments then
          var song = ConvertAndInsertMidi(file, asNew, true, out var error);
          if (song == null) { OnError?.Invoke(this, error); return; }
          if (song.Warning != null) OnError?.Invoke(this, song.Warning);
          if (song.TableMovedTo >= 0) OnMessage?.Invoke(this, $"The song table was moved to {song.TableMovedTo:X6} to make room.");
          Status = $"Converted {file.Name}: {song.Tracks} track{(song.Tracks == 1 ? string.Empty : "s")}, {ToneData.FormatSize(song.Size)}; inserted as song {song.Index}{(string.IsNullOrEmpty(song.Name) ? string.Empty : " (" + song.Name + ")")} at {song.Address:X6}, instruments from {song.PlayedWith}.{song.VoicegroupMessage}";
+         // A MIDI file is read as General MIDI when nothing else was chosen. A MIDI file from a game's own source folder (pokeemerald's sound/songs/midi, for example) is not:
+         // its programs are the slots of that game's voicegroup, so the General MIDI instruments make it sound like another song.
+         if (general) {
+            Status += " Its instruments are General MIDI programs. If the file comes from a game's own folder (its programs are slots of that game's voicegroup), undo, pick that voicegroup under 'Insert with voicegroup' and insert the file again.";
+         }
          OnMessage?.Invoke(this, Status + (asNew ? $" Play it with 'playbgm {song.Index}' / 'playse {song.Index}'." : string.Empty) + TrackLimitNote(song.Tracks, musicPlayer));
       }
 

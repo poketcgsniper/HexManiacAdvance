@@ -861,6 +861,7 @@ t:
          Assert.StartsWith("Converted My Song.mid: 1 track, ", tab.Status);
          Assert.Contains("inserted as song 0", tab.Status);
          Assert.Contains("instruments from all_instruments", tab.Status);
+         Assert.Contains("General MIDI programs", tab.Status); // and the way out for a MIDI file from a game's own folder
       }
 
       [Fact]
@@ -881,6 +882,7 @@ t:
          tab.OverrideVoicegroup = true;
          tab.InsertSong.Execute(null);
          Assert.Equal(Other, tab.Songs[3].Header.Voicegroup);
+         Assert.DoesNotContain("General MIDI programs", tab.Status); // the user already chose
          Assert.Empty(tabErrors);
       }
 
