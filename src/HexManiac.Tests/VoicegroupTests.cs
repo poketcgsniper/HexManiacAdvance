@@ -724,5 +724,104 @@ inserted:
       }
 
       #endregion
+
+      #region Add new song
+
+      private const string TwoVoiceSource = @"
+	.include ""MPlayDef.s""
+	.equ	two_grp, voicegroup000
+	.section .rodata
+	.global	two_voices
+	.align	2
+two_voices_1:
+	.byte	VOICE , 1
+	.byte	VOL , 100
+	.byte	N24 , Cn3 , v100
+	.byte	W24
+	.byte	VOICE , 3
+	.byte	N24 , En3 , v100
+	.byte	W24
+	.byte	FINE
+	.align	2
+two_voices:
+	.byte	1
+	.byte	0
+	.byte	0
+	.byte	0
+	.word	two_grp
+	.word	two_voices_1
+	.end
+";
+
+      [Fact]
+      public void Tab_AddNewSong_AppendsAnEmptySongAndSelectsIt() {
+         var tab = CreateTab();
+         var before = SongCount;
+         var group = HeaderVoicegroup(0);
+
+         Assert.True(tab.AddNewSong.CanExecute(null));
+         tab.AddNewSong.Execute(null);
+
+         Assert.Empty(tabErrors);
+         Assert.Equal(before + 1, SongCount);
+         Assert.Equal(before + 1, tab.Songs.Count);
+         Assert.Equal(before, tab.SelectedSong.Index);
+         Assert.Equal(0, tab.SelectedSong.Header.TrackCount); // plays nothing
+         Assert.Equal(group, HeaderVoicegroup(0)); // nothing else changed
+         Assert.Equal(headers[2], Model.ReadPointer(TableAddress + 16));
+
+         // one user action is one undo step
+         tab.Undo.Execute(null);
+         Assert.Equal(before, SongCount);
+      }
+
+      [Fact]
+      public void Tab_InsertSong_IntoANewSong_GivesItAVoicegroupWithOnlyItsInstruments() {
+         var tab = CreateTab();
+         tab.AddNewSong.Execute(null);
+         var index = tab.SelectedSong.Index;
+         FileSystem.OpenFile = (description, options) => new LoadedFile("two voices.s", Encoding.UTF8.GetBytes(TwoVoiceSource));
+         tab.SelectedVoicegroup = Group(tab, GroupA);
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Empty(tabErrors);
+         tab.SelectedSong = tab.Songs[index];
+         var voicegroup = tab.SelectedSong.Header.Voicegroup;
+         Assert.NotEqual(GroupA, voicegroup);
+         Assert.NotEqual(GroupB, voicegroup);
+         Assert.Equal(128, tab.SongVoicegroup.EntryCount);
+         var filler = VoicegroupCatalog.FillerTone();
+         for (int slot = 0; slot < 128; slot++) {
+            var expected = slot == 1 || slot == 3 ? Bytes(GroupA + slot * ToneSize, ToneSize) : filler;
+            Assert.Equal(expected, Bytes(voicegroup + slot * ToneSize, ToneSize));
+         }
+         Assert.Equal(GroupA, HeaderVoicegroup(0)); // the shared voicegroups and the other songs are untouched
+         Assert.Equal(GroupA, HeaderVoicegroup(1));
+         Assert.Equal(GroupB, HeaderVoicegroup(2));
+         Assert.StartsWith("sound.voicegroups.", Model.GetAnchorFromAddress(-1, voicegroup));
+
+         // song and voicegroup are one undo step
+         tab.Undo.Execute(null);
+         Assert.True(string.IsNullOrEmpty(Model.GetAnchorFromAddress(-1, voicegroup)));
+      }
+
+      [Fact]
+      public void Tab_InsertSong_IntoANewSong_WithTheOptionOff_UsesTheChosenVoicegroup() {
+         var tab = CreateTab();
+         tab.AddNewSong.Execute(null);
+         var index = tab.SelectedSong.Index;
+         tab.NewSongsGetOwnVoicegroup = false;
+         FileSystem.OpenFile = (description, options) => new LoadedFile("two voices.s", Encoding.UTF8.GetBytes(TwoVoiceSource));
+         tab.SelectedVoicegroup = Group(tab, GroupA);
+
+         tab.InsertSong.Execute(null);
+
+         Assert.Empty(tabErrors);
+         tab.SelectedSong = tab.Songs[index];
+         Assert.Equal(GroupA, tab.SelectedSong.Header.Voicegroup);
+      }
+
+      #endregion
    }
 }
