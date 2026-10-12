@@ -1494,6 +1494,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
             AddButton(() => ShortcutIcons.BrendanStanding(model) ?? FindItemIcon(model, "Running", "Mach Bike", "Bike"), HardcodeTablesModel.OverworldSprites, "OW Sprites");
          }
+         // the field effects (grass, ripples, shadows, dust...) with their palettes: one table, named for people (graphics.overworld.fieldeffects; older files call it graphics.overworld.sprites2)
+         if (FieldEffects.FindTableName(model) is string fieldEffectTable && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Field Effects")) {
+            AddButton(() => FieldEffects.ButtonPicture(model), fieldEffectTable, "Field\nEffects");
+         }
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
             var animTiles = AddButton(() => FindItemIcon(model, "Wailmer Pail", "Pail", "Watering"), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles");
             animTiles.SetAnimationSource(() => ShortcutIcons.FlowerAnimation(model)); // the animated flower; the old picture stays if the ROM has no flower
