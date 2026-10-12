@@ -137,6 +137,21 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
       public const string TableFormat = "[type.|h key. length. pan_sweep.|h wave_or_group::|h attack. decay. sustain. release.]128";
       public const string AnchorPrefix = "sound.voicegroups.";
 
+      /// <summary>How many of the first 'count' instruments of the voicegroup at 'address' are real ones, that is, not the games' unused-instrument filler.</summary>
+      public static int CountRealInstruments(IDataModel model, int address, int count) {
+         if (address < 0) return 0;
+         var filler = FillerTone();
+         int real = 0;
+         for (int slot = 0; slot < count && slot < MaxEntries; slot++) {
+            var start = address + slot * EntrySize;
+            if (start + EntrySize > model.Count) break;
+            bool same = true;
+            for (int i = 0; i < EntrySize && same; i++) same = model[start + i] == filler[i];
+            if (!same) real++;
+         }
+         return real;
+      }
+
       /// <summary>The number of instruments in a row, from the start, that look valid.</summary>
       public static int CountEntries(IDataModel model, int address, int maxEntries = MaxEntries) {
          if (address < 0) return 0;
@@ -306,6 +321,71 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          anchorName = null;
          if (!TryAllocate(model, token, VoicegroupCatalog.Length, out address, out error)) return false;
          var bytes = BuildCopy(model, source?.Address ?? -1, source?.CopyCount ?? 0);
+         WriteNewVoicegroup(model, token, address, bytes, songName, out anchorName);
+         return true;
+      }
+
+      /// <summary>
+      /// The voicegroup that a song file means by a symbol: the .s files of pokeemerald call it voicegroup_littleroot, and this ROM may name the voicegroup sound.voicegroups.littleroot.
+      /// The symbol, or the symbol without its 'voicegroup_' / 'voicegroup' start, is compared with the names of the voicegroups (ignoring case). Null when none has that name.
+      /// </summary>
+      public static VoicegroupInfo FindByName(IEnumerable<VoicegroupInfo> voicegroups, string symbol) {
+         if (string.IsNullOrWhiteSpace(symbol)) return null;
+         var candidates = new List<string> { symbol };
+         foreach (var prefix in new[] { "voicegroup_", "voicegroup" }) {
+            if (symbol.Length > prefix.Length && symbol.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) { candidates.Add(symbol.Substring(prefix.Length)); break; }
+         }
+         foreach (var candidate in candidates) {
+            var found = voicegroups.FirstOrDefault(group => !group.IsCustom && group.Name != null && string.Equals(group.Name, candidate, StringComparison.OrdinalIgnoreCase));
+            if (found != null) return found;
+         }
+         return null;
+      }
+
+      /// <summary>
+      /// The 128 instruments of a new voicegroup that holds only the instruments a song uses: slot n is a copy of slot n of the source for every voice n in 'voices',
+      /// and every other slot is the games' unused-instrument filler. So the song sounds exactly as it does with the source voicegroup, but it can be changed without touching anything else.
+      /// A voice that the source does not have (past its end, or no source) stays filler and is added to 'missing'.
+      /// </summary>
+      public static byte[] BuildForVoices(IDataModel model, int sourceAddress, int sourceCount, IEnumerable<int> voices, List<int> missing = null) {
+         var bytes = new byte[VoicegroupCatalog.Length];
+         var filler = VoicegroupCatalog.FillerTone();
+         for (int slot = 0; slot < VoicegroupCatalog.MaxEntries; slot++) Array.Copy(filler, 0, bytes, slot * VoicegroupCatalog.EntrySize, filler.Length);
+         sourceCount = Math.Max(0, Math.Min(sourceCount, VoicegroupCatalog.MaxEntries));
+         foreach (var voice in voices.Distinct().OrderBy(voice => voice)) {
+            if (voice < 0 || voice >= VoicegroupCatalog.MaxEntries) continue;
+            var sourceSlot = sourceAddress + voice * VoicegroupCatalog.EntrySize;
+            if (sourceAddress < 0 || voice >= sourceCount || sourceSlot + VoicegroupCatalog.EntrySize > model.Count) { missing?.Add(voice); continue; }
+            for (int i = 0; i < VoicegroupCatalog.EntrySize; i++) bytes[voice * VoicegroupCatalog.EntrySize + i] = model[sourceSlot + i];
+         }
+         return bytes;
+      }
+
+      /// <summary>
+      /// Puts a new 128-instrument voicegroup that holds the instruments 'voices' of 'source' (see BuildForVoices) into free space and gives it a named anchor.
+      /// Nothing is changed when this returns false.
+      /// </summary>
+      public static bool TryCreateForVoices(IDataModel model, ModelDelta token, VoicegroupInfo source, IEnumerable<int> voices, string songName, out int address, out string anchorName, out IReadOnlyList<int> missingVoices, out string error) {
+         anchorName = null;
+         address = -1;
+         missingVoices = Array.Empty<int>();
+         voices = voices.Where(voice => voice >= 0 && voice < VoicegroupCatalog.MaxEntries).Distinct().ToList();
+         var missing = new List<int>();
+         var sourceCount = source?.IsCustom == true ? 0 : source?.CopyCount ?? 0;
+         var bytes = BuildForVoices(model, source?.Address ?? -1, sourceCount, voices, missing);
+         if (missing.Count > 0 && missing.Count == voices.Count()) {
+            // nothing to carry over: a voicegroup of fillers would only make the song silent
+            missingVoices = missing;
+            error = "the voicegroup it was written for has none of the instruments it asks for";
+            return false;
+         }
+         if (!TryAllocate(model, token, VoicegroupCatalog.Length, out address, out error)) return false;
+         WriteNewVoicegroup(model, token, address, bytes, songName, out anchorName);
+         missingVoices = missing;
+         return true;
+      }
+
+      private static void WriteNewVoicegroup(IDataModel model, ModelDelta token, int address, byte[] bytes, string songName, out string anchorName) {
          token.ChangeData(model, address, bytes);
          anchorName = UniqueAnchorName(model, songName);
          var parse = ArrayRun.TryParse(model, VoicegroupCatalog.TableFormat, address, SortedSpan<int>.None, out var table);
@@ -314,7 +394,6 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
          } else {
             model.ObserveAnchorWritten(token, anchorName, table);
          }
-         return true;
       }
 
       /// <summary>Gives the voicegroup at an address a name in the metadata (without giving it a table format: its length isn't known for sure).</summary>

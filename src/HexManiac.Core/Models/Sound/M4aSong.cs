@@ -179,6 +179,38 @@ namespace HavenSoft.HexManiac.Core.Models.Sound {
       }
 
       /// <summary>
+      /// The voices (the numbers a voicegroup is indexed by) that the song's tracks select with VOICE commands, including the ones in patterns and in jumped-to blocks.
+      /// A track is followed the way the sound engine plays it: to its FINE, a GOTO ends the walk of that block (the command after it can't be reached from it), and PATT / GOTO / REPT targets are walked as well.
+      /// Every address is looked at once, so loops can't run on.
+      /// </summary>
+      public SortedSet<int> FindVoices(SongHeader header) {
+         var voices = new SortedSet<int>();
+         if (header == null) return voices;
+         var visited = new HashSet<int>();
+         var pending = new Queue<int>(header.Tracks);
+         while (pending.Count > 0) {
+            int address = pending.Dequeue();
+            int runningStatus = 0;
+            int guard = 0x40000;
+            while (address >= 0 && address < model.Count && guard-- > 0) {
+               if (!visited.Add(address)) break;
+               int command = model[address];
+               int length = CommandLength(address, ref runningStatus, out int effective);
+               int argStart = command < 0x80 ? address : address + 1;
+               int argCount = address + length - argStart;
+               if (effective == 0xBD && argCount > 0 && model[argStart] < 0x80) voices.Add(model[argStart]);
+               if (effective == 0xB2 || effective == 0xB3 || effective == 0xB5) {
+                  var target = model.ReadPointer(argStart + (effective == 0xB5 ? 1 : 0));
+                  if (target >= 0 && target < model.Count) pending.Enqueue(target);
+               }
+               address += length;
+               if (effective == 0xB1 || effective == 0xB2 || effective == 0xB4) break; // FINE, GOTO, PEND: nothing after them is played from here
+            }
+         }
+         return voices;
+      }
+
+      /// <summary>
       /// Returns the address just after the FINE command (or after the last readable byte).
       /// </summary>
       private int Walk(int start, bool stopAtPatternEnd, Action<int, int> onCommand) {
