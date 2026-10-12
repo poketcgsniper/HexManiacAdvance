@@ -246,6 +246,67 @@
                         </ItemsControl>
                      </StackPanel>
                   </DataTemplate>
+                  <DataTemplate DataType="{x:Type hsg3hvmtr:FieldEffectElementViewModel}">
+                     <StackPanel Margin="2,8,2,0" Visibility="{Binding Visible, Converter={StaticResource BoolToVisibility}}">
+                        <TextBlock Text="{Binding Title}" FontWeight="Bold"/>
+                        <TextBlock Text="{Binding Info}" Foreground="{DynamicResource Secondary}" FontSize="10" TextWrapping="Wrap" Margin="0,2,0,4"/>
+                        <ItemsControl ItemsSource="{Binding Frames}" Background="{DynamicResource Backlight}" Margin="0,0,0,4">
+                           <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate>
+                                 <WrapPanel/>
+                              </ItemsPanelTemplate>
+                           </ItemsControl.ItemsPanel>
+                           <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                 <hsg3hv:PixelImage Margin="2" TransparentBrush="{DynamicResource Backlight}"/>
+                              </DataTemplate>
+                           </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding PaletteTitle}" Foreground="{DynamicResource Secondary}" FontSize="10" TextWrapping="Wrap"/>
+                        <hsg3hv:PixelImage DataContext="{Binding PaletteImage}" HorizontalAlignment="Left" Margin="0,2" TransparentBrush="{DynamicResource Backlight}"/>
+                        <hsg3hv:AngleButton Margin="0,2" Direction="Out" HorizontalAlignment="Stretch" Content="Edit this palette" Command="{Binding OpenPalette}"
+                                            ToolTip="Jump to the palette this effect is drawn with, to change its colours"/>
+                        <DockPanel Margin="0,2">
+                           <Button DockPanel.Dock="Right" Content="&#8635;" Command="{Binding Refresh}" Padding="6,1" Margin="4,0,0,0" ToolTip="Redraw every field effect"/>
+                           <TextBlock Text="Find:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                           <TextBox Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" ToolTip="Filter by number or name"/>
+                        </DockPanel>
+                        <TextBlock Text="All field effects (click one to edit it):" Foreground="{DynamicResource Secondary}" FontSize="10" Margin="0,2,0,0"/>
+                        <ItemsControl ItemsSource="{Binding Elements}" Background="{DynamicResource Backlight}">
+                           <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate>
+                                 <WrapPanel/>
+                              </ItemsPanelTemplate>
+                           </ItemsControl.ItemsPanel>
+                           <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                 <Button Command="{Binding SelectCommand}" CommandParameter="{Binding}"
+                                         ToolTip="{Binding Label}" Margin="1" Padding="2" BorderThickness="2" Background="Transparent">
+                                    <Button.Style>
+                                       <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                          <Setter Property="BorderBrush" Value="Transparent"/>
+                                          <Style.Triggers>
+                                             <DataTrigger Binding="{Binding Selected}" Value="True">
+                                                <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                             </DataTrigger>
+                                             <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                                                <Setter Property="Opacity" Value=".4"/>
+                                             </DataTrigger>
+                                          </Style.Triggers>
+                                       </Style>
+                                    </Button.Style>
+                                    <StackPanel Width="68">
+                                       <Grid Height="48">
+                                          <hsg3hv:PixelImage HorizontalAlignment="Center" VerticalAlignment="Bottom" TransparentBrush="{DynamicResource Backlight}"/>
+                                       </Grid>
+                                       <TextBlock Text="{Binding Index}" HorizontalAlignment="Center" FontSize="9"/>
+                                    </StackPanel>
+                                 </Button>
+                              </DataTemplate>
+                           </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                     </StackPanel>
+                  </DataTemplate>
                   <DataTemplate DataType="{x:Type hsg3hvmtr:ButtonArrayElementViewModel}">
                      <hsg3hv:AngleButton Margin="2,2" Direction="Out" HorizontalAlignment="Stretch"
                                  Content="{Binding Text}" ToolTip="{Binding ToolTipText}" Command="{Binding Command}"

@@ -92,7 +92,12 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          // if there was no height/width found, assume that it's square and based on the first element length
          // (the size is a u16: pokeemerald-expansion uses the next byte as a 'relativeFrames' flag)
          var pixelCount = model.ReadMultiByteValue(start + 4, 2) * 2; // number of pixels is twice the number of bytes for all OW sprites
-         bool adjustDimensions = true;
+         // a sprite template (the field effects) has no width or height field: its shape is in the OAM data the template points at.
+         // Guessing a square from the byte count draws every 32x8 / 16x32 / ... picture with its tiles in the wrong places.
+         int oamWidth = 0, oamHeight = 0;
+         var shapeFromOam = widthOffset < 0 && heightOffset < 0 && TryReadOamShape(model, parent, elementStart, listOffset, pixelCount, out oamWidth, out oamHeight);
+         if (shapeFromOam) (width, height) = (oamWidth, oamHeight);
+         bool adjustDimensions = !shapeFromOam;
          if (width == 0) { width = (int)Math.Sqrt(pixelCount); adjustDimensions = true; }
          if (height == 0) { height = width; adjustDimensions = true; }
          var tileWidth = (int)Math.Max(1, Math.Ceiling(width / 8.0));
@@ -136,7 +141,6 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
          if (compressedFrames > 0) {
             format = string.IsNullOrEmpty(hint) ? $"`lzs4x{tileWidth}x{tileHeight * compressedFrames}`" : $"`lzs4x{tileWidth}x{tileHeight * compressedFrames}|{hint}`";
          }
-         segments[0] = new ArrayRunPointerSegment(model.FormatRunFactory, "sprite", format);
 
          // calculate the element count
          var nextAnchorStart = model.GetNextAnchor(Start + 1).Start;
@@ -164,8 +168,89 @@ namespace HavenSoft.HexManiac.Core.Models.Runs {
 
          ElementCount = Math.Max(ElementCount, 1);
          Length = Math.Max(ElementLength, Length);
-         SpriteFormat = new SpriteFormat(4, tileWidth, compressedFrames > 0 ? tileHeight * compressedFrames : tileHeight, hint);
+
+         // pokeemerald-expansion 'relative frames', not compressed: the one entry points at the first frame of a sheet and the other frames follow it.
+         // Nothing in the list says how many there are, but the animations of the template do (the biggest image they show): draw the sheet as one tall sprite.
+         var sheetFrames = 0;
+         if (compressedFrames == 0 && ElementCount == 1 && relativeFrames && firstFrame >= 0 && byteLength > 0 && listOffset >= 4) {
+            sheetFrames = CountAnimationFrames(model, parent, elementStart, listOffset);
+            if (sheetFrames > MaxSheetFrames || firstFrame + (long)sheetFrames * byteLength > model.Count) sheetFrames = 0;
+         }
+         if (sheetFrames > 1) {
+            format = string.IsNullOrEmpty(hint) ? $"`ucs4x{tileWidth}x{tileHeight * sheetFrames}`" : $"`ucs4x{tileWidth}x{tileHeight * sheetFrames}|{hint}`";
+         }
+         segments[0] = new ArrayRunPointerSegment(model.FormatRunFactory, "sprite", format);
+         var frameStack = Math.Max(compressedFrames, sheetFrames);
+         SpriteFormat = new SpriteFormat(4, tileWidth, frameStack > 1 ? tileHeight * frameStack : tileHeight, hint);
          ElementNames = ElementCount.Range().Select(i => string.Empty).ToList();
+      }
+
+      private const int MaxSheetFrames = 64;
+
+      /// <summary>
+      /// The shapes an OAM entry can have: [shape][size] -> (width, height) in pixels. Shape 3 does not exist.
+      /// Attribute 0 (u16) holds the shape in bits 14-15, attribute 1 (u16) holds the size in bits 14-15.
+      /// </summary>
+      private static readonly (int width, int height)[][] OamShapes = {
+         new[] { (8, 8), (16, 16), (32, 32), (64, 64) },
+         new[] { (16, 8), (32, 8), (32, 16), (64, 32) },
+         new[] { (8, 16), (8, 32), (16, 32), (32, 64) },
+      };
+
+      /// <summary>The pixel size of an OAM entry (a pair of attribute words), or false if the shape is not one a sprite can have.</summary>
+      public static bool TryGetOamSize(int attribute0, int attribute1, out int width, out int height) {
+         width = height = 0;
+         var shape = (attribute0 >> 14) & 3;
+         var size = (attribute1 >> 14) & 3;
+         if (shape >= OamShapes.Length) return false;
+         (width, height) = OamShapes[shape][size];
+         return true;
+      }
+
+      /// <summary>
+      /// A sprite template is { tileTag, paletteTag, oam, anims, images, affineAnims, callback }: the two pointers in front of the image list are the OAM data and the animations.
+      /// Returns the size the OAM data gives the sprite, but only if it fits the number of pixels the first image says it has.
+      /// </summary>
+      private static bool TryReadOamShape(IDataModel model, IReadOnlyList<ArrayRunElementSegment> parent, int elementStart, int listOffset, int pixelCount, out int width, out int height) {
+         width = height = 0;
+         if (listOffset < 8 || pixelCount <= 0 || !IsPointerAt(parent, listOffset - 8) || !IsPointerAt(parent, listOffset - 4)) return false;
+         var oam = model.ReadPointer(elementStart + listOffset - 8);
+         if (oam < 0 || oam + 4 > model.Count) return false;
+         if (!TryGetOamSize(model.ReadMultiByteValue(oam, 2), model.ReadMultiByteValue(oam + 2, 2), out width, out height)) return false;
+         if (width * height != pixelCount) { width = height = 0; return false; }
+         return true;
+      }
+
+      /// <summary>
+      /// How many different images the animations of a sprite template show: the biggest frame number in any of its animation sequences, plus one. Returns 0 if the template has no usable animations.
+      /// The animation table is a list of pointers to sequences of 4-byte commands: frame (image number first, as a signed 16-bit value), loop (-3), jump (-2) and end (-1).
+      /// </summary>
+      private static int CountAnimationFrames(IDataModel model, IReadOnlyList<ArrayRunElementSegment> parent, int elementStart, int listOffset) {
+         if (!IsPointerAt(parent, listOffset - 4)) return 0;
+         var table = model.ReadPointer(elementStart + listOffset - 4);
+         if (table < 0 || table + 4 > model.Count) return 0;
+         var biggest = -1;
+         for (int i = 0; i < 16; i++) { // an animation table has a handful of sequences; stop at the first entry that is not a pointer
+            var sequence = model.ReadPointer(table + 4 * i);
+            if (sequence < 0 || sequence + 4 > model.Count) break;
+            for (int command = 0; command < 128 && sequence + 4 * command + 4 <= model.Count; command++) {
+               var type = (short)model.ReadMultiByteValue(sequence + 4 * command, 2);
+               if (type == -3) continue;   // loop
+               if (type < 0) break;        // jump or end
+               biggest = Math.Max(biggest, type);
+            }
+         }
+         return biggest + 1;
+      }
+
+      private static bool IsPointerAt(IReadOnlyList<ArrayRunElementSegment> segments, int offset) {
+         var current = 0;
+         foreach (var segment in segments) {
+            if (current == offset) return segment.Type == ElementContentType.Pointer && segment.Length == 4;
+            if (current > offset) return false;
+            current += segment.Length;
+         }
+         return false;
       }
 
       public override IDataFormat CreateDataFormat(IDataModel data, int index) => ITableRunExtensions.CreateSegmentDataFormat(this, data, index);

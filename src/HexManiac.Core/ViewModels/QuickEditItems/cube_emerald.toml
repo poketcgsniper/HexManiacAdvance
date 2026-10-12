@@ -263,7 +263,7 @@ Address = 0xA0C534
 Format = '''[pal<`ucp4`> id:|h unused:]1'''
 
 [[NamedAnchors]]
-Name = '''graphics.overworld.sprites2'''
+Name = '''graphics.overworld.fieldeffects'''
 Address = 0x4AE8C0
 Format = '''[data<[tileTag:|h paletteid:|h oam<> anims<> sprites<`osl|graphics.overworld.palettes2,graphics.overworld.fieldeffects.palettes.ash,graphics.overworld.fieldeffects.palettes.smallsparkle,graphics.overworld.fieldeffects.palettes.cavedust,graphics.overworld.fieldeffects.palettes.bigdust,graphics.overworld.fieldeffects.palettes.orasdowsing,graphics.overworld.palettes:id=`> affine<> callback<>]1>]fieldeffectobjects'''
 
