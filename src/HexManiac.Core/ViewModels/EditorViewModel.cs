@@ -1492,7 +1492,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             AddButton(() => ShortcutIcons.PokeFlute(model), ViewPort.EditorGotoPrefix + "sound", "Sound"); // the Poke Flute item picture (the built-in picture is a Poke Flute too)
          }
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
-            AddButton(() => ShortcutIcons.FirstOverworldSprite(model) ?? ShortcutIcons.BrendanStanding(model), HardcodeTablesModel.OverworldSprites, "OW Sprites"); // sprite 0, first picture: the player
+            AddButton(() => ShortcutIcons.FirstOverworldSprite(model), HardcodeTablesModel.OverworldSprites, "OW Sprites"); // sprite 0, first picture (the player in the unedited games); the built-in character if the ROM has none
          }
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
             var animTiles = AddButton(() => FindItemIcon(model, "Wailmer Pail", "Pail", "Watering"), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles");
