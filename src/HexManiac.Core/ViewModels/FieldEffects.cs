@@ -120,8 +120,18 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var names = model.GetOptions(tableName);
          if (names != null && index < names.Count && !string.IsNullOrEmpty(names[index]) && names[index] != index.ToString()) return names[index];
          if (model.TryGetList(NameListName, out var list) && index < list.Count && !string.IsNullOrEmpty(list[index])) return list[index];
+         // an unedited Emerald has no list of names: the game's own names (FLDEFFOBJ_*) for its 37 effects
+         if (Count(model) == VanillaEmeraldNames.Length && index < VanillaEmeraldNames.Length) return VanillaEmeraldNames[index];
          return string.Empty;
       }
+
+      /// <summary>The names of the 37 field effect objects of pokeemerald (FLDEFFOBJ_SHADOW_S ...), in order.</summary>
+      private static readonly string[] VanillaEmeraldNames = {
+         "SHADOW_S", "SHADOW_M", "SHADOW_L", "SHADOW_XL", "TALL_GRASS", "RIPPLE", "ASH", "SURF_BLOB", "ARROW", "GROUND_IMPACT_DUST",
+         "JUMP_TALL_GRASS", "SAND_FOOTPRINTS", "JUMP_BIG_SPLASH", "SPLASH", "JUMP_SMALL_SPLASH", "LONG_GRASS", "JUMP_LONG_GRASS", "UNUSED_GRASS", "UNUSED_GRASS_2", "UNUSED_SAND",
+         "WATER_SURFACING", "REFLECTION_DISTORTION", "SPARKLE", "DEEP_SAND_FOOTPRINTS", "TREE_DISGUISE", "MOUNTAIN_DISGUISE", "BIRD", "BIKE_TIRE_TRACKS", "SAND_DISGUISE", "SAND_PILE",
+         "SHORT_GRASS", "HOT_SPRINGS_WATER", "ASH_PUFF", "ASH_LAUNCH", "BUBBLES", "SMALL_SPARKLE", "RAYQUAZA",
+      };
 
       public static int Count(IDataModel model) => FindTable(model)?.ElementCount ?? 0;
 
