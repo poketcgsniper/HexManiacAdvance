@@ -26,7 +26,14 @@ namespace HavenSoft.HexManiac.Tests {
       private readonly List<string> dialogs = new List<string>();
       private readonly List<string[]> dialogOptions = new List<string[]>();
 
-      public OverworldNewPaletteTests() : base(0x4000) {
+      /// <summary>Is the palette table closed by an end marker row that is part of its count (CUBE) or by eight zero bytes after the last palette (the vanilla games)?</summary>
+      private readonly bool endCode;
+      private int EndRows => endCode ? 0 : 1;
+
+      public OverworldNewPaletteTests() : this(false) { }
+
+      protected OverworldNewPaletteTests(bool endCode) : base(0x4000) {
+         this.endCode = endCode;
          SetFullModel(0xFF);
          for (int i = 0; i < 32; i++) { Data[Frame0 + i] = (byte)(0x11 * (1 + i % 3)); Data[Frame1 + i] = (byte)(0x21 + i); }
          for (int i = 0; i < 16; i++) {
@@ -41,9 +48,10 @@ namespace HavenSoft.HexManiac.Tests {
          Model.WriteMultiByteValue(PalTable + 12, 2, Token, 0x1101);
          Model.WriteMultiByteValue(PalTable + 14, 2, Token, 0);
          Model.WriteMultiByteValue(PalTable + 16, 4, Token, 0);
-         Model.WriteMultiByteValue(PalTable + 20, 2, Token, 0x11FF);
+         Model.WriteMultiByteValue(PalTable + 20, 2, Token, endCode ? 0 : 0x11FF);
          Model.WriteMultiByteValue(PalTable + 22, 2, Token, 0);
-         ViewPort.Edit($"@{PalTable:X} ^{HardcodeTablesModel.OverworldPalettes}[pal<`ucp4`> id:|h unused:]3 ");
+         if (endCode) ViewPort.Edit($"@{PalTable:X} ^{HardcodeTablesModel.OverworldPalettes}[pal<`ucp4`> id:|h unused:]!0000000000000000 ");
+         else ViewPort.Edit($"@{PalTable:X} ^{HardcodeTablesModel.OverworldPalettes}[pal<`ucp4`> id:|h unused:]3 ");
          // the list of two 8x8 pictures
          Model.WritePointer(Token, List, Frame0);
          Model.WriteMultiByteValue(List + 4, 4, Token, 0x20);
@@ -116,6 +124,20 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.True(slot.CanCreatePalette);
          Assert.True(slot.NeedsChoice);
          Assert.Equal(0x1100, slot.PaletteId);
+         Assert.Equal(0x11FF, slot.ReflectionTag);
+         if (endCode) Assert.IsType<TableStreamRun>(PaletteTable);
+         else Assert.IsType<ArrayRun>(PaletteTable);
+      }
+
+      [Fact]
+      public void Find_PaletteIdThatIsNotInTheOverworldPaletteTable_CanNotGetANewPalette() {
+         Model.WriteMultiByteValue(RowA + PaletteIdOffset, 2, Token, 0x1000); // (a field effect palette, say)
+
+         var slot = OverworldSlotImport.Find(Model, RowA + SpritesOffset);
+
+         Assert.NotNull(slot);
+         Assert.False(slot.CanCreatePalette);
+         Assert.True(slot.SharesPictures);
       }
 
       [Fact]
@@ -170,10 +192,12 @@ namespace HavenSoft.HexManiac.Tests {
          ImportInto(RowA, FileSystem(1));
 
          var table = PaletteTable;
-         Assert.Equal(4, table.ElementCount);
+         Assert.Equal(3 + EndRows, table.ElementCount);
          var tags = table.ElementCount.Range().Select(i => Model.ReadMultiByteValue(table.Start + i * table.ElementLength + 4, 2)).ToList();
-         Assert.Equal(new[] { 0x1100, 0x1101, OverworldSlotImport.FirstNewTag, 0x11FF }, tags);
-         Assert.Equal(0, Model.ReadMultiByteValue(table.Start + 3 * table.ElementLength, 4)); // the end marker has no palette
+         Assert.Equal(endCode ? new[] { 0x1100, 0x1101, OverworldSlotImport.FirstNewTag } : new[] { 0x1100, 0x1101, OverworldSlotImport.FirstNewTag, 0x11FF }, tags);
+         // the end marker has no palette
+         Assert.Equal(0, Model.ReadMultiByteValue(table.Start + table.ElementCount * table.ElementLength - (endCode ? 0 : table.ElementLength), 4));
+         if (endCode) Assert.Equal(0, Model.ReadMultiByteValue(table.Start + table.ElementCount * table.ElementLength + 4, 4));
          var paletteAddress = Model.ReadPointer(table.Start + 2 * table.ElementLength);
          var palette = Assert.IsAssignableFrom<IPaletteRun>(Model.GetNextRun(paletteAddress));
          Assert.Equal(paletteAddress, palette.Start);
@@ -213,7 +237,7 @@ namespace HavenSoft.HexManiac.Tests {
          ViewPort.Undo.Execute();
 
          Assert.True(before.SequenceEqual(Snapshot()));
-         Assert.Equal(3, PaletteTable.ElementCount);
+         Assert.Equal(2 + EndRows, PaletteTable.ElementCount);
          Assert.Equal(3, Model.GetNextRun(List).PointerSources.Count);
       }
 
@@ -227,10 +251,10 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(0x1100, PaletteId(RowC));
          Assert.NotEqual(Pointer(RowA), Pointer(RowB));
          Assert.Equal(List, Pointer(RowC));
-         Assert.Equal(5, PaletteTable.ElementCount);
+         Assert.Equal(4 + EndRows, PaletteTable.ElementCount);
          var ids = PaletteTable.ElementCount.Range().Select(i => Model.ReadMultiByteValue(PaletteTable.Start + i * PaletteTable.ElementLength + 4, 2)).ToList();
          Assert.Equal(ids.Count, ids.Distinct().Count());
-         Assert.Equal(0x11FF, ids.Last());
+         if (!endCode) Assert.Equal(0x11FF, ids.Last());
          Assert.Empty(Errors);
       }
 
@@ -244,7 +268,7 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.NotEqual(List, Pointer(RowA));
          Assert.Equal(List, Pointer(RowB));
          Assert.Equal(0x1100, PaletteId(RowA));
-         Assert.Equal(3, PaletteTable.ElementCount);
+         Assert.Equal(2 + EndRows, PaletteTable.ElementCount);
          Assert.Equal(before.Skip(Frame0).Take(0x40), Bytes(Frame0, 0x40)); // the pictures of the other slots are not touched
          Assert.Equal(before.Skip(List).Take(16), Bytes(List, 16));
       }
@@ -297,7 +321,12 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Equal(List, Pointer(RowA)); // nothing else shares the pictures: they stay where they are
          Assert.Equal(OverworldSlotImport.FirstNewTag, PaletteId(RowA));
          Assert.Equal(0x1100, PaletteId(RowB));
-         Assert.Equal(4, PaletteTable.ElementCount);
+         Assert.Equal(3 + EndRows, PaletteTable.ElementCount);
       }
+   }
+
+   /// <summary>The same slots, but with the palette table the vanilla games have: it ends with eight zero bytes instead of a counted end-marker row.</summary>
+   public class OverworldNewPaletteEndCodeTableTests : OverworldNewPaletteTests {
+      public OverworldNewPaletteEndCodeTableTests() : base(true) { }
    }
 }

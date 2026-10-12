@@ -945,7 +945,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          }
          SpriteAddress = result.ListAddress;
          if (result.PaletteAddress >= 0) PaletteAddress = result.PaletteAddress;
-         if (createPalette) viewPort.RaiseMessage($"Created palette {result.PaletteId:X4} for this sprite. Other sprites keep their colors.");
+         if (createPalette) {
+            var reflection = slot.ReflectionTag >= 0 && slot.ReflectionTag != OverworldSlot.NoPaletteTag ? $" Its reflection palette ({slot.ReflectionTag:X4}) was not changed." : string.Empty;
+            viewPort.RaiseMessage($"Created palette {result.PaletteId:X4} for this sprite. Other sprites keep their colors.{reflection}");
+         }
          else if (result.CopiedPictures) viewPort.RaiseMessage("This sprite now has its own copy of the pictures. Other sprites keep theirs.");
          return true;
       }

@@ -28,6 +28,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
       public ITableRun PaletteTable { get; set; }
       public string PaletteKeyField { get; set; }
 
+      /// <summary>The row's reflection palette tag (0x11FF means none: the game makes the reflection from the sprite's own colors), or -1 if the table has no such field.</summary>
+      public int ReflectionTag { get; set; } = -1;
+      public const int NoPaletteTag = 0x11FF;
+
       /// <summary>How many other graphics-info rows point at the same frame list.</summary>
       public int OtherRowsOnList { get; set; }
       /// <summary>True when some frame of the list is also pointed at from somewhere outside the list.</summary>
@@ -98,9 +102,18 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             var paletteTable = model.GetTable(HardcodeTablesModel.OverworldPalettes);
             var key = paletteTable?.ElementContent.FirstOrDefault(seg => seg.Name == keyField && seg.Length == 2);
             if (paletteTable != null && key != null && paletteTable.ElementContent.Any(seg => seg is ArrayRunPointerSegment)) {
-               slot.PaletteTable = paletteTable;
-               slot.PaletteKeyField = keyField;
+               // (a field effect that finds its palette in a table of its own is not in this table: its palette can't be swapped for a new row of it)
+               var keyOffset = paletteTable.ElementContent.Until(seg => seg == key).Sum(seg => seg.Length);
+               for (int i = 0; i < paletteTable.ElementCount; i++) {
+                  if (model.ReadMultiByteValue(paletteTable.Start + i * paletteTable.ElementLength + keyOffset, 2) != slot.PaletteId) continue;
+                  slot.PaletteTable = paletteTable;
+                  slot.PaletteKeyField = keyField;
+                  break;
+               }
             }
+         }
+         foreach (var field in new[] { "reflectionPaletteTag", "secondid" }) {
+            if (TryReadRowValue(model, sourceAddress, field, out var reflection)) { slot.ReflectionTag = reflection; break; }
          }
 
          Measure(model, slot);
