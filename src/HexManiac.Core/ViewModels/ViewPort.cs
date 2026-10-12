@@ -2592,7 +2592,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       /// <summary>
-      /// Goto targets starting with this prefix open an editor tab instead of navigating to data: 'editor:sound', 'editor:sprites', 'editor:customization', 'editor:reflections'.
+      /// Goto targets starting with this prefix open an editor tab instead of navigating to data: 'editor:sound', 'editor:sprites', 'editor:customization', 'editor:reflections', 'editor:secondary'.
       /// </summary>
       public const string EditorGotoPrefix = "editor:";
 
@@ -2607,9 +2607,20 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             OpenCharacterCustomizationTab();
          } else if (editor.Equals("reflections", StringComparison.OrdinalIgnoreCase) || editor.Equals("reflection", StringComparison.OrdinalIgnoreCase)) {
             OpenReflectionPaletteTab();
+         } else if (editor.Equals("secondary", StringComparison.OrdinalIgnoreCase) || editor.Equals("fieldeffects", StringComparison.OrdinalIgnoreCase)) {
+            OpenOverworldSecondary();
          } else {
-            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites', 'editor:animations', 'editor:customization' or 'editor:reflections'.");
+            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites', 'editor:animations', 'editor:customization', 'editor:reflections' or 'editor:secondary'.");
          }
+      }
+
+      /// <summary>
+      /// The 'OW Secondary' button: the field effects table in this tab (with a button that opens the Reflection Palettes editor), or, in a game that has reflection palettes but no field effects table,
+      /// the Reflection Palettes editor itself (with nothing to go back to).
+      /// </summary>
+      public void OpenOverworldSecondary() {
+         if (FieldEffects.FindTableName(Model) is string table) Goto.Execute(table);
+         else OpenReflectionPaletteTab(); // raises the error that explains what is missing if that is not available either
       }
 
       public void OpenReflectionPaletteTab() {

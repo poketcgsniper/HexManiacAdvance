@@ -21,7 +21,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
    ///                        and the place where its battle animation plugs in (<see cref="CreatePokemonButtonAnimation"/>)
    ///   Items                a Poke Ball (found by name in the items table, with the icon the item table points to)
    ///   Sound                the Poke Flute (the item is found by its name in the items table; its picture is the 'icon' of the items table or, in the unedited games, the item picture table)
-   ///   OW Sprites           the first picture of overworld sprite 0 (standing, facing down): the player, Brendan in Ruby, Sapphire, Emerald and CUBE, Red in FireRed and LeafGreen
+   ///   OW Sprites           the first picture of overworld sprite 235 (the RS Brendan of CUBE and Emerald); sprite 0 (the player) when the table has no sprite 235 or it has no picture
    ///   Anim Tiles           the General tileset's flower, animated with the frames and the speed of the game's own animation table
    ///   Character Customization   Brendan's trainer front picture with a dark skin tone and the blue clothes row
    ///
@@ -271,11 +271,19 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          try {
             var table = model.GetTable(HardcodeTablesModel.OverworldSprites);
             if (table == null || table.ElementCount < 1) return null;
-            return HavenSoft.HexManiac.Core.ViewModels.Map.ObjectEventViewModel.Render(model, new ModelTable(model, table.Start), null, 0, 0, () => -1);
+            var owTable = new ModelTable(model, table.Start);
+            IPixelViewModel picture = null;
+            if (table.ElementCount > ButtonSpriteIndex) {
+               try { picture = HavenSoft.HexManiac.Core.ViewModels.Map.ObjectEventViewModel.Render(model, owTable, null, ButtonSpriteIndex, 0, () => -1); } catch (Exception) { picture = null; }
+            }
+            return picture ?? HavenSoft.HexManiac.Core.ViewModels.Map.ObjectEventViewModel.Render(model, owTable, null, 0, 0, () => -1);
          } catch (Exception) {
             return null;
          }
       }
+
+      /// <summary>The overworld sprite the OW Sprites button shows: 235, the Ruby/Sapphire Brendan of CUBE and Emerald. A table with fewer sprites, or a sprite without a picture, falls back to sprite 0.</summary>
+      public const int ButtonSpriteIndex = 235;
 
       #endregion
 

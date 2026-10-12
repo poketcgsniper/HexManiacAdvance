@@ -2,6 +2,7 @@ using HavenSoft.HexManiac.Core;
 using HavenSoft.HexManiac.Core.Models;
 using HavenSoft.HexManiac.Core.Models.Runs;
 using HavenSoft.HexManiac.Core.ViewModels;
+using HavenSoft.HexManiac.Core.ViewModels.Tools;
 using System.Collections.Generic;
 using System.Linq;
 using Xunit;
@@ -391,6 +392,121 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Empty(tabErrors);
          Assert.Single(changes);
          Assert.Equal(PaletteTable + 2 * 8, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart)); // the pointer to the palette of the sprite: the third row of the palette table
+      }
+
+      #endregion
+
+      #region The OW Secondary button (field effects + reflection palettes)
+
+      private const int FxImage = 0x6000, FxPalette = 0x6100, FxPaletteTable = 0x6120, FxOam = 0x6130, FxImageList = 0x6140, FxTemplate = 0x6150, FxTemplateTable = 0x6170;
+
+      // the same field effect table the FieldEffectsTests use, placed where this ROM has room
+      private void AddFieldEffects() {
+         for (int i = 0; i < 0x80; i++) Model[FxImage + i] = 0x11;
+         Model.WriteMultiByteValue(FxPalette + 2, 2, Token, 0x001F);
+         ViewPort.Edit($"@{FxPaletteTable:X} <{FxPalette:X}> 04 10 00 00 @{FxPaletteTable:X} ^graphics.overworld.palettes2[pal<`ucp4`> id:|h unused:]1 ");
+         ViewPort.Edit($"@{FxOam:X} 00 00 00 40 ");
+         ViewPort.Edit($"@{FxImageList:X} <{FxImage:X}> 80 00 00 00 ");
+         ViewPort.Edit($"@{FxTemplate:X} FF FF 04 10 <{FxOam:X}> 00 00 00 00 <{FxImageList:X}> 00 00 00 00 00 00 00 00 ");
+         ViewPort.Edit($"@{FxTemplateTable:X} <{FxTemplate:X}> @{FxTemplateTable:X} ^graphics.overworld.fieldeffects[data<[tileTag:|h paletteid:|h oam<> anims<> sprites<`osl|graphics.overworld.palettes2:id=`> affine<> callback<>]1>]1 ");
+         ViewPort.ChangeHistory.ChangeCompleted();
+      }
+
+      private List<GotoShortcutViewModel> MenuButtons() {
+         var editor = New.EditorViewModel();
+         editor.Add(ViewPort);
+         return editor.GotoViewModel.Shortcuts.ToList();
+      }
+
+      [Fact]
+      public void MainMenu_HasOneOwSecondaryButton_InsteadOfFieldEffectsAndReflectionPalettes() {
+         AddFieldEffects();
+
+         var texts = MenuButtons().Select(button => button.DisplayText.Replace("\n", " ")).ToList();
+
+         Assert.Single(texts, "OW Secondary");
+         Assert.DoesNotContain("Field Effects", texts);
+         Assert.DoesNotContain("Reflection Palettes", texts);
+      }
+
+      [Fact]
+      public void OwSecondaryButton_KeepsTheFirstFrameOfTheTallGrass() {
+         AddFieldEffects();
+
+         var button = MenuButtons().Single(b => b.DisplayText == "OW Secondary");
+
+         Assert.NotNull(button.Image);
+         Assert.Equal(FieldEffects.ButtonPicture(Model).PixelData, button.Image.PixelData);
+      }
+
+      [Fact]
+      public void OwSecondaryButton_WithOnlyReflections_IsStillThereAndOpensTheReflectionEditor() {
+         var texts = MenuButtons().Select(button => button.DisplayText).ToList();
+         Assert.Contains("OW Secondary", texts);
+         Assert.True(OverworldSecondary.IsSupported(Model));
+         var opened = new List<ITabContent>();
+         ViewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
+
+         ViewPort.OpenEditorTab("secondary");
+
+         Assert.IsType<ReflectionPaletteTab>(Assert.Single(opened));
+         Assert.Empty(Errors);
+      }
+
+      [Fact]
+      public void OwSecondary_WithFieldEffects_ShowsTheFieldEffectsTable() {
+         AddFieldEffects();
+         var opened = new List<ITabContent>();
+         ViewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
+
+         ViewPort.OpenEditorTab("secondary");
+
+         Assert.Empty(opened); // the table is shown in the tab that is already open
+         Assert.Equal(FxTemplateTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart));
+         Assert.Empty(Errors);
+      }
+
+      [Fact]
+      public void FieldEffectsTable_HasAWayToTheReflectionEditor_AndBack() {
+         AddFieldEffects();
+         ViewPort.Goto.Execute("graphics.overworld.fieldeffects/0");
+         var element = ViewPort.Tools.TableTool.Children.OfType<FieldEffectElementViewModel>().Single();
+         var opened = new List<ITabContent>();
+         ViewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
+
+         Assert.True(element.OpenReflectionPalettes.CanExecute(null));
+         element.OpenReflectionPalettes.Execute(null);
+
+         var tab = Assert.IsType<ReflectionPaletteTab>(Assert.Single(opened));
+         var changes = new List<TabChangeRequestedEventArgs>();
+         tab.RequestTabChange += (sender, e) => changes.Add(e);
+         ViewPort.Goto.Execute(PaletteTable);
+         Assert.True(tab.OpenFieldEffects.CanExecute(null));
+         tab.OpenFieldEffects.Execute(null);
+         Assert.Single(changes);
+         Assert.Equal(FxTemplateTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart));
+      }
+
+      [Fact]
+      public void TheReflectionEditor_WithoutFieldEffects_HasNoButtonToThem() {
+         Assert.False(CreateTab().OpenFieldEffects.CanExecute(null));
+      }
+
+      [Fact]
+      public void OwSecondary_WithNeitherTable_HasNoButtonAndSaysWhyOnTheGotoPrefix() {
+         var plain = new ViewPort("plain.txt", new PokemonModel(new byte[0x200], singletons: Singletons), InstantDispatch.Instance, Singletons);
+         var errors = new List<string>();
+         plain.OnError += (sender, e) => errors.Add(e);
+
+         plain.OpenEditorTab("secondary");
+
+         Assert.False(OverworldSecondary.IsSupported(plain.Model));
+         Assert.Single(errors);
+      }
+
+      [Fact]
+      public void OwSecondary_UsesTheSpriteOfTheOwSpritesGroupForItsFallback() {
+         Assert.Equal(ShortcutKind.OverworldSprites, ShortcutFallbackIcons.Identify(ViewPort.EditorGotoPrefix + "secondary", "OW Secondary"));
       }
 
       #endregion

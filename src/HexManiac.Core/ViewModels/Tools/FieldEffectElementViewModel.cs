@@ -77,6 +77,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       public ICommand OpenPalette { get; }
       public ICommand Refresh { get; }
+      /// <summary>Opens the Reflection Palettes editor, the other half of the 'OW Secondary' menu button.</summary>
+      public ICommand OpenReflectionPalettes { get; }
       /// <summary>Parameter: the SpriteGalleryItem that was clicked.</summary>
       public ICommand SelectCommand { get; }
 
@@ -84,6 +86,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
          this.viewPort = viewPort;
          model = viewPort.Model;
          OpenPalette = new StubCommand { CanExecute = arg => palette != null, Execute = arg => { if (palette != null) viewPort.Goto.Execute(palette.GotoDestination); } };
+         OpenReflectionPalettes = new StubCommand { CanExecute = arg => ReflectionPaletteTab.IsSupported(model), Execute = arg => viewPort.OpenReflectionPaletteTab() };
          Refresh = new StubCommand { CanExecute = arg => true, Execute = arg => { model.ClearCacheScope(); Load(); ShowEffect(CurrentIndex); } };
          SelectCommand = new StubCommand { CanExecute = arg => true, Execute = arg => Select(arg as SpriteGalleryItem) };
          ShowEffect(index);

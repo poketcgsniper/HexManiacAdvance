@@ -698,5 +698,67 @@ namespace HavenSoft.HexManiac.Tests {
       }
    }
 
+   /// <summary>The OW Sprites button shows overworld sprite 235 (the RS Brendan) when the table has it, sprite 0 otherwise.</summary>
+   public class ShortcutOverworldSprite235Tests : BaseViewModelTestClass {
+      private const short BlueDrawn = 0x001F, RedDrawn = 0x7C00; // as the picture's pixels have it (the red and blue bits are swapped)
+      private const int Palettes = 0x60, SpriteList = 0x80, Sprite0 = 0x120, Sprite1 = 0x140, Table = 0x400;
+
+      public ShortcutOverworldSprite235Tests() : base(0x1000) { }
+
+      // palette id 1 is blue and id 0 is red; every sprite but 235 uses the blue one (id 1), sprite 235 the red one (id 0)
+      private void CreateTable(int count, bool lastHasGraphics = true) {
+         for (int i = 0; i < 0x20; i++) Model[i] = 0x11;
+         Model.WriteMultiByteValue(0x20 + 2, 2, Token, 0x001F);
+         Model.WriteMultiByteValue(0x40 + 2, 2, Token, 0x7C00);
+         ViewPort.Edit($"@{Palettes:X2} <020> 00 00 <040> 01 00 @{Palettes:X2} ^{HardcodeTablesModel.OverworldPalettes}[pal<`ucp4`> id:|h]2 ");
+         ViewPort.Edit($"@{SpriteList:X2} <000> 20 ");
+         ViewPort.Edit($"@{Sprite0:X} FF FF 01 00 40 00 08 00 08 00 <080>");
+         ViewPort.Edit(lastHasGraphics ? $"@{Sprite1:X} FF FF 00 00 40 00 08 00 08 00 <080>" : $"@{Sprite1:X} FF FF 00 00 40 00 08 00 08 00 00 00 00 00");
+         for (int i = 0; i < count; i++) Model.WritePointer(Token, Table + i * 4, i == ShortcutIcons.ButtonSpriteIndex ? Sprite1 : Sprite0);
+         ViewPort.Edit($"@{Table:X} ^{HardcodeTablesModel.OverworldSprites}[data<[starterbytes:|h paletteid:|h length: width: height: sprites<`osl`>]1>]{count} ");
+      }
+
+      [Fact]
+      public void ATableWith236Sprites_ShowsSprite235() {
+         CreateTable(236);
+
+         var picture = ShortcutIcons.FirstOverworldSprite(Model);
+
+         Assert.NotNull(picture);
+         Assert.All(picture.PixelData, pixel => Assert.Equal(RedDrawn, pixel));
+      }
+
+      [Fact]
+      public void ATableWith235Sprites_ShowsSprite0() {
+         CreateTable(235);
+
+         var picture = ShortcutIcons.FirstOverworldSprite(Model);
+
+         Assert.NotNull(picture);
+         Assert.All(picture.PixelData, pixel => Assert.Equal(BlueDrawn, pixel));
+      }
+
+      [Fact]
+      public void Sprite235WithoutGraphics_FallsBackToSprite0() {
+         CreateTable(236, lastHasGraphics: false);
+
+         var picture = ShortcutIcons.FirstOverworldSprite(Model);
+
+         Assert.NotNull(picture);
+         Assert.All(picture.PixelData, pixel => Assert.Equal(BlueDrawn, pixel));
+      }
+
+      [Fact]
+      public void TheButton_ShowsSprite235() {
+         CreateTable(236);
+         var editor = New.EditorViewModel();
+         editor.Add(ViewPort);
+
+         var button = editor.GotoViewModel.Shortcuts.Single(b => b.DisplayText == "OW Sprites");
+
+         Assert.All(button.Image.PixelData, pixel => Assert.Equal(RedDrawn, pixel));
+      }
+   }
+
    #endregion
 }

@@ -266,6 +266,8 @@
                         <hsg3hv:PixelImage DataContext="{Binding PaletteImage}" HorizontalAlignment="Left" Margin="0,2" TransparentBrush="{DynamicResource Backlight}"/>
                         <hsg3hv:AngleButton Margin="0,2" Direction="Out" HorizontalAlignment="Stretch" Content="Edit this palette" Command="{Binding OpenPalette}"
                                             ToolTip="Jump to the palette this effect is drawn with, to change its colours"/>
+                        <hsg3hv:AngleButton Margin="0,2" Direction="Out" HorizontalAlignment="Stretch" Content="Reflection palettes" Command="{Binding OpenReflectionPalettes}"
+                                            ToolTip="Open the Reflection Palettes editor (the other half of the OW Secondary button)"/>
                         <DockPanel Margin="0,2">
                            <Button DockPanel.Dock="Right" Content="&#8635;" Command="{Binding Refresh}" Padding="6,1" Margin="4,0,0,0" ToolTip="Redraw every field effect"/>
                            <TextBlock Text="Find:" VerticalAlignment="Center" Margin="0,0,4,0"/>
