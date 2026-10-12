@@ -731,6 +731,9 @@
                               <DataTemplate DataType="{x:Type hshmcvm:CharacterCustomizationTab}">
                                  <hsg3hv:CharacterCustomizationView />
                               </DataTemplate>
+                              <DataTemplate DataType="{x:Type hshmcvm:ReflectionPaletteTab}">
+                                 <hsg3hv:ReflectionPaletteView />
+                              </DataTemplate>
                               <DataTemplate DataType="{x:Type hshmcvm:ImageEditorViewModel}">
                                  <hsg3hv:ImageEditorView />
                               </DataTemplate>

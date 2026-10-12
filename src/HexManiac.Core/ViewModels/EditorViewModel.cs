@@ -582,6 +582,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             new OpenSoundEditor(),
             new OpenAnimatedTiles(),
             new OpenCharacterCustomization(),
+            new OpenReflectionPalettes(),
          };
 
          tabs = new List<ITabContent>();
@@ -865,6 +866,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          SoundTab sound => sound.Model,
          TilesetAnimationTab animations => animations.Model,
          CharacterCustomizationTab customization => customization.Model,
+         ReflectionPaletteTab reflections => reflections.Model,
          _ => null,
       };
 
@@ -1504,6 +1506,9 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          if (CharacterCustomizationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Character Customization")) {
             AddButton(() => ShortcutIcons.CharacterFront(model) ?? ShortcutIcons.BrendanStanding(model), ViewPort.EditorGotoPrefix + "customization", "Character\nCustomization");
+         }
+         if (ReflectionPaletteTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Reflection Palettes")) {
+            AddButton(() => ReflectionPreview.MenuIcon(model), ViewPort.EditorGotoPrefix + "reflections", "Reflection\nPalettes"); // the boy upside down in the colours of water
          }
       }
 
