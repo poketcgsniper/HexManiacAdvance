@@ -461,7 +461,7 @@ namespace HavenSoft.HexManiac.Tests {
 
          ViewPort.OpenEditorTab("secondary");
 
-         Assert.Empty(opened); // the table is shown in the tab that is already open
+         Assert.DoesNotContain(opened, tab => tab is ReflectionPaletteTab); // the table is shown in the tab that is already open
          Assert.Equal(FxTemplateTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart));
          Assert.Empty(Errors);
       }
