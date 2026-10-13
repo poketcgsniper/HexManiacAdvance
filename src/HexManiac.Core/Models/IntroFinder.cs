@@ -49,7 +49,7 @@ namespace HavenSoft.HexManiac.Core.Models {
          if (FirstCall(data, function + 2, 0x20, out _) < 0) return false;
          for (int p = function + 0x10; p < function + 0x30; p += 4) {
             var word = IntroThumb.Word(data, p);
-            if (word == 0xFFFF || word == 0xFFFF0001) return true;
+            if (word == 0xFFFF || word == unchecked((int)0xFFFF0001)) return true;
          }
          return false;
       }
@@ -179,7 +179,7 @@ namespace HavenSoft.HexManiac.Core.Models {
          IntroConstant first = null, second = null;
 
          // site A: the picture of the Pokémon next to Birch, made by the first call after Birch's object
-         var call = FirstCall(data, anchor + 4, 0x40, out var helper);
+         var call = FirstCall(data, anchor + 4, 0x300, out var helper);
          if (call >= 0) {
             if (Contains(data, call - 12, 12, 0x2064, 0x214B)) {
                // Emerald: CreateMonPicSprite_Affine is a small helper that loads the species from its own literal pool

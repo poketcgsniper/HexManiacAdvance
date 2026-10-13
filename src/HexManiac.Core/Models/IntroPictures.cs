@@ -248,7 +248,9 @@ namespace HavenSoft.HexManiac.Core.Models {
       public static IntroImage ReadCompressed(byte[] data, int spriteAddress, int paletteAddress) {
          if (spriteAddress < 0 || spriteAddress >= data.Length || paletteAddress < 0 || paletteAddress >= data.Length) return null;
          var tiles = LZRun.Decompress(data, spriteAddress);
-         if (tiles == null || tiles.Length != 0x800) return null;
+         // Pokémon pictures hold their animation frames one after the other: the first 0x800 bytes are the picture itself
+         if (tiles == null || tiles.Length < 0x800) return null;
+         if (tiles.Length > 0x800) tiles = tiles.Take(0x800).ToArray();
          var palette = LZRun.Decompress(data, paletteAddress);
          if (palette == null || palette.Length < 32) {
             if (paletteAddress + 32 > data.Length) return null;
