@@ -275,32 +275,32 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          "........................",
       };
 
-      private const string IntroManagerLegend = "k=1c1418 h=6a4028 H=8a5a3c s=f0c8a0 S=c89870 w=ffffff g=c0c8d0 r=f87868 R=d03828 p=d8dce0";
+      // Professor Birch's bag (the bag of the starter-choosing screen of Emerald), redrawn small (cut down from the game's picture to 11 colours): an outline, five browns, the cream paper, the grey-blue lining.
+      // 38x22: wider than the other pictures, like the bag. The Intro Manager button shows the real bag of the loaded ROM when it can find it (BirchBag), and this one otherwise (FireRed has no such bag).
+      private const string IntroManagerLegend = "k=2e2428 d=5b403f D=4f585f b=84534a B=966f53 m=b18f61 h=bc9b5c H=d5a65b t=deac5a T=bdad95 s=dbd2cc";
       private static readonly string[] IntroManagerRows = {
-         "........................",
-         "......kkkkkkkk..........",
-         ".....khhhhhhhhk.........",
-         "....khhHHHhhhhhk........",
-         "....khhhhhhhhhhk........",
-         "....kssssssssSSk........",
-         "....ksskssssksSk........",
-         "....kssssssssSSk........",
-         ".....kssssSSSSk.........",
-         "......kkssSSkk..........",
-         "....kkkwwkkwwkkk........",
-         "...kwwwwwwkwwwwwk.......",
-         "..kwwwwwwwwwwwwwwk......",
-         "..kwgwwwwwwwwwwgwk......",
-         "..kwgwwwwwwwwwwgwkkkkk..",
-         "..kwwgwwwwwwwwgwwkRrrRRk",
-         "..kwwgwwwwwwwwgwkRrrRRRk",
-         "..kwwwgwwwwwwgwwkkkwwkkk",
-         "..kwwwgwwwwwwgwwkpwwwwpk",
-         "..kwwwgwwwwwwgwwkppwwppk",
-         "..kwwwwgwwwwgwwwwkppppk.",
-         "..kkkkkkkkkkkkkkkkkkkk..",
-         "........................",
-         "........................",
+         "...........sht........................",
+         ".........stttttht.........dkkd........",
+         ".....dddBtttttttttht..dddddddddddb....",
+         "....dddhtttttttttthHhmbddddddkk...Bd..",
+         "...ddbHtttttttttHHHHthhhmbdk.......B..",
+         "...kBtmhtttttttthHHttHhhhhhh........d.",
+         "...bttthmmHtttthHHtttHhhhhhhm.......b.",
+         "..tHHHtHTsmmmHHHHttttHhhhhhhBd.....mb.",
+         ".hhttthssTsssTmmtttttHhhhhhBbd.....bbd",
+         "hBmhHtHTsTTsssssTmhtHHhhhhBbbd....bbbb",
+         "mBBBmhHHhssTsssssssTmhhhhBbbbd..Bbbbd.",
+         ".dbbbBmhhmTsTsssssssmBBhbbbdbbbbbbBbd.",
+         ".kkdbbbbBhhmsTssssTBhhmbdbbdbbbbbbbd..",
+         ".dbdkddbbbBmmTTssTbmhhBddbbdbbbbbbd...",
+         "..dbdkkkdbbbBBmTTmhmmBbddbdbbbdddD....",
+         "....dkkbkkddbbbBhhhhBbkbddkdDkDD......",
+         ".....kdbbdkDdbbbbmhmbdkbdkDDDT........",
+         ".....kkkdbDDDDDbbbbbbkdbkDD...........",
+         "......kkkkkDDDDDdbbdkdddDD............",
+         "........kkkDDDDDDkkkdbdDD.............",
+         "...........BDDDkddbbbdDD..............",
+         "...............DddddkDT...............",
       };
 
       private static (string legend, string[] rows) ArtFor(ShortcutKind kind) {

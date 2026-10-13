@@ -1499,7 +1499,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          // 'Intro Manager': the Pokémon, the professor's picture and the music of the new game intro (Emerald, FireRed and the games made from them)
          if (IntroManagerTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Intro Manager")) {
-            AddButton(() => null, ViewPort.EditorGotoPrefix + "intro", "Intro\nManager"); // the built-in picture (a professor in front of a Poké Ball) is drawn by ShortcutFallbackIcons
+            AddButton(() => ShortcutIcons.BirchBag(model), ViewPort.EditorGotoPrefix + "intro", "Intro\nManager"); // Professor Birch's bag from the ROM's starter screen; the built-in bag of ShortcutFallbackIcons when the ROM has none (FireRed)
          }
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
             var animTiles = AddButton(() => FindItemIcon(model, "Wailmer Pail", "Pail", "Watering"), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles");

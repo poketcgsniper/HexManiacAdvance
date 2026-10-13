@@ -36,7 +36,7 @@ namespace HavenSoft.HexManiac.Tests {
             Assert.Equal(height, picture.PixelHeight);
             Assert.Equal(width * height, picture.PixelData.Length);
             Assert.Equal(ShortcutFallbackIcons.Transparent, picture.Transparent);
-            Assert.InRange(width, 16, 24);   // the same sizes as the item icons, overworld sprites and tiles the ROMs give these buttons
+            Assert.InRange(width, 16, kind == ShortcutKind.IntroManager ? 40 : 24);   // the same sizes as the item icons, overworld sprites and tiles the ROMs give these buttons; the bag is wide
             Assert.InRange(height, 16, 24);
             Assert.True(picture.PixelData.Count(pixel => pixel != ShortcutFallbackIcons.Transparent) > width * height / 4, $"{kind} is mostly empty");
          }
@@ -88,6 +88,17 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Contains(pixels, c => c.red >= 220 && c.green >= 170 && c.blue <= 80);      // the gold ring and mouthpiece
          Assert.Contains(pixels, c => c.red >= 220 && c.green >= 220 && c.blue >= 200);     // the cream tube
          Assert.DoesNotContain(pixels, c => c.blue > c.red + 60);                            // and no longer the blue music note
+      }
+
+      [Fact]
+      public void TheIntroManagerPicture_IsABrownBagWithCreamPaper_NotAProfessor() {
+         // Professor Birch's bag: tan and brown leather, a cream flap, no Poke Ball red and no skin-and-white professor
+         var pixels = ShortcutFallbackIcons.Create(ShortcutKind.IntroManager).PixelData.Where(pixel => pixel != ShortcutFallbackIcons.Transparent).Select(Rgb).ToList();
+
+         Assert.True(pixels.Count(c => c.red > c.blue + 50 && c.red >= 150 && c.green >= 100) * 3 >= pixels.Count, "mostly tan leather");
+         Assert.Contains(pixels, c => c.red >= 200 && c.green >= 195 && c.blue >= 180);   // the cream paper
+         Assert.DoesNotContain(pixels, c => c.red >= 200 && c.green <= 90 && c.blue <= 90); // no red Poke Ball
+         Assert.DoesNotContain(pixels, c => c.red >= 250 && c.green >= 250 && c.blue >= 250); // and no white coat
       }
 
       [Fact]

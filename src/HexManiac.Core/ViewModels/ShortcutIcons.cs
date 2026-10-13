@@ -22,6 +22,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
    ///   Items                a Poke Ball (found by name in the items table, with the icon the item table points to)
    ///   Sound                the Poke Flute (the item is found by its name in the items table; its picture is the 'icon' of the items table or, in the unedited games, the item picture table)
    ///   OW Sprites           the first picture of overworld sprite 235 (the RS Brendan of CUBE and Emerald); sprite 0 (the player) when the table has no sprite 235 or it has no picture
+   ///   Intro Manager        Professor Birch's bag, found through the code of the starter-choosing screen
    ///   Anim Tiles           the General tileset's flower, animated with the frames and the speed of the game's own animation table
    ///   Character Customization   Brendan's trainer front picture with a dark skin tone and the blue clothes row
    ///
@@ -187,6 +188,23 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             if (char.IsLetterOrDigit(c)) result.Append(char.ToUpperInvariant(c));
          }
          return result.ToString();
+      }
+
+      #endregion
+
+      #region Professor Birch's bag (the Intro Manager button)
+
+      /// <summary>
+      /// Professor Birch's bag from the starter-choosing screen, cut out of the screen and halved in size (see <see cref="BirchBag"/>): found through the game's code, so it works on Emerald, CUBE and relocated data.
+      /// Null if the ROM has no such screen (FireRed, Ruby, a changed screen); the button then shows the built-in bag.
+      /// </summary>
+      public static IPixelViewModel BirchBag(IDataModel model) {
+         try {
+            var pixels = HavenSoft.HexManiac.Core.Models.BirchBag.Draw(model.RawData, ShortcutFallbackIcons.Transparent, out var width, out var height);
+            return pixels == null ? null : new ReadonlyPixelViewModel(width, height, pixels, ShortcutFallbackIcons.Transparent);
+         } catch (Exception) {
+            return null;
+         }
       }
 
       #endregion
