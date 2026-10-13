@@ -744,6 +744,23 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
+      public void TheMainMenu_HasAnIntroManagerButton_WithItsOwnPicture_OnlyForTheGamesItWorksOn() {
+         WriteEmerald(3);
+         var editor = New.EditorViewModel();
+         editor.Add(ViewPort);
+
+         var button = editor.GotoViewModel.Shortcuts.Single(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Intro Manager");
+
+         Assert.Equal(ShortcutFallbackIcons.Create(ShortcutKind.IntroManager).PixelData, button.Image.PixelData);
+
+         // a game that is not Emerald, FireRed or LeafGreen has no such button
+         Header("AXVE0");
+         var other = New.EditorViewModel();
+         other.Add(ViewPort);
+         Assert.DoesNotContain(other.GotoViewModel.Shortcuts, shortcut => shortcut.DisplayText.Replace("\n", " ") == "Intro Manager");
+      }
+
+      [Fact]
       public void CleanName_ShowsTheSymbolsOfTheNameLists() {
          Assert.Equal("NIDORAN♀", IntroSettingEditor.CleanName("NIDORAN\\sf"));
          Assert.Equal("NIDORAN♂", IntroSettingEditor.CleanName("\"NIDORAN\\sm\""));

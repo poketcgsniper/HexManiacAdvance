@@ -529,6 +529,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          CompleteEdit();
          viewPort.Refresh();
          Reload();
+         var now = editor.Options.Find(editor.Value);
+         if (now != null) OnMessage?.Invoke(this, $"{editor.Title}: {now.Text}.");
       }
 
       internal void ApplyPicture(IntroPictureEditor editor, IntroImage source) {
