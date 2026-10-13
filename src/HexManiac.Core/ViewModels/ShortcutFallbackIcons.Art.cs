@@ -275,6 +275,34 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          "........................",
       };
 
+      private const string IntroManagerLegend = "k=1c1418 h=6a4028 H=8a5a3c s=f0c8a0 S=c89870 w=ffffff g=c0c8d0 r=f87868 R=d03828 p=d8dce0";
+      private static readonly string[] IntroManagerRows = {
+         "........................",
+         "......kkkkkkkk..........",
+         ".....khhhhhhhhk.........",
+         "....khhHHHhhhhhk........",
+         "....khhhhhhhhhhk........",
+         "....kssssssssSSk........",
+         "....ksskssssksSk........",
+         "....kssssssssSSk........",
+         ".....kssssSSSSk.........",
+         "......kkssSSkk..........",
+         "....kkkwwkkwwkkk........",
+         "...kwwwwwwkwwwwwk.......",
+         "..kwwwwwwwwwwwwwwk......",
+         "..kwgwwwwwwwwwwgwk......",
+         "..kwgwwwwwwwwwwgwkkkkk..",
+         "..kwwgwwwwwwwwgwwkRrrRRk",
+         "..kwwgwwwwwwwwgwkRrrRRRk",
+         "..kwwwgwwwwwwgwwkkkwwkkk",
+         "..kwwwgwwwwwwgwwkpwwwwpk",
+         "..kwwwgwwwwwwgwwkppwwppk",
+         "..kwwwwgwwwwgwwwwkppppk.",
+         "..kkkkkkkkkkkkkkkkkkkk..",
+         "........................",
+         "........................",
+      };
+
       private static (string legend, string[] rows) ArtFor(ShortcutKind kind) {
          switch (kind) {
             case ShortcutKind.Generic: return (GenericLegend, GenericRows);
@@ -287,6 +315,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             case ShortcutKind.OverworldSprites: return (OverworldSpritesLegend, OverworldSpritesRows);
             case ShortcutKind.AnimatedTiles: return (AnimatedTilesLegend, AnimatedTilesRows);
             case ShortcutKind.CharacterCustomization: return (CharacterCustomizationLegend, CharacterCustomizationRows);
+            case ShortcutKind.IntroManager: return (IntroManagerLegend, IntroManagerRows);
             default: return (GenericLegend, GenericRows);
          }
       }
