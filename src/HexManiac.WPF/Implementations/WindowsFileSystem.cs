@@ -65,7 +65,9 @@ namespace HavenSoft.HexManiac.WPF.Implementations {
             if (Clipboard.ContainsImage()) {
                try {
                   var bitmapSource = Clipboard.GetImage();
-                  return DecodeImage(bitmapSource);
+                  if (bitmapSource == null) return (default, default);
+                  var decoded = DecodeImage(bitmapSource);
+                  return decoded.image == null ? (default, default) : decoded;
                } catch (COMException) {
                   // something else was using the clipboard... couldn't copy
                   var window = (MainWindow)Application.Current.MainWindow;
@@ -572,8 +574,14 @@ namespace HavenSoft.HexManiac.WPF.Implementations {
                }
             }
          } else {
-            MessageBox.Show($"Current version does not support converting PixelFormats.{format}");
-            return (null, frame.PixelWidth);
+            // the clipboard hands out Bgr32, Pbgra32, Bgr555, Gray8 and others: let WPF convert them all to something we read above
+            try {
+               var converted = new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+               return DecodeImage(converted);
+            } catch (Exception e) when (e is NotSupportedException || e is ArgumentException || e is InvalidOperationException) {
+               MessageBox.Show($"Current version does not support converting PixelFormats.{format}");
+               return (null, frame.PixelWidth);
+            }
          }
 
          return (data, frame.PixelWidth);

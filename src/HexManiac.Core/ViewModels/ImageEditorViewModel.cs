@@ -46,7 +46,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public ICommand ExportBackup => null;
       public ICommand Undo => StubCommand(ref undoWrapper, ExecuteUndo, () => history.Undo.CanExecute(default));
       public ICommand Redo => StubCommand(ref redoWrapper, ExecuteRedo, () => history.Redo.CanExecute(default));
-      public ICommand Copy => StubCommand<IFileSystem>(ref copyCommand, ExecuteCopy, fs => toolStrategy is SelectionTool selectTool && selectTool.HasSelection);
+      public ICommand Copy => StubCommand<IFileSystem>(ref copyCommand, ExecuteCopy, fs => true); // always available, so that Ctrl+C can say what to do when nothing is selected
       public ICommand Paste => StubCommand<IFileSystem>(ref pasteCommand, ExecutePaste, fs => fs.CopyImage.width != 0);
       public ICommand SelectAll => StubCommand(ref selectAllCommand, ExecuteSelectAll, () => true);
       public ICommand DeepCopy => null;
@@ -110,68 +110,110 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       private void ExecuteCopy(IFileSystem fs) {
-         if (!(toolStrategy is SelectionTool tool)) return;
+         if (fs == null) return;
+         if (!(toolStrategy is SelectionTool tool) || !tool.HasSelection) {
+            RaiseMessage("Nothing to copy: use the Select tool to drag a rectangle over the pixels (or tiles) to copy, then press Ctrl+C.");
+            return;
+         }
          tool.Copy(fs);
       }
 
       private void ExecutePaste(IFileSystem fs) {
          var sprite = fs.CopyImage;
          if (sprite.width == 0) return;
-         var height = sprite.image.Length / sprite.width;
-         if (height > PixelHeight || sprite.width > PixelWidth) {
-            RaiseMessage("Image is too large to paste!");
+         if (sprite.image == null || sprite.image.Length < sprite.width) {
+            RaiseError("Could not read an image from the clipboard.");
+            return;
+         }
+         PasteImage(sprite.image, sprite.width, ImageClipboardMemory.Find(sprite.image, sprite.width));
+      }
+
+      /// <summary>
+      /// The palette (page) that the pixel at x, y of the editor is drawn with.
+      /// Tilemaps pick a page per tile, 16-color tilesets use the page that is showing, everything else uses the first page.
+      /// </summary>
+      private IReadOnlyList<short> PaletteAt(int x, int y, PaletteCache cache, bool only16, Dictionary<int, IReadOnlyList<short>> pageCache) {
+         var pageSize = Math.Max(1, Palette.Elements.Count);
+         var start = 0;
+         if (CanEditTilePalettes) {
+            var tile = (y / 8) * TileWidth + x / 8;
+            if (tile.InRange(0, TilePalettes.Count)) start = Math.Max(0, TilePalettes[tile] - cache.InitialBlankPages) * 16;
+         } else if (only16 && palettePage >= 0) {
+            start = palettePage * 16;
+         }
+         if (start >= cache.Colors.Count) start = 0;
+         if (!pageCache.TryGetValue(start, out var palette)) {
+            palette = cache.Colors.Skip(start).Take(pageSize).ToList();
+            pageCache[start] = palette;
+         }
+         return palette;
+      }
+
+      private void PasteImage(short[] image, int imageWidth, ImageClip source) {
+         var height = image.Length / imageWidth;
+         if (height > PixelHeight || imageWidth > PixelWidth) {
+            RaiseMessage($"Image is too large to paste! It is {imageWidth}x{height} px, but this image is only {PixelWidth}x{PixelHeight} px.");
             return;
          }
 
          SelectedTool = ImageEditorTools.Select;
          var tool = (SelectionTool)toolStrategy;
+
+         // where to paste: with a selection, the pasted picture starts at the top left of the selection.
+         // otherwise it's centered on the cursor. Pictures made of whole tiles snap to the tile grid, so tiles stay tiles.
+         int x, y;
+         var selection = tool.HasSelection ? tool.Region : default;
+         bool pasteOnSource = source != null && ReferenceEquals(source.Owner, this) && selection.start.X == source.OriginX && selection.start.Y == source.OriginY;
+         bool wholeTiles = imageWidth % 8 == 0 && height % 8 == 0 && PixelWidth % 8 == 0 && PixelHeight % 8 == 0;
+         if (tool.HasSelection && !pasteOnSource) {
+            (x, y) = (selection.start.X, selection.start.Y);
+            if (wholeTiles) (x, y) = (x / 8 * 8, y / 8 * 8);
+         } else {
+            var hoverPoint = ToSpriteSpace(interactionStart);
+            (x, y) = (hoverPoint.X - imageWidth / 2, hoverPoint.Y - height / 2);
+            if (wholeTiles) {
+               x = (int)Math.Floor((x + 4) / 8.0) * 8;
+               y = (int)Math.Floor((y + 4) / 8.0) * 8;
+            }
+         }
          tool.ClearSelection();
-         var hoverPoint = ToSpriteSpace(interactionStart);
-         var (x, y) = (hoverPoint.X - sprite.width / 2, hoverPoint.Y - height / 2);
-         x = x.LimitToRange(0, PixelWidth - sprite.width);
+         x = x.LimitToRange(0, PixelWidth - imageWidth);
          y = y.LimitToRange(0, PixelHeight - height);
          ToolDown(FromSpriteSpace(new Point(x, y)));
-         Hover(FromSpriteSpace(new Point(x + sprite.width - 1, y + height - 1)));
-         ToolUp(FromSpriteSpace(new Point(x + sprite.width - 1, y + height - 1)));
+         Hover(FromSpriteSpace(new Point(x + imageWidth - 1, y + height - 1)));
+         ToolUp(FromSpriteSpace(new Point(x + imageWidth - 1, y + height - 1)));
 
-         IReadOnlyList<short> fullPalette;
-         if (PalettePointer == Pointer.NULL) {
-            fullPalette = TileViewModel.CreateDefaultPalette(Palette.Elements.Count);
-         } else {
-            var paletteRun = model.GetNextRun(model.ReadPointer(PalettePointer)) as IPaletteRun;
-            fullPalette = paletteRun.AllColors(model);
-         }
+         var cache = new PaletteCache(this);
+         var only16 = SpriteOnlyExpects16Colors();
+         var pageCache = new Dictionary<int, IReadOnlyList<short>>();
+         var (left, top) = (x, y);
+         var result = ImagePasteMapper.Map(image, imageWidth, source, (xx, yy) => PaletteAt(left + xx, top + yy, cache, only16, pageCache));
 
-         // choose a palette that best matches the available colors
-         if (Palette.Elements.Count < fullPalette.Count) {
-            var paletteMatch = new int[fullPalette.Count / Palette.Elements.Count];
-            for (int xx = 0; xx < sprite.width; xx++) {
-               for (int yy = 0; yy < height; yy++) {
-                  var targetColor = sprite.image[yy * sprite.width + xx];
-                  foreach (var pal in fullPalette.Count.Range().Where(i => fullPalette[i] == targetColor).Select(i => i / Palette.Elements.Count)) paletteMatch[pal]++;
-               }
-            }
-            var max = paletteMatch.Max();
-            var palChoice = paletteMatch.Length.Range().First(i => paletteMatch[i] == max);
-            fullPalette = fullPalette.Skip(palChoice * Palette.Elements.Count).Take(Palette.Elements.Count).ToList();
-         }
-
-         var newUnderPixels = new int[sprite.width, height];
-         for (int xx = 0; xx < sprite.width; xx++) {
-            for (int yy = 0; yy < height; yy++) {
-               var targetColor = sprite.image[yy * sprite.width + xx];
-               var paletteIndex = fullPalette.IndexOf(targetColor);
-               if (paletteIndex < 0) paletteIndex = 0;
-               paletteIndex %= Palette.Elements.Count;
-               newUnderPixels[xx, yy] = paletteIndex;
-            }
-         }
-
-         tool.SetUnderPixels(newUnderPixels);
+         tool.SetUnderPixels(result.Indexes);
          tool.SwapUnderPixelsWithCurrentPixels();
 
          UpdateSpriteModel();
          NotifyPropertyChanged(nameof(PixelData));
+         RaiseMessage(result.Describe());
+      }
+
+      /// <summary>Keep the palette indexes of what was just copied, so a paste into another tab doesn't need to guess them from the colors.</summary>
+      private void RememberCopy(short[] colors, int copyWidth, Point start, int copyHeight) {
+         var cache = new PaletteCache(this);
+         var only16 = SpriteOnlyExpects16Colors();
+         var pageCache = new Dictionary<int, IReadOnlyList<short>>();
+         var indexes = new int[colors.Length];
+         var palettes = new IReadOnlyList<short>[colors.Length];
+         for (int y = 0; y < copyHeight; y++) {
+            for (int x = 0; x < copyWidth; x++) {
+               var (xx, yy) = (start.X + x, start.Y + y);
+               var page = 0;
+               if (CanEditTilePalettes) page = TilePalettes[(yy / 8) * TileWidth + xx / 8] - cache.InitialBlankPages;
+               indexes[y * copyWidth + x] = only16 ? pixels[xx, yy] : PaletteIndex(pixels[xx, yy], page, cache);
+               palettes[y * copyWidth + x] = PaletteAt(xx, yy, cache, only16, pageCache);
+            }
+         }
+         ImageClipboardMemory.Last = new ImageClip(colors, copyWidth, indexes, palettes, this, start.X, start.Y);
       }
 
       private void ExecuteSelectAll() {
@@ -827,8 +869,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public bool TryImport(LoadedFile file, IFileSystem fileSystem) {
          if (!file.Name.ToLower().EndsWith(".png")) return false;
          var image = fileSystem.LoadImage(file.Name);
-         fileSystem.CopyImage = image;
-         ExecutePaste(fileSystem);
+         if (image.image == null || image.width == 0) return true;
+         PasteImage(image.image, image.width, null); // dropping a file shouldn't replace what the user has on the clipboard
          return true;
       }
 
@@ -1114,6 +1156,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          private int[,] underPixels; // the pixels that are 'under' the current selection. As the selection moves, this changes.
 
          public bool HasSelection => underPixels != null;
+         public (Point start, int width, int height) Region => (selectionStart, selectionWidth, selectionHeight);
 
          public SelectionTool(ImageEditorViewModel parent) => this.parent = parent;
 
@@ -1257,6 +1300,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             }
             try {
                fs.CopyImage = (result, selectionWidth);
+               parent.RememberCopy(result, selectionWidth, selectionStart, selectionHeight);
             } catch {
                parent.RaiseError("Failed to copy image.");
             }
