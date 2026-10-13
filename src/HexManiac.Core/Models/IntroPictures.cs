@@ -330,7 +330,7 @@ namespace HavenSoft.HexManiac.Core.Models {
          return result;
       }
 
-      private static string NameOf(IReadOnlyList<string> names, int index) => index < names.Count && !string.IsNullOrWhiteSpace(names[index]) ? names[index].Trim('"') : $"Pokémon {index}";
+      private static string NameOf(IReadOnlyList<string> names, int index) => index < names.Count && !string.IsNullOrWhiteSpace(names[index]) ? names[index].Trim('"').Replace("\\sf", "♀").Replace("\\sm", "♂").Trim() : $"Pokémon {index}";
       private static string TrainerName(IReadOnlyList<string> names, int index) => index < names.Count && !string.IsNullOrWhiteSpace(names[index]) ? names[index].Trim('"') : $"Trainer picture {index}";
    }
 }

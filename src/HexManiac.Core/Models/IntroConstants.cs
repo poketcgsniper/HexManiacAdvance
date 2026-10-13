@@ -48,8 +48,9 @@ namespace HavenSoft.HexManiac.Core.Models {
       public override int Read(byte[] data) {
          var first = IntroThumb.Half(data, Address) & 0xFF;
          if (SecondKind == SecondNone) return first;
+         // the second instruction is whatever is in the ROM now: writing a number can turn an 'lsls' into an 'adds' and back
          var second = IntroThumb.Half(data, SecondAddress);
-         return SecondKind == SecondShift ? first << ((second >> 6) & 31) : first + (second & 0xFF);
+         return IsAdd(second) ? first + (second & 0xFF) : first << ((second >> 6) & 31);
       }
 
       /// <summary>
@@ -66,6 +67,8 @@ namespace HavenSoft.HexManiac.Core.Models {
          shift = 0;
          return false;
       }
+
+      private static bool IsAdd(int half) => (half >> 11) == 6;
 
       public override bool CanHold(int value) {
          if (value < 0) return false;
@@ -101,8 +104,10 @@ namespace HavenSoft.HexManiac.Core.Models {
 
       public override string Describe(byte[] data) {
          var text = $"movs r{Register}, #{IntroThumb.Half(data, Address) & 0xFF} at {Address:X6}";
-         if (SecondKind == SecondShift) text += $", lsls #{(IntroThumb.Half(data, SecondAddress) >> 6) & 31} at {SecondAddress:X6}";
-         if (SecondKind == SecondAdd) text += $", adds #{IntroThumb.Half(data, SecondAddress) & 0xFF} at {SecondAddress:X6}";
+         if (SecondKind != SecondNone) {
+            var second = IntroThumb.Half(data, SecondAddress);
+            text += IsAdd(second) ? $", adds #{second & 0xFF} at {SecondAddress:X6}" : $", lsls #{(second >> 6) & 31} at {SecondAddress:X6}";
+         }
          return text;
       }
    }

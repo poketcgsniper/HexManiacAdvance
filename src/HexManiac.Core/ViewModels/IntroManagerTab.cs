@@ -170,7 +170,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var options = new List<IntroOption>();
          if (names != null) {
             for (int i = IsSpecies ? 1 : 0; i < names.Count; i++) {
-               var name = (names[i] ?? string.Empty).Trim('"').Trim();
+               var name = CleanName(names[i]);
                if (name.Length == 0) continue;
                var available = setting.CanHold(i, out var reason);
                options.Add(new IntroOption(i, $"{name} ({i})", available, available ? string.Empty : reason));
@@ -180,6 +180,11 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          Options.UserSelected += (sender, option) => Apply(option.Value);
          Reset = new StubCommand { CanExecute = arg => OriginalValue >= 0 && currentValue != OriginalValue, Execute = arg => Apply(OriginalValue) };
          ShowInMainTab = new StubCommand { CanExecute = arg => true, Execute = arg => tab.ShowInMainTab(Setting.Addresses.First()) };
+      }
+
+      /// <summary>A name as the lists store it ("NIDORAN\sf"), written the way people read it ("NIDORAN♀").</summary>
+      public static string CleanName(string name) {
+         return (name ?? string.Empty).Trim('"').Replace("\\sf", "♀").Replace("\\sm", "♂").Trim();
       }
 
       public void Capture(byte[] data) {
