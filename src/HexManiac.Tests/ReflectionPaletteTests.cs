@@ -232,15 +232,6 @@ namespace HavenSoft.HexManiac.Tests {
          Assert.Null(ReflectionPreview.DrawNormal(frames[0], null));
       }
 
-      [Fact]
-      public void MenuIcon_IsTheFirstPlayerSpriteUpsideDown() {
-         var icon = ReflectionPreview.MenuIcon(Model);
-
-         Assert.NotNull(icon);
-         Assert.Equal(16, icon.PixelWidth);
-         Assert.Equal(32, icon.PixelHeight);
-      }
-
       #endregion
 
       #region The tab
@@ -343,7 +334,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void OpeningTheTabWithoutTheTables_SaysWhyAndOpensNothing() {
+      public void OpeningTheEditorWithoutTheTables_SaysWhyAndOpensNothing() {
          var plain = new PokemonModel(new byte[0x200], singletons: Singletons);
          var viewPort = new ViewPort("plain.txt", plain, InstantDispatch.Instance, Singletons);
          var errors = new List<string>();
@@ -351,24 +342,35 @@ namespace HavenSoft.HexManiac.Tests {
          viewPort.OnError += (sender, e) => errors.Add(e);
          viewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
 
-         viewPort.OpenReflectionPaletteTab();
+         viewPort.OpenOverworldSpritesEditor(OverworldSecondarySection.Reflections);
 
          Assert.Empty(opened);
          Assert.Single(errors);
-         Assert.Contains("Reflection Palettes", errors[0]);
+         Assert.Contains("overworld sprite table", errors[0]);
       }
 
       [Fact]
-      public void TheEditorGotoPrefix_OpensTheTab() {
+      public void TheEditorGotoPrefix_ShowsTheReflectionSectionNextToTheOverworldSprites() {
          var opened = new List<ITabContent>();
          ViewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
 
          ViewPort.OpenEditorTab("reflections");
 
-         var tab = Assert.IsType<ReflectionPaletteTab>(Assert.Single(opened));
-         Assert.Equal("Reflection Palettes", tab.Name);
-         Assert.Equal(Model, tab.Model);
+         Assert.Empty(opened); // no tab of its own any more: it is part of the table tool of the sprites
+         Assert.Equal(SpriteTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart));
+         Assert.Same(ViewPort.Tools.TableTool, ViewPort.Tools.SelectedTool);
+         var panel = Assert.Single(ViewPort.Tools.TableTool.Children.OfType<OverworldSecondaryElementViewModel>());
+         Assert.True(panel.ShowReflections);
+         Assert.NotNull(panel.ReflectionsEditor);
          Assert.Empty(Errors);
+      }
+
+      [Fact]
+      public void TheEditorGotoPrefix_AnOldSecondaryDestinationIsUnknownNow() {
+         ViewPort.OpenEditorTab("secondary");
+
+         Assert.Single(Errors);
+         Assert.Contains("Unknown editor", Errors[0]);
       }
 
       [Fact]
@@ -384,19 +386,16 @@ namespace HavenSoft.HexManiac.Tests {
       public void Tab_OpenPaletteOfASprite_ShowsItsOwnPaletteInTheMainTab() {
          var tab = CreateTab();
          tab.Entries[1].Select.Execute(null);
-         var changes = new List<TabChangeRequestedEventArgs>();
-         tab.RequestTabChange += (sender, e) => changes.Add(e);
 
          tab.Sprites[0].OpenPalette.Execute(null);
 
          Assert.Empty(tabErrors);
-         Assert.Single(changes);
          Assert.Equal(PaletteTable + 2 * 8, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart)); // the pointer to the palette of the sprite: the third row of the palette table
       }
 
       #endregion
 
-      #region The OW Secondary button (field effects + reflection palettes)
+      #region The secondary overworld panel (field effects + reflection palettes) next to the overworld sprites
 
       private const int FxImage = 0x6000, FxPalette = 0x6100, FxPaletteTable = 0x6120, FxOam = 0x6130, FxImageList = 0x6140, FxTemplate = 0x6150, FxTemplateTable = 0x6170;
 
@@ -418,95 +417,214 @@ namespace HavenSoft.HexManiac.Tests {
          return editor.GotoViewModel.Shortcuts.ToList();
       }
 
+      private OverworldSecondaryElementViewModel Panel() => Assert.Single(ViewPort.Tools.TableTool.Children.OfType<OverworldSecondaryElementViewModel>());
+
       [Fact]
-      public void MainMenu_HasOneOwSecondaryButton_InsteadOfFieldEffectsAndReflectionPalettes() {
+      public void MainMenu_HasNoOwSecondaryButtonAnyMore_AndNoButtonForTheTwoEditors() {
          AddFieldEffects();
 
          var texts = MenuButtons().Select(button => button.DisplayText.Replace("\n", " ")).ToList();
 
-         Assert.Single(texts, "OW Secondary");
+         Assert.DoesNotContain("OW Secondary", texts);
          Assert.DoesNotContain("Field Effects", texts);
          Assert.DoesNotContain("Reflection Palettes", texts);
+         Assert.Contains("OW Sprites", texts); // the neighbours stay
       }
 
       [Fact]
-      public void OwSecondaryButton_KeepsTheFirstFrameOfTheTallGrass() {
+      public void TheSpriteTable_HasTheSecondaryPanelInAColumnOfItsOwn() {
          AddFieldEffects();
 
-         var button = MenuButtons().Single(b => b.DisplayText == "OW Secondary");
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
 
-         Assert.NotNull(button.Image);
-         Assert.Equal(FieldEffects.ButtonPicture(Model).PixelData, button.Image.PixelData);
+         var panel = Panel();
+         Assert.True(panel.HasFieldEffects);
+         Assert.True(panel.HasReflections);
+         Assert.True(panel.HasBoth);
+         Assert.Equal(3, ViewPort.Tools.TableTool.Groups.Count); // the sprite table, its fields (the sprite itself), and the panel
+         Assert.Contains(panel, ViewPort.Tools.TableTool.Groups[2].Members);
       }
 
       [Fact]
-      public void OwSecondaryButton_WithOnlyReflections_IsStillThereAndOpensTheReflectionEditor() {
-         var texts = MenuButtons().Select(button => button.DisplayText).ToList();
-         Assert.Contains("OW Secondary", texts);
-         Assert.True(OverworldSecondary.IsSupported(Model));
-         var opened = new List<ITabContent>();
-         ViewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
+      public void OtherTables_HaveNoSecondaryPanel() {
+         AddFieldEffects();
 
-         ViewPort.OpenEditorTab("secondary");
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldPalettes}/0");
 
-         Assert.IsType<ReflectionPaletteTab>(Assert.Single(opened));
+         Assert.Empty(ViewPort.Tools.TableTool.Children.OfType<OverworldSecondaryElementViewModel>());
+      }
+
+      [Fact]
+      public void ThePanel_ShowsTheFieldEffectsFirst_AndTheSectionsAreCreatedWhenFirstShown() {
+         AddFieldEffects();
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
+         var panel = Panel();
+
+         Assert.True(panel.ShowFieldEffects);
+         Assert.NotNull(panel.FieldEffectsEditor);
+         Assert.True(panel.FieldEffectsEditor.IsEmbedded);
+         Assert.Null(panel.ReflectionsEditor); // not built until it is shown
+
+         panel.SelectReflections.Execute(null);
+
+         Assert.True(panel.ShowReflections);
+         Assert.False(panel.ShowFieldEffects);
+         Assert.NotNull(panel.ReflectionsEditor);
+         Assert.Null(panel.FieldEffectsEditor);
+         Assert.Equal(2, panel.ReflectionsEditor.Entries.Count);
+      }
+
+      [Fact]
+      public void ThePanel_KeepsItsSectionWhenAnotherSpriteIsPicked()
+      {
+         AddFieldEffects();
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
+         var first = Panel();
+         first.SelectReflections.Execute(null);
+         var editor = first.ReflectionsEditor;
+
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/1");
+
+         var panel = Panel();
+         Assert.True(panel.ShowReflections);
+         Assert.Same(editor, panel.ReflectionsEditor); // the same editor, not a new one every time the cursor moves
+         Assert.Equal(ViewPort.SecondarySection, OverworldSecondarySection.Reflections);
+      }
+
+      [Fact]
+      public void ThePanel_WithoutFieldEffects_ShowsOnlyTheReflections()
+      {
+         ViewPort.SecondarySection = OverworldSecondarySection.FieldEffects; // the usual first section, but there is none
+
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
+
+         var panel = Panel();
+         Assert.False(panel.HasFieldEffects);
+         Assert.False(panel.HasBoth);
+         Assert.True(panel.ShowReflections);
+         Assert.NotNull(panel.ReflectionsEditor);
+         Assert.Null(panel.FieldEffectsEditor);
+         Assert.False(panel.SelectFieldEffects.CanExecute(null));
+      }
+
+      [Fact]
+      public void TheGotoPrefix_FieldEffects_ShowsThatSection_AndFallsBackWithoutTheTable()
+      {
+         ViewPort.OpenEditorTab("fieldeffects"); // no field effects in this ROM: the reflections are shown instead
+
+         Assert.True(Panel().ShowReflections);
+         Assert.Empty(Errors);
+
+         AddFieldEffects();
+         ViewPort.OpenEditorTab("reflections");
+         Assert.True(Panel().ShowReflections);
+         ViewPort.OpenEditorTab("fieldeffects");
+
+         Assert.True(Panel().ShowFieldEffects); // already in the sprite table: the same panel switches
          Assert.Empty(Errors);
       }
 
       [Fact]
-      public void OwSecondary_WithFieldEffects_ShowsTheFieldEffectsTable() {
-         AddFieldEffects();
-         var opened = new List<ITabContent>();
-         ViewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
+      public void ThePanel_EditingAPalette_ReachesTheRom_AndTheTableToolRefreshDoesNotResetIt()
+      {
+         ViewPort.OpenEditorTab("reflections");
+         var editor = Panel().ReflectionsEditor;
+         var edited = GbaColor.Pack(5, 9, 28);
+         editor.Palette.Elements[1].Color = GbaColor.ToDisplay(edited);
 
-         ViewPort.OpenEditorTab("secondary");
+         editor.Palette.PushColorsToModel();
+         ViewPort.Tools.TableTool.DataForCurrentRunChanged(); // the table tool refreshes after every edit
 
-         Assert.DoesNotContain(opened, tab => tab is ReflectionPaletteTab); // the table is shown in the tab that is already open
-         Assert.Equal(FxTemplateTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart));
+         Assert.Equal(edited, Model.ReadMultiByteValue(BrendanReflection + 2, 2));
+         Assert.Same(editor, Panel().ReflectionsEditor);
+         Assert.Equal(GbaColor.ToDisplay(edited), editor.Palette.Elements[1].Color);
          Assert.Empty(Errors);
       }
 
       [Fact]
-      public void FieldEffectsTable_HasAWayToTheReflectionEditor_AndBack() {
+      public void ThePanel_AChangeMadeElsewhere_IsReadAgain()
+      {
+         ViewPort.OpenEditorTab("reflections");
+         var editor = Panel().ReflectionsEditor;
+         var edited = GbaColor.Pack(7, 8, 9);
+
+         Model.WriteMultiByteValue(BrendanReflection + 2, 2, Token, edited);
+         ViewPort.ChangeHistory.ChangeCompleted();
+         ViewPort.Tools.TableTool.DataForCurrentRunChanged();
+
+         Assert.Equal(GbaColor.ToDisplay(edited), editor.Entries[0].Colors[1]);
+      }
+
+      [Fact]
+      public void TheToolPanel_GrowsOnceToMakeRoomForThePanel_AndStaysWhereThePersonPutsIt()
+      {
+         Assert.Equal(ViewPort.DefaultToolPanelWidth, ViewPort.ToolPanelWidth);
+
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
+
+         Assert.True(ViewPort.ToolPanelWidth >= OverworldSecondaryElementViewModel.WantedToolPanelWidth);
+         ViewPort.ToolPanelWidth = 800; // the person made it narrower again
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/1");
+         Assert.Equal(800, ViewPort.ToolPanelWidth);
+      }
+
+      [Fact]
+      public void TheToolPanel_IsNotMadeWiderThanThePersonHasItAlready()
+      {
+         ViewPort.ToolPanelWidth = 1300;
+
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
+
+         Assert.Equal(1300, ViewPort.ToolPanelWidth);
+      }
+
+      [Fact]
+      public void FieldEffectsTable_HasAWayToTheReflectionSection()
+      {
          AddFieldEffects();
          ViewPort.Goto.Execute("graphics.overworld.fieldeffects/0");
          var element = ViewPort.Tools.TableTool.Children.OfType<FieldEffectElementViewModel>().Single();
-         var opened = new List<ITabContent>();
-         ViewPort.RequestTabChange += (sender, e) => opened.Add(e.NewTab);
 
          Assert.True(element.OpenReflectionPalettes.CanExecute(null));
          element.OpenReflectionPalettes.Execute(null);
 
-         var tab = Assert.IsType<ReflectionPaletteTab>(Assert.Single(opened));
-         var changes = new List<TabChangeRequestedEventArgs>();
-         tab.RequestTabChange += (sender, e) => changes.Add(e);
-         ViewPort.Goto.Execute(PaletteTable);
-         Assert.True(tab.OpenFieldEffects.CanExecute(null));
-         tab.OpenFieldEffects.Execute(null);
-         Assert.Single(changes);
-         Assert.Equal(FxTemplateTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart));
+         Assert.Equal(SpriteTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart));
+         Assert.True(Panel().ShowReflections);
       }
 
       [Fact]
-      public void TheReflectionEditor_WithoutFieldEffects_HasNoButtonToThem() {
-         Assert.False(CreateTab().OpenFieldEffects.CanExecute(null));
+      public void ThePanel_EmbeddedFieldEffectsEditor_CanBeUsedInTheSpriteTable()
+      {
+         AddFieldEffects();
+         ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
+         var editor = Panel().FieldEffectsEditor;
+
+         editor.Fields[1].Text = "1234";
+
+         Assert.Equal(0x1234, Model.ReadMultiByteValue(FxTemplate + 2, 2));
+         Assert.Equal(SpriteTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart)); // still looking at the sprites
+         Assert.Empty(Errors);
       }
 
       [Fact]
-      public void OwSecondary_WithNeitherTable_HasNoButtonAndSaysWhyOnTheGotoPrefix() {
+      public void OpenOverworldSpritesEditor_WithNeitherTable_SaysWhyOnTheGotoPrefix() {
          var plain = new ViewPort("plain.txt", new PokemonModel(new byte[0x200], singletons: Singletons), InstantDispatch.Instance, Singletons);
          var errors = new List<string>();
          plain.OnError += (sender, e) => errors.Add(e);
 
-         plain.OpenEditorTab("secondary");
+         plain.OpenEditorTab("reflections");
 
-         Assert.False(OverworldSecondary.IsSupported(plain.Model));
+         Assert.False(OverworldSecondaryElementViewModel.IsSupported(plain.Model));
          Assert.Single(errors);
       }
 
       [Fact]
-      public void OwSecondary_UsesTheSpriteOfTheOwSpritesGroupForItsFallback() {
-         Assert.Equal(ShortcutKind.OverworldSprites, ShortcutFallbackIcons.Identify(ViewPort.EditorGotoPrefix + "secondary", "OW Secondary"));
+      public void TheQuickEditItem_ShowsTheReflectionSection() {
+         var item = new HavenSoft.HexManiac.Core.ViewModels.QuickEditItems.OpenReflectionPalettes();
+
+         item.Run(ViewPort).Wait();
+
+         Assert.True(Panel().ShowReflections);
       }
 
       #endregion

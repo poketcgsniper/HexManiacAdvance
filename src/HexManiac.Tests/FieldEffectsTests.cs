@@ -107,11 +107,76 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void ButtonPicture_IsTheFirstFrame() {
-         var picture = FieldEffects.ButtonPicture(Model);
+      public void EmbeddedElement_HasTheTagsToTypeIn_AndNoLinkToTheReflectionEditor() {
+         var element = new FieldEffectElementViewModel(ViewPort, 0, embedded: true);
 
-         Assert.NotNull(picture);
-         Assert.Equal(16, picture.PixelWidth);
+         Assert.True(element.IsEmbedded);
+         Assert.Equal(new[] { "Tile tag", "Palette tag" }, element.Fields.Select(field => field.Label).ToArray());
+         Assert.Equal(new[] { "FFFF", "1004" }, element.Fields.Select(field => field.Text).ToArray());
+         Assert.False(element.OpenReflectionPalettes.CanExecute(null));
+         Assert.Empty(new FieldEffectElementViewModel(ViewPort, 0).Fields); // the table tool has the real fields
+      }
+
+      [Fact]
+      public void EmbeddedElement_TypingATag_WritesTheTemplate_AndDrawsTheEffectAgain() {
+         var element = new FieldEffectElementViewModel(ViewPort, 0, embedded: true);
+         Assert.Contains("1004", element.PaletteTitle);
+
+         element.Fields[1].Text = "ffff";
+
+         Assert.Equal(0xFFFF, Model.ReadMultiByteValue(Template + 2, 2));
+         Assert.Equal("FFFF", element.Fields[1].Text);
+         Assert.Contains("none", element.Info);
+
+         element.Fields[0].Text = "0x2A";
+
+         Assert.Equal(0x2A, Model.ReadMultiByteValue(Template, 2));
+         Assert.Equal("002A", element.Fields[0].Text);
+      }
+
+      [Fact]
+      public void EmbeddedElement_AnInvalidTag_IsPutBack() {
+         var element = new FieldEffectElementViewModel(ViewPort, 0, embedded: true);
+
+         element.Fields[1].Text = "xyz";
+         element.Fields[1].Text = "12345";
+
+         Assert.Equal(0x1004, Model.ReadMultiByteValue(Template + 2, 2));
+         Assert.Equal("1004", element.Fields[1].Text);
+      }
+
+      [Fact]
+      public void EmbeddedElement_SelectingAnEffect_StaysInThisView() {
+         var element = new FieldEffectElementViewModel(ViewPort, 0, embedded: true);
+         var before = ViewPort.SelectionStart;
+
+         element.SelectCommand.Execute(element.Elements.Single());
+
+         Assert.Equal(before, ViewPort.SelectionStart);
+         Assert.Equal(0, element.CurrentIndex);
+      }
+
+      [Fact]
+      public void EmbeddedElement_OpenTable_ShowsTheEffectInTheTableTool() {
+         var element = new FieldEffectElementViewModel(ViewPort, 0, embedded: true);
+
+         Assert.True(element.OpenTable.CanExecute(null));
+         element.OpenTable.Execute(null);
+
+         Assert.Equal(TemplateTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart));
+      }
+
+      [Fact]
+      public void EmbeddedElement_UpdateIfEdited_NoticesAChangeMadeElsewhere() {
+         var element = new FieldEffectElementViewModel(ViewPort, 0, embedded: true);
+         element.UpdateIfEdited();
+         Model.WriteMultiByteValue(Palette + 2, 2, Token, 0x03E0);
+         Model.WriteMultiByteValue(Template + 2, 2, Token, 0xFFFF);
+
+         element.UpdateIfEdited();
+
+         Assert.Equal("FFFF", element.Fields[1].Text);
+         Assert.Contains("none", element.Info);
       }
 
       [Fact]

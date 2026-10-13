@@ -266,8 +266,27 @@
                         <hsg3hv:PixelImage DataContext="{Binding PaletteImage}" HorizontalAlignment="Left" Margin="0,2" TransparentBrush="{DynamicResource Backlight}"/>
                         <hsg3hv:AngleButton Margin="0,2" Direction="Out" HorizontalAlignment="Stretch" Content="Edit this palette" Command="{Binding OpenPalette}"
                                             ToolTip="Jump to the palette this effect is drawn with, to change its colours"/>
+                        <ItemsControl ItemsSource="{Binding Fields}" Margin="0,2" IsTabStop="False">
+                           <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                 <Grid Margin="0,1">
+                                    <Grid.ColumnDefinitions>
+                                       <ColumnDefinition Width="90"/>
+                                       <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Label}" VerticalAlignment="Center" Margin="2,0"/>
+                                    <TextBox Grid.Column="1" Text="{Binding Text, UpdateSourceTrigger=LostFocus}" FontFamily="Consolas" MaxLength="6" VerticalAlignment="Center"
+                                             ToolTip="Four hex digits (press Tab or click away to apply). The palette tag picks the palette the effect is drawn with; FFFF means the palette of the object it belongs to."/>
+                                 </Grid>
+                              </DataTemplate>
+                           </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <hsg3hv:AngleButton Margin="0,2" Direction="Out" HorizontalAlignment="Stretch" Content="Edit all fields" Command="{Binding OpenTable}"
+                                            Visibility="{Binding IsEmbedded, Converter={StaticResource BoolToVisibility}}"
+                                            ToolTip="Show this effect in the table tool with all of its fields (the table of field effects)"/>
                         <hsg3hv:AngleButton Margin="0,2" Direction="Out" HorizontalAlignment="Stretch" Content="Reflection palettes" Command="{Binding OpenReflectionPalettes}"
-                                            ToolTip="Open the Reflection Palettes editor (the other half of the OW Secondary button)"/>
+                                            Visibility="{Binding IsEmbedded, Converter={StaticResource InverseBoolToVisibility}}"
+                                            ToolTip="Show the Reflection Palettes editor, on the right of the overworld sprites"/>
                         <DockPanel Margin="0,2">
                            <Button DockPanel.Dock="Right" Content="&#8635;" Command="{Binding Refresh}" Padding="6,1" Margin="4,0,0,0" ToolTip="Redraw every field effect"/>
                            <TextBlock Text="Find:" VerticalAlignment="Center" Margin="0,0,4,0"/>
@@ -307,6 +326,53 @@
                               </DataTemplate>
                            </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                     </StackPanel>
+                  </DataTemplate>
+                  <DataTemplate DataType="{x:Type hsg3hvmtr:OverworldSecondaryElementViewModel}">
+                     <StackPanel Margin="2,8,2,0" Visibility="{Binding Visible, Converter={StaticResource BoolToVisibility}}">
+                        <Grid Background="{DynamicResource Backlight}">
+                           <TextBlock HorizontalAlignment="Center" Text="Field effects and reflections" FontSize="20" Height="26"/>
+                        </Grid>
+                        <Grid Margin="0,6,0,4" Visibility="{Binding HasBoth, Converter={StaticResource BoolToVisibility}}">
+                           <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*"/>
+                              <ColumnDefinition Width="*"/>
+                           </Grid.ColumnDefinitions>
+                           <Button Grid.Column="0" Content="Field Effects" Command="{Binding SelectFieldEffects}" Margin="0,0,2,0" Padding="4,3" BorderThickness="2"
+                                   ToolTip="Grass, ripples, shadows, dust and the other effects, with their pictures and palettes">
+                              <Button.Style>
+                                 <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                    <Setter Property="BorderBrush" Value="Transparent"/>
+                                    <Style.Triggers>
+                                       <DataTrigger Binding="{Binding ShowFieldEffects}" Value="True">
+                                          <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                       </DataTrigger>
+                                    </Style.Triggers>
+                                 </Style>
+                              </Button.Style>
+                           </Button>
+                           <Button Grid.Column="1" Content="Reflection Palettes" Command="{Binding SelectReflections}" Margin="2,0,0,0" Padding="4,3" BorderThickness="2"
+                                   ToolTip="The palettes of reflections in water, on ice and under bridges, with the sprites they affect">
+                              <Button.Style>
+                                 <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                    <Setter Property="BorderBrush" Value="Transparent"/>
+                                    <Style.Triggers>
+                                       <DataTrigger Binding="{Binding ShowReflections}" Value="True">
+                                          <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                       </DataTrigger>
+                                    </Style.Triggers>
+                                 </Style>
+                              </Button.Style>
+                           </Button>
+                        </Grid>
+                        <ContentControl Content="{Binding FieldEffectsEditor}" IsTabStop="False"/>
+                        <ContentControl Content="{Binding ReflectionsEditor}" IsTabStop="False">
+                           <ContentControl.ContentTemplate>
+                              <DataTemplate>
+                                 <hsg3hv:ReflectionPaletteView/>
+                              </DataTemplate>
+                           </ContentControl.ContentTemplate>
+                        </ContentControl>
                      </StackPanel>
                   </DataTemplate>
                   <DataTemplate DataType="{x:Type hsg3hvmtr:ButtonArrayElementViewModel}">

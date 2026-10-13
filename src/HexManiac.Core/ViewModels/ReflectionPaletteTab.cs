@@ -56,23 +56,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          if (kind == ReflectionPaletteKind.Ice) return ReflectionFilters.ToDisplay(ReflectionFilters.Ice(raw));
          return null;
       }
-
-      /// <summary>The picture for the main menu button: the first sprite of the overworld sprite table (the boy), upside down in the colours of the water. Null if the ROM has no such sprite.</summary>
-      public static IPixelViewModel MenuIcon(IDataModel model) {
-         try {
-            var catalog = ReflectionCatalog.Get(model);
-            var sprite = catalog.Sprites.FirstOrDefault(s => s.Slot == ReflectionCatalog.PlayerSlot) ?? catalog.Sprites.FirstOrDefault();
-            if (sprite == null) return null;
-            var normal = catalog.ColorsOfTag(sprite.Tag);
-            var frames = ReadFrames(model, sprite.Index, new[] { 0 });
-            if (normal == null || frames.Count == 0) return null;
-            var stored = sprite.ReflectionTag >= 0 ? catalog.ColorsOfTag(sprite.ReflectionTag) : null;
-            var palette = catalog.Mode == ReflectionMode.Stored && stored != null ? stored : Filter(ReflectionPaletteKind.Water, normal);
-            return DrawReflection(frames[0], palette);
-         } catch (Exception) {
-            return null;
-         }
-      }
    }
 
    /// <summary>One frame of a sprite: the normal picture, its reflection, and (for a palette the game doesn't read) how the game really draws the reflection.</summary>
@@ -151,7 +134,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
    }
 
    /// <summary>
-   /// The Reflection Palettes editor: lists every palette the game uses for reflections (in water, on ice and under a high bridge), lets the person recolour it with the normal palette editor,
+   /// The Reflection Palettes editor (the second section of the secondary overworld panel in the overworld sprites view, see OverworldSecondaryElementViewModel): lists every palette the game uses for reflections (in water, on ice and under a high bridge), lets the person recolour it with the normal palette editor,
    /// and shows the sprites it affects next to their reflections. A game that works its reflections out while it runs (pokeemerald-expansion) is described instead: its three colour rules are shown read-only
    /// on the sprites, and the palettes it still carries but does not read are listed as such.
    /// </summary>
@@ -191,7 +174,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public event EventHandler<string> OnError;
       public event EventHandler<string> OnMessage;
       public event EventHandler Closed;
-      public event EventHandler<TabChangeRequestedEventArgs> RequestTabChange;
+      public event EventHandler<TabChangeRequestedEventArgs> RequestTabChange { add { } remove { } } // this editor is part of the main tab, it never opens another one
       event EventHandler ITabContent.ClearMessage { add { } remove { } }
       event EventHandler<Action> ITabContent.RequestDelayedWork { add { } remove { } }
       event EventHandler ITabContent.RequestMenuClose { add { } remove { } }
@@ -315,19 +298,23 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          return wrapper;
       }
 
-      private StubCommand refresh, openPalettes, openSprites;
+      private StubCommand refresh, openPalettes;
       public ICommand Refresh => StubCommand(ref refresh, Reload, () => true);
       public ICommand OpenPaletteTable => StubCommand(ref openPalettes, () => ShowInMainTab(model.GetTable(HardcodeTablesModel.OverworldPalettes)?.Start ?? -1), () => model.GetTable(HardcodeTablesModel.OverworldPalettes) != null);
-      public ICommand OpenSpriteTable => StubCommand(ref openSprites, () => ShowInMainTab(model.GetTable(HardcodeTablesModel.OverworldSprites)?.Start ?? -1), () => model.GetTable(HardcodeTablesModel.OverworldSprites) != null);
 
-      private StubCommand openFieldEffects;
-      /// <summary>The other half of the 'OW Secondary' menu button: shows the field effects table (grass, ripples, dust...) in the main tab.</summary>
-      public ICommand OpenFieldEffects => StubCommand(ref openFieldEffects, () => ShowInMainTab(FieldEffects.FindTable(model)?.Start ?? -1), () => FieldEffects.IsSupported(model));
+      private long readAtEdit = -1;
+
+      /// <summary>Reads everything again, but only if something in a ROM changed since this editor last looked (the table tool asks whenever its cursor moves or anything is edited).</summary>
+      public void ReloadIfEdited() {
+         if (readAtEdit == ModelEditStamp.Current) return;
+         Reload();
+      }
 
       #region Reading
 
       /// <summary>Reads everything from the ROM again and keeps the selection if the entry is still there.</summary>
       public void Reload() {
+         readAtEdit = ModelEditStamp.Current;
          refreshing = true;
          try {
             catalog = ReflectionCatalog.Build(model);
@@ -517,6 +504,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          var existing = catalog.ColorsOf(row.Palette);
          if (existing != null && existing.SequenceEqual(colors)) return;
          if (!WriteColors(row.Palette, colors)) return;
+         readAtEdit = ModelEditStamp.Current; // this editor made the change itself: no need to read it back
          row.Colors = colors;
          var summary = colors.Select((c, i) => $"{i}={GbaColor.Describe(GbaColor.FromDisplay(c))}");
          ColorSummary = "Colours: " + string.Join("  ", summary);
@@ -552,8 +540,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       private void ShowInMainTab(int address) {
          if (address < 0) return;
-         viewPort.Goto.Execute(address);
-         RequestTabChange?.Invoke(this, new TabChangeRequestedEventArgs(viewPort));
+         viewPort.Goto.Execute(address); // this editor lives inside the main tab, which is where the table is shown
       }
 
       #endregion

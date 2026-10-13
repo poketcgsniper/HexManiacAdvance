@@ -334,24 +334,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <summary>The picture a button or a gallery shows for the effect: its first frame. Null if the effect has no picture.</summary>
       public static IPixelViewModel RenderFirstFrame(IDataModel model, int index) => RenderFrames(model, index).FirstOrDefault();
 
-      /// <summary>The picture for the main-menu button: the tall grass if the game has it (the best known field effect), else the first effect that has a picture.</summary>
-      public static IPixelViewModel ButtonPicture(IDataModel model) {
-         try {
-            var count = Count(model);
-            var preferred = new List<int>();
-            for (int i = 0; i < count; i++) if (NameOf(model, i).Equals("TALL_GRASS", StringComparison.OrdinalIgnoreCase)) preferred.Add(i);
-            if (preferred.Count == 0 && count > 4) preferred.Add(4); // tall grass has been field effect 4 in every game
-            for (int i = 0; i < count; i++) if (!preferred.Contains(i)) preferred.Add(i);
-            foreach (var index in preferred) {
-               var frame = RenderFirstFrame(model, index);
-               if (frame != null && frame.PixelWidth >= 16) return frame;
-            }
-         } catch (Exception) {
-            // pictures are decoration: a button without one gets its built-in sprite
-         }
-         return null;
-      }
-
       #endregion
    }
 

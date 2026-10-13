@@ -866,7 +866,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          SoundTab sound => sound.Model,
          TilesetAnimationTab animations => animations.Model,
          CharacterCustomizationTab customization => customization.Model,
-         ReflectionPaletteTab reflections => reflections.Model,
          _ => null,
       };
 
@@ -1495,12 +1494,6 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
             AddButton(() => ShortcutIcons.FirstOverworldSprite(model), HardcodeTablesModel.OverworldSprites, "OW Sprites"); // sprite 235 (RS Brendan, walking graphic), first picture; sprite 0 if the table is shorter; the built-in character if the ROM has none
-         }
-         // 'OW Secondary': the field effects (grass, ripples, shadows, dust...) with their palettes, and the reflection palettes, behind one button. It opens the field effects table
-         // (graphics.overworld.fieldeffects; older files call it graphics.overworld.sprites2) and the Reflection Palettes editor is one click away from there (and back); a game with only
-         // reflection palettes opens that editor directly. See ViewPort.OpenEditorTab("secondary").
-         if (OverworldSecondary.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == OverworldSecondary.ButtonText)) {
-            AddButton(() => FieldEffects.ButtonPicture(model) ?? ReflectionPreview.MenuIcon(model), ViewPort.EditorGotoPrefix + "secondary", OverworldSecondary.ButtonText); // the first frame of the tall grass
          }
          if (TilesetAnimationTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText == "Anim Tiles")) {
             var animTiles = AddButton(() => FindItemIcon(model, "Wailmer Pail", "Pail", "Watering"), ViewPort.EditorGotoPrefix + "animations", "Anim Tiles");

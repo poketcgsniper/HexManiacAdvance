@@ -78,7 +78,13 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
 
       /// <summary>Wide enough for three columns of fields, so dropdowns in the table tool aren't squeezed.</summary>
       public const double DefaultToolPanelWidth = 760;
-      public double ToolPanelWidth { get; set; } = DefaultToolPanelWidth;
+      private double toolPanelWidth = DefaultToolPanelWidth;
+      public double ToolPanelWidth { get => toolPanelWidth; set => Set(ref toolPanelWidth, value); }
+
+      /// <summary>Makes the left tool panel at least this wide (it is never made narrower: that is for the person to do).</summary>
+      public void EnsureToolPanelWidth(double width) {
+         if (ToolPanelWidth < width) ToolPanelWidth = width;
+      }
 
       private string fileName;
       public string FileName {
@@ -2592,7 +2598,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       }
 
       /// <summary>
-      /// Goto targets starting with this prefix open an editor tab instead of navigating to data: 'editor:sound', 'editor:sprites', 'editor:customization', 'editor:reflections', 'editor:secondary'.
+      /// Goto targets starting with this prefix open an editor tab instead of navigating to data: 'editor:sound', 'editor:sprites', 'editor:customization', and, in the overworld sprites view,
+      /// 'editor:reflections' (the Reflection Palettes section) and 'editor:fieldeffects' (the Field Effects section).
       /// </summary>
       public const string EditorGotoPrefix = "editor:";
 
@@ -2606,32 +2613,37 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          } else if (editor.Equals("customization", StringComparison.OrdinalIgnoreCase) || editor.Equals("character", StringComparison.OrdinalIgnoreCase)) {
             OpenCharacterCustomizationTab();
          } else if (editor.Equals("reflections", StringComparison.OrdinalIgnoreCase) || editor.Equals("reflection", StringComparison.OrdinalIgnoreCase)) {
-            OpenReflectionPaletteTab();
-         } else if (editor.Equals("secondary", StringComparison.OrdinalIgnoreCase) || editor.Equals("fieldeffects", StringComparison.OrdinalIgnoreCase)) {
-            OpenOverworldSecondary();
+            OpenOverworldSpritesEditor(OverworldSecondarySection.Reflections);
+         } else if (editor.Equals("fieldeffects", StringComparison.OrdinalIgnoreCase)) {
+            OpenOverworldSpritesEditor(OverworldSecondarySection.FieldEffects);
          } else {
-            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites', 'editor:animations', 'editor:customization', 'editor:reflections' or 'editor:secondary'.");
+            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites', 'editor:animations', 'editor:customization', 'editor:reflections' or 'editor:fieldeffects'.");
          }
       }
 
+      /// <summary>Which section of the secondary overworld panel (next to the overworld sprites) is shown: it stays the way the person left it.</summary>
+      public OverworldSecondarySection SecondarySection { get; set; } = OverworldSecondarySection.FieldEffects;
+
       /// <summary>
-      /// The 'OW Secondary' button: the field effects table in this tab (with a button that opens the Reflection Palettes editor), or, in a game that has reflection palettes but no field effects table,
-      /// the Reflection Palettes editor itself (with nothing to go back to).
+      /// Shows the overworld sprite table (the sprite that is selected there, or the first one) with the secondary overworld panel on its right, at the given section:
+      /// the field effects (grass, ripples, shadows, dust, with their palettes) and the reflection palettes. A section the game doesn't have falls back to the other one.
       /// </summary>
-      public void OpenOverworldSecondary() {
-         if (FieldEffects.FindTableName(Model) is string table) Goto.Execute(table);
-         else OpenReflectionPaletteTab(); // raises the error that explains what is missing if that is not available either
+      public void OpenOverworldSpritesEditor(OverworldSecondarySection section) {
+         if (!OverworldSecondaryElementViewModel.IsSupported(Model) || Model.GetTable(HardcodeTablesModel.OverworldSprites) == null) {
+            RaiseError(OverworldSecondaryUnsupportedMessage);
+            return;
+         }
+         SecondarySection = section;
+         var table = Model.GetTable(HardcodeTablesModel.OverworldSprites);
+         var tableTool = Tools.TableTool;
+         var current = tableTool?.Address ?? -1;
+         var insideTable = current >= table.Start && current < table.Start + table.ElementLength * table.ElementCount;
+         if (insideTable) tableTool.ShowSecondarySection(section); // already looking at the sprites: just switch the section
+         else Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
+         if (tableTool != null) Tools.SelectedTool = tableTool;
       }
 
-      public void OpenReflectionPaletteTab() {
-         if (!ReflectionPaletteTab.IsSupported(Model)) { RaiseError(ReflectionPaletteTab.UnsupportedMessage); return; }
-         var newTab = new ReflectionPaletteTab(this);
-         newTab.OnError += (sender, e) => RaiseError(e);
-         newTab.OnMessage += (sender, e) => RaiseMessage(e);
-         var args = new TabChangeRequestedEventArgs(newTab);
-         RequestTabChange(this, args);
-         if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);
-      }
+      public const string OverworldSecondaryUnsupportedMessage = "This ROM has no overworld sprite table together with field effects or reflection palettes that the editors can read, so there is nothing to show here.";
 
       public void OpenCharacterCustomizationTab() {
          if (!CharacterCustomizationTab.IsSupported(Model)) { RaiseError(CharacterCustomizationTab.UnsupportedMessage); return; }

@@ -318,6 +318,28 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
 
       public IList<IArrayElementViewModel> Children => Groups.SelectMany(group => group.Members).ToList();
 
+      private bool widenedForSecondaryColumn;
+
+      /// <summary>
+      /// The overworld sprites get one more column to the right of their fields: the field effects and the reflection palettes (see <see cref="OverworldSecondaryElementViewModel"/>).
+      /// The tool panel grows to make room for it the first time, if it is narrower than three columns need; the panel can be made narrower again by hand, and then it stays that way.
+      /// </summary>
+      private void AddOverworldSecondaryColumn() {
+         while (Groups.Count <= childIndexGroup) AddGroup();
+         AddChild(new OverworldSecondaryElementViewModel(viewPort));
+         Groups[childIndexGroup].Close();
+         childIndexGroup++;
+         if (!widenedForSecondaryColumn) {
+            widenedForSecondaryColumn = true;
+            viewPort.EnsureToolPanelWidth(OverworldSecondaryElementViewModel.WantedToolPanelWidth);
+         }
+      }
+
+      /// <summary>Switches the secondary overworld panel next to the overworld sprites to another section.</summary>
+      public void ShowSecondarySection(OverworldSecondarySection section) {
+         foreach (var panel in Children.OfType<OverworldSecondaryElementViewModel>()) panel.Show(section);
+      }
+
       private void AddGroup() {
          Groups.Add(new TableGroupViewModel(viewPort) {
             ForwardModelChanged = element => element.DataChanged += ForwardModelChanged,
@@ -526,6 +548,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                if (!ReferenceEquals(Groups[childIndexGroup], streamGroup)) Groups[childIndexGroup] = streamGroup;
                childIndexGroup++;
             }
+            if (array is ArrayRun && basename == HardcodeTablesModel.OverworldSprites && OverworldSecondaryElementViewModel.IsSupported(model)) AddOverworldSecondaryColumn();
             if (array is not ArrayRun && streamGroup != null) streamGroup.GroupName = NameForStreamGroup(streamGroup);
             AddChildrenFromStreams(array, basename, index);
          }
