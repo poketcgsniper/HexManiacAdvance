@@ -1870,6 +1870,7 @@ show:
          var sprites = data.GetSubTable("sprites");
 
          int graphicsAddress;
+         var requestedFacing = -1;
          bool invisible = false;
          bool flip = false;
          if (sprites == null) {
@@ -1881,6 +1882,7 @@ show:
             invisible = facing == 76;
             flip = facing == 3;
             if (facing == 3) facing = 2;
+            requestedFacing = facing;
             if (facing >= sprites.Count) facing = 0;
             graphicsAddress = sprites.Run.Start;
          }
@@ -1897,9 +1899,25 @@ show:
          if (paletteRun == null) return defaultOW;
          var ow = ReadonlyPixelViewModel.Create(model, graphicsRun, paletteRun, true);
          if (sprites is null) ow = ReadonlyPixelViewModel.Crop(ow, 0, 0, ow.PixelWidth, ow.PixelHeight / 2);
+         else ow = CropToFrame(ow, data.GetValue("width"), data.GetValue("height"), sprites.Count, requestedFacing);
          if (invisible) ow = BuildInvisibleEventRender(ow);
          if (flip) ow = ow.ReflectX();
          return ow;
+      }
+
+      /// <summary>
+      /// A sprite whose frames are all in one tall image (pokeemerald-expansion 'relative frames': the player characters, the bike, surfing, fishing, ...)
+      /// is a single list entry that is several frames high. Only one frame is shown: the facing it is drawn with (down, up, left) or the first frame (down).
+      /// The size of one frame is the width and height the sprite declares.
+      /// </summary>
+      public static IPixelViewModel CropToFrame(IPixelViewModel image, int frameWidth, int frameHeight, int listCount, int facing) {
+         if (image == null || frameWidth <= 0 || frameHeight <= 0) return image;
+         frameWidth = (frameWidth + 7) / 8 * 8; // the pictures are made of 8x8 tiles
+         frameHeight = (frameHeight + 7) / 8 * 8;
+         if (image.PixelHeight <= frameHeight) return image; // not a sheet
+         var frames = image.PixelHeight / frameHeight;
+         var frame = listCount == 1 && facing > 0 && facing < frames && facing < 3 ? facing : 0;
+         return ReadonlyPixelViewModel.Crop(image, 0, frame * frameHeight, Math.Min(frameWidth, image.PixelWidth), frameHeight);
       }
 
       private static readonly string[] QuestionMarkGlyph = { ".###.", "#...#", "....#", "...#.", "..#..", ".....", "..#.." };
