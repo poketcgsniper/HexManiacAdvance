@@ -20,6 +20,8 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       OverworldSprites,
       AnimatedTiles,
       CharacterCustomization,
+      /// <summary>The Intro Manager (the start of a new game): a professor and a Poké Ball.</summary>
+      IntroManager,
    }
 
    /// <summary>
@@ -50,7 +52,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       /// <summary>Every kind of button, in the order of the main menu.</summary>
       public static IReadOnlyList<ShortcutKind> AllKinds { get; } = new[] {
          ShortcutKind.Pokemon, ShortcutKind.Trainers, ShortcutKind.Moves, ShortcutKind.Items, ShortcutKind.Maps,
-         ShortcutKind.Sound, ShortcutKind.OverworldSprites, ShortcutKind.AnimatedTiles, ShortcutKind.CharacterCustomization, ShortcutKind.Generic,
+         ShortcutKind.Sound, ShortcutKind.OverworldSprites, ShortcutKind.AnimatedTiles, ShortcutKind.CharacterCustomization, ShortcutKind.IntroManager, ShortcutKind.Generic,
       };
 
       #region Which kind is this button?
@@ -90,6 +92,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          ("ANIM", ShortcutKind.AnimatedTiles),
          ("CUSTOM", ShortcutKind.CharacterCustomization),
          ("CHARACTER", ShortcutKind.CharacterCustomization),
+         ("INTRO", ShortcutKind.IntroManager),
       };
 
       /// <summary>
@@ -104,6 +107,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
                case "sound": case "music": case "cries": return ShortcutKind.Sound;
                case "animations": case "tiles": return ShortcutKind.AnimatedTiles;
                case "customization": case "character": return ShortcutKind.CharacterCustomization;
+               case "intro": return ShortcutKind.IntroManager;
                case "sprites": case "gallery": case "secondary": case "fieldeffects": case "reflections": case "reflection": return ShortcutKind.OverworldSprites;
             }
          }

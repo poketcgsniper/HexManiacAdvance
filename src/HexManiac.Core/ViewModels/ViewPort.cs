@@ -2605,12 +2605,14 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             OpenTilesetAnimationTab(TilesetAnimationTab.DefaultGroup, TilesetAnimationTab.DefaultMap, false);
          } else if (editor.Equals("customization", StringComparison.OrdinalIgnoreCase) || editor.Equals("character", StringComparison.OrdinalIgnoreCase)) {
             OpenCharacterCustomizationTab();
+         } else if (editor.Equals("intro", StringComparison.OrdinalIgnoreCase)) {
+            OpenIntroManagerTab();
          } else if (editor.Equals("reflections", StringComparison.OrdinalIgnoreCase) || editor.Equals("reflection", StringComparison.OrdinalIgnoreCase)) {
             OpenReflectionPaletteTab();
          } else if (editor.Equals("secondary", StringComparison.OrdinalIgnoreCase) || editor.Equals("fieldeffects", StringComparison.OrdinalIgnoreCase)) {
             OpenOverworldSecondary();
          } else {
-            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites', 'editor:animations', 'editor:customization', 'editor:reflections' or 'editor:secondary'.");
+            RaiseError($"Unknown editor '{editor}'. Try 'editor:sound', 'editor:sprites', 'editor:animations', 'editor:customization', 'editor:intro', 'editor:reflections' or 'editor:secondary'.");
          }
       }
 
@@ -2636,6 +2638,16 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
       public void OpenCharacterCustomizationTab() {
          if (!CharacterCustomizationTab.IsSupported(Model)) { RaiseError(CharacterCustomizationTab.UnsupportedMessage); return; }
          var newTab = new CharacterCustomizationTab(this);
+         newTab.OnError += (sender, e) => RaiseError(e);
+         newTab.OnMessage += (sender, e) => RaiseMessage(e);
+         var args = new TabChangeRequestedEventArgs(newTab);
+         RequestTabChange(this, args);
+         if (!args.RequestAccepted) mapper?.RaiseRequestTabChange(args);
+      }
+
+      public void OpenIntroManagerTab() {
+         if (!IntroManagerTab.IsSupported(Model)) { RaiseError(IntroManagerTab.UnsupportedMessage); return; }
+         var newTab = new IntroManagerTab(this);
          newTab.OnError += (sender, e) => RaiseError(e);
          newTab.OnMessage += (sender, e) => RaiseMessage(e);
          var args = new TabChangeRequestedEventArgs(newTab);

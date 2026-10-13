@@ -582,6 +582,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
             new OpenSoundEditor(),
             new OpenAnimatedTiles(),
             new OpenCharacterCustomization(),
+            new OpenIntroManager(),
             new OpenReflectionPalettes(),
          };
 
@@ -866,6 +867,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          SoundTab sound => sound.Model,
          TilesetAnimationTab animations => animations.Model,
          CharacterCustomizationTab customization => customization.Model,
+         IntroManagerTab intro => intro.Model,
          ReflectionPaletteTab reflections => reflections.Model,
          _ => null,
       };
@@ -1495,6 +1497,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels {
          }
          if (model.GetTable(HardcodeTablesModel.OverworldSprites) != null && !results.Any(shortcut => shortcut.DisplayText == "OW Sprites")) {
             AddButton(() => ShortcutIcons.FirstOverworldSprite(model), HardcodeTablesModel.OverworldSprites, "OW Sprites"); // sprite 235 (RS Brendan, walking graphic), first picture; sprite 0 if the table is shorter; the built-in character if the ROM has none
+         }
+         // 'Intro Manager': the Pokémon, the professor's picture and the music of the new game intro (Emerald, FireRed and the games made from them)
+         if (IntroManagerTab.IsSupported(model) && !results.Any(shortcut => shortcut.DisplayText.Replace("\n", " ") == "Intro Manager")) {
+            AddButton(() => null, ViewPort.EditorGotoPrefix + "intro", "Intro\nManager"); // the built-in picture (a professor in front of a Poké Ball) is drawn by ShortcutFallbackIcons
          }
          // 'OW Secondary': the field effects (grass, ripples, shadows, dust...) with their palettes, and the reflection palettes, behind one button. It opens the field effects table
          // (graphics.overworld.fieldeffects; older files call it graphics.overworld.sprites2) and the Reflection Palettes editor is one click away from there (and back); a game with only

@@ -154,6 +154,8 @@ namespace HavenSoft.HexManiac.Tests {
       [InlineData("editor:cries", "x", ShortcutKind.Sound)]
       [InlineData("editor:tiles", "x", ShortcutKind.AnimatedTiles)]
       [InlineData("editor:character", "x", ShortcutKind.CharacterCustomization)]
+      [InlineData("editor:intro", "Intro\nManager", ShortcutKind.IntroManager)]
+      [InlineData("my.table", "Intro Manager", ShortcutKind.IntroManager)]
       [InlineData("editor:sprites", "x", ShortcutKind.OverworldSprites)]
       [InlineData("editor:gallery", "x", ShortcutKind.OverworldSprites)]
       [InlineData("graphics.pokemon.sprites.front/1", "x", ShortcutKind.Pokemon)]
@@ -191,7 +193,7 @@ namespace HavenSoft.HexManiac.Tests {
          // every button of the main menu of CUBE (data/GotoShortcut entries plus the editor buttons)
          var buttons = new[] {
             ("data.pokemon.stats/1", "Pokemon"), ("data.trainers.stats", "Trainers"), ("data.pokemon.moves.stats", "Moves"), ("data.items.stats", "Items"), ("maps.bank0.littleroot town.0-9 ", "Maps"),
-            ("editor:sound", "Sound"), (HardcodeTablesModel.OverworldSprites, "OW Sprites"), ("editor:animations", "Anim Tiles"), ("editor:customization", "Character\nCustomization"),
+            ("editor:sound", "Sound"), (HardcodeTablesModel.OverworldSprites, "OW Sprites"), ("editor:animations", "Anim Tiles"), ("editor:customization", "Character\nCustomization"), ("editor:intro", "Intro\nManager"),
          };
          var kinds = buttons.Select(button => ShortcutFallbackIcons.Identify(button.Item1, button.Item2)).ToList();
 

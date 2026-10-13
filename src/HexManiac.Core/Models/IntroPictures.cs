@@ -118,6 +118,8 @@ namespace HavenSoft.HexManiac.Core.Models {
       public abstract IntroImage Read(byte[] data);
       /// <summary>Writes the source picture (64x64, at most 16 colours) as the intro picture. Returns false with a reason if it can't be done.</summary>
       public abstract bool Apply(IDataModel model, ModelDelta token, IntroImage source, out string reason);
+      /// <summary>What the picture will look like in the game after <see cref="Apply"/> with this source (the preview before the change).</summary>
+      public virtual IntroImage Compose(IntroImage source) => source;
       /// <summary>The addresses the pointers point to now: use with <see cref="Restore"/> to go back.</summary>
       public abstract int[] CurrentTargets(byte[] data);
       public abstract void Restore(IDataModel model, ModelDelta token, int[] targets);
@@ -204,14 +206,7 @@ namespace HavenSoft.HexManiac.Core.Models {
 
       public override bool Apply(IDataModel model, ModelDelta token, IntroImage source, out string reason) {
          if (!CanUse(source, out reason)) return false;
-         // the new picture sits at the bottom of Oak's taller picture, so that the feet stay where they were
-         var indexes = new byte[64 * 96];
-         for (int y = 0; y < 64; y++) {
-            for (int x = 0; x < 64; x++) {
-               var i = source.Indexes[y * 64 + x];
-               indexes[(y + 32) * 64 + x] = i == 0 ? (byte)0 : (byte)(PaletteSlot + i);
-            }
-         }
+         var indexes = Stack(source, PaletteSlot);
          var compressed = LZRun.Compress(IntroTiles.Encode8(indexes, TilesWide, TilesHigh)).ToArray();
          var palette = IntroTiles.WritePalette(source.Palette.Take(16).ToArray(), 32);
          var length = compressed.Length + 4 - (compressed.Length & 3) + 64;
@@ -222,6 +217,23 @@ namespace HavenSoft.HexManiac.Core.Models {
          IntroEdit.Repoint(model, token, TilesLiteral, address);
          IntroEdit.Repoint(model, token, PaletteLiteral, paletteAddress);
          return true;
+      }
+
+      /// <summary>The new picture sits at the bottom of Oak's taller picture, so that the feet stay where they were. Non-transparent pixels get 'offset' added (the palette slot).</summary>
+      private static byte[] Stack(IntroImage source, int offset) {
+         var indexes = new byte[64 * 96];
+         for (int y = 0; y < 64; y++) {
+            for (int x = 0; x < 64; x++) {
+               var i = source.Indexes[y * 64 + x];
+               indexes[(y + 32) * 64 + x] = i == 0 ? (byte)0 : (byte)(offset + i);
+            }
+         }
+         return indexes;
+      }
+
+      public override IntroImage Compose(IntroImage source) {
+         if (source == null || source.Width != 64 || source.Height != 64) return source;
+         return new IntroImage(64, 96, Stack(source, 0), source.Palette);
       }
 
       public override void Restore(IDataModel model, ModelDelta token, int[] targets) {
