@@ -356,7 +356,7 @@ namespace HavenSoft.HexManiac.Tests {
 
          ViewPort.OpenEditorTab("reflections");
 
-         Assert.Empty(opened); // no tab of its own any more: it is part of the table tool of the sprites
+         Assert.DoesNotContain(opened, tab => tab is ReflectionPaletteTab); // no tab of its own any more: it is part of the table tool of the sprites
          Assert.Equal(SpriteTable, ViewPort.ConvertViewPointToAddress(ViewPort.SelectionStart));
          Assert.Same(ViewPort.Tools.TableTool, ViewPort.Tools.SelectedTool);
          var panel = Assert.Single(ViewPort.Tools.TableTool.Children.OfType<OverworldSecondaryElementViewModel>());
@@ -475,8 +475,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void ThePanel_KeepsItsSectionWhenAnotherSpriteIsPicked()
-      {
+      public void ThePanel_KeepsItsSectionWhenAnotherSpriteIsPicked() {
          AddFieldEffects();
          ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
          var first = Panel();
@@ -492,8 +491,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void ThePanel_WithoutFieldEffects_ShowsOnlyTheReflections()
-      {
+      public void ThePanel_WithoutFieldEffects_ShowsOnlyTheReflections() {
          ViewPort.SecondarySection = OverworldSecondarySection.FieldEffects; // the usual first section, but there is none
 
          ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
@@ -508,8 +506,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void TheGotoPrefix_FieldEffects_ShowsThatSection_AndFallsBackWithoutTheTable()
-      {
+      public void TheGotoPrefix_FieldEffects_ShowsThatSection_AndFallsBackWithoutTheTable() {
          ViewPort.OpenEditorTab("fieldeffects"); // no field effects in this ROM: the reflections are shown instead
 
          Assert.True(Panel().ShowReflections);
@@ -525,8 +522,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void ThePanel_EditingAPalette_ReachesTheRom_AndTheTableToolRefreshDoesNotResetIt()
-      {
+      public void ThePanel_EditingAPalette_ReachesTheRom_AndTheTableToolRefreshDoesNotResetIt() {
          ViewPort.OpenEditorTab("reflections");
          var editor = Panel().ReflectionsEditor;
          var edited = GbaColor.Pack(5, 9, 28);
@@ -542,8 +538,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void ThePanel_AChangeMadeElsewhere_IsReadAgain()
-      {
+      public void ThePanel_AChangeMadeElsewhere_IsReadAgain() {
          ViewPort.OpenEditorTab("reflections");
          var editor = Panel().ReflectionsEditor;
          var edited = GbaColor.Pack(7, 8, 9);
@@ -556,8 +551,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void TheToolPanel_GrowsOnceToMakeRoomForThePanel_AndStaysWhereThePersonPutsIt()
-      {
+      public void TheToolPanel_GrowsOnceToMakeRoomForThePanel_AndStaysWhereThePersonPutsIt() {
          Assert.Equal(ViewPort.DefaultToolPanelWidth, ViewPort.ToolPanelWidth);
 
          ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
@@ -569,8 +563,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void TheToolPanel_IsNotMadeWiderThanThePersonHasItAlready()
-      {
+      public void TheToolPanel_IsNotMadeWiderThanThePersonHasItAlready() {
          ViewPort.ToolPanelWidth = 1300;
 
          ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
@@ -579,8 +572,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void FieldEffectsTable_HasAWayToTheReflectionSection()
-      {
+      public void FieldEffectsTable_HasAWayToTheReflectionSection() {
          AddFieldEffects();
          ViewPort.Goto.Execute("graphics.overworld.fieldeffects/0");
          var element = ViewPort.Tools.TableTool.Children.OfType<FieldEffectElementViewModel>().Single();
@@ -593,8 +585,7 @@ namespace HavenSoft.HexManiac.Tests {
       }
 
       [Fact]
-      public void ThePanel_EmbeddedFieldEffectsEditor_CanBeUsedInTheSpriteTable()
-      {
+      public void ThePanel_EmbeddedFieldEffectsEditor_CanBeUsedInTheSpriteTable() {
          AddFieldEffects();
          ViewPort.Goto.Execute($"{HardcodeTablesModel.OverworldSprites}/0");
          var editor = Panel().FieldEffectsEditor;

@@ -466,6 +466,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
             UpdateCurrentElementSelector(array, index);
 
             TableGroupViewModel streamGroup = null;
+            var showsOverworldSprites = false;
             var elementOffset = array.Start + array.ElementLength * index;
             if (array is not ArrayRun arrayRun) {
                if (Groups.Count == 2) {
@@ -521,7 +522,10 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                         AddChild(header);
                         Groups[childIndexGroup].AddChildrenFromTable(viewPort, selection, currentArray, currentIndex, header, helperGroup, partition, member.Fields);
                         // a picture is worth a thousand clicks: offer the gallery of every overworld sprite
-                        if (tableName == HardcodeTablesModel.OverworldSprites) AddChild(new SpriteGalleryElementViewModel(viewPort, currentIndex));
+                        if (tableName == HardcodeTablesModel.OverworldSprites) {
+                           AddChild(new SpriteGalleryElementViewModel(viewPort, currentIndex));
+                           showsOverworldSprites = true;
+                        }
                         // the field effects (grass, ripples, dust, ...): their frames with the palette the game uses, and the palette one click away
                         if (FieldEffects.IsFieldEffectTable(tableName)) AddChild(new FieldEffectElementViewModel(viewPort, currentIndex));
                         // expansion trainers: the battle messages (trainer slides) live in their own table, one click away
@@ -548,7 +552,7 @@ namespace HavenSoft.HexManiac.Core.ViewModels.Tools {
                if (!ReferenceEquals(Groups[childIndexGroup], streamGroup)) Groups[childIndexGroup] = streamGroup;
                childIndexGroup++;
             }
-            if (array is ArrayRun && basename == HardcodeTablesModel.OverworldSprites && OverworldSecondaryElementViewModel.IsSupported(model)) AddOverworldSecondaryColumn();
+            if (showsOverworldSprites && OverworldSecondaryElementViewModel.IsSupported(model)) AddOverworldSecondaryColumn();
             if (array is not ArrayRun && streamGroup != null) streamGroup.GroupName = NameForStreamGroup(streamGroup);
             AddChildrenFromStreams(array, basename, index);
          }
